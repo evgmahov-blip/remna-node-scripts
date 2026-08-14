@@ -47,7 +47,7 @@ fi
 #
 #  Неинтерактивно:
 #    EMAIL=you@mail.com DOMAIN=node.example.net SECRET_KEY=... \
-#      STREAM_SITE_URL=https://est.remna.2rdp.ru/ bash $0 --auto
+#      STREAM_SITE_URL=https://rustream.remna.space/ bash $0 --auto
 # ============================================================================
 set -Eeo pipefail
 
@@ -70,7 +70,7 @@ SCRIPT_INSTALL_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream.sh
 PROFILE_WATCH_SERVICE=remna-profile-wait.service  # legacy: удаляется при обновлении/сносе
 PROFILE_WATCH_UNIT=/etc/systemd/system/$PROFILE_WATCH_SERVICE
 WEBROOT=/var/www/mstream
-STREAM_SITE_URL="${STREAM_SITE_URL:-https://est.remna.2rdp.ru/}"
+STREAM_SITE_URL="${STREAM_SITE_URL:-https://stream.remna.space}"
 STREAM_SITE_ARCHIVE="${STREAM_SITE_ARCHIVE:-}"
 STREAM_HEALTH_UPSTREAM="${STREAM_HEALTH_UPSTREAM:-https://stream.deepbeat.ru:8443/health}"
 
