@@ -46,7 +46,7 @@ cmd_telemt_install(){ local port tlsdomain pdomain tmp; printf 'Внешний �
 cmd_telemt_status(){ local pdomain; say "Telemt:"; $SUDO systemctl --no-pager --full status telemt 2>/dev/null | sed -n '1,8p' || true; say ""; say "Telemt Panel:"; $SUDO systemctl --no-pager --full status telemt-panel 2>/dev/null | sed -n '1,8p' || true; say ""; say "Порты:"; ss -ltnp 2>/dev/null | grep -E ':5222 |:5223 |:8530 |:8080 |:9091 |:18443 |:443 ' || true; say ""; say "Redirect ${PANEL_PORT}->443:"; $SUDO iptables -t nat -S PREROUTING 2>/dev/null | grep -- "--dport ${PANEL_PORT}" || echo "нет"; pdomain="$(panel_domain)"; [ -z "$pdomain" ] || say "URL: https://${pdomain}:${PANEL_PORT}${PANEL_PATH}/login"; }
 cmd_telemt_remove(){ local yn tmp; printf 'Удалить Telemt + Telemt Panel? [y/N] '; read -r yn <"$TTY" || true; case "$yn" in [Yy]*) : ;; *) warn "Отменено."; return 0 ;; esac; $SUDO systemctl disable --now "telemt-panel-${PANEL_PORT}.service" >/dev/null 2>&1 || true; $SUDO rm -f "/etc/systemd/system/telemt-panel-${PANEL_PORT}.service"; $SUDO iptables -t nat -D PREROUTING -p tcp --dport "$PANEL_PORT" -j REDIRECT --to-ports 443 2>/dev/null || true; tmp="$(mktemp)"; if curl -fsSL "$PANEL_INSTALL_URL" -o "$tmp"; then $SUDO bash "$tmp" purge || true; fi; rm -f "$tmp"; tmp="$(mktemp)"; if curl -fsSL "$TELEMT_INSTALL_URL" -o "$tmp"; then $SUDO sh "$tmp" purge || true; fi; rm -f "$tmp"; $SUDO systemctl daemon-reload; ok "Telemt и Telemt Panel удалены. Caddy/Remnanode не тронуты."; }
 
-run_core(){ ensure_core; "$CORE" "$@"; [ ! -f "$PANEL_CONFIG" ] || ensure_panel_caddy; }
+run_core(){ ensure_core; bash <(cat "$CORE") "$@"; [ ! -f "$PANEL_CONFIG" ] || ensure_panel_caddy; }
 menu(){ while true; do cat <<'MENU'
 
 ────────────────────────────────────────────────────────────
