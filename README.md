@@ -1,79 +1,54 @@
 # Remna Node Scripts
 
-Набор Bash-скриптов для установки и обслуживания Remnanode с Caddy, XHTTP через CDN, стрим-сайтом и отдельным VLESS RAW REALITY Vision на одном сервере.
+Один Bash-скрипт для установки и обслуживания Remnanode с Caddy, XHTTP через CDN, стрим-сайтом и VLESS RAW REALITY Vision.
 
-> Проект рассчитан на Ubuntu/Debian и требует root-доступ или `sudo`.
+Проект рассчитан на Ubuntu/Debian и требует root-доступ или `sudo`.
 
-## Что умеет
-
-Основной `install-caddy-node-reality-stream.sh` устанавливает Caddy и Remnanode, настраивает XHTTP/CDN, стрим-сайт, готовит XHTTP и REALITY inbound JSON, показывает статус, выполняет диагностику/repair и умеет менять XHTTP-путь.
-
-`remna-node-manager.sh` добавляет постоянное интерактивное меню и безопасное подменю удаления.
-
-## Быстрый запуск менеджера
+## Быстрый запуск
 
 ```bash
 sudo -i
 mkdir -p /opt/remna-node-scripts
 cd /opt/remna-node-scripts
 curl -fsSLO https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/install-caddy-node-reality-stream.sh
-curl -fsSLO https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/remna-node-manager.sh
-chmod 700 install-caddy-node-reality-stream.sh remna-node-manager.sh
-./remna-node-manager.sh
+chmod 700 install-caddy-node-reality-stream.sh
+./install-caddy-node-reality-stream.sh
 ```
 
-Менеджер использует основной скрипт из той же директории или `/opt/remna-node-scripts/`.
-
-## Установка без меню
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/install-caddy-node-reality-stream.sh) install
-```
-
-Неинтерактивно:
-
-```bash
-EMAIL=you@example.com \
-DOMAIN=node.example.com \
-SECRET_KEY='ваш_secret_key' \
-bash install-caddy-node-reality-stream.sh --auto
-```
-
-Не публикуйте `SECRET_KEY` в истории shell, логах, issue или сообщениях.
+Запуск **без аргументов** открывает встроенное меню.
 
 ## Меню
 
-Менеджер содержит полную установку, переустановку, Caddy-only, генерацию и изменение XHTTP-пути, обновление стрим-сайта, сводку, диагностику, статус, команды REALITY, repair и удаление.
+Встроенное меню содержит:
 
-После каждой операции менеджер возвращается в главное меню. Основной установщик запускается отдельным Bash-процессом, поэтому изменения `set`/`trap` внутри диагностики не ломают цикл менеджера.
+1. Полную установку Remnanode + Caddy + стрим-сайт.
+2. Переустановку с нуля.
+3. Установку только фронта Caddy.
+4. Генерацию нового XHTTP-пути.
+5. Обновление стрим-сайта.
+6. Сводку настроек для CDN и Remnawave.
+7. Диагностику.
+8. Статус сервисов и портов.
+9. Подготовку REALITY.
+10. Включение REALITY.
+11. Отключение REALITY.
+12. Просмотр путей к файлам REALITY без вывода секретов.
+13. Repair текущей ноды.
+14. Локальный `clean` — удаление Remnanode, `/opt/remnanode`, Caddyfile и стрим-сайта.
 
-## Удаление
-
-В менеджере доступны четыре варианта:
-
-1. Удалить только Remnanode и `/opt/remnanode`.
-2. Удалить Caddy-конфигурацию и стрим-сайт, сохранив бэкап конфигов.
-3. Выполнить штатный `clean` основного скрипта.
-4. Полностью удалить локальные компоненты, включая пакет Caddy и `/opt/remna-node-scripts`.
-
-Опасные действия требуют подтверждения. Полное удаление требует вручную ввести `DELETE`.
-
-Удаление на сервере **не удаляет** автоматически ноду, Config Profile и другие объекты из панели Remnawave. Firewall также не изменяется.
-
-## Основные команды
+## Команды без меню
 
 ```bash
-./install-caddy-node-reality-stream.sh menu
 ./install-caddy-node-reality-stream.sh install
 ./install-caddy-node-reality-stream.sh front-only
 ./install-caddy-node-reality-stream.sh reinstall
-./install-caddy-node-reality-stream.sh status
-./install-caddy-node-reality-stream.sh diagnose
-./install-caddy-node-reality-stream.sh repair
 ./install-caddy-node-reality-stream.sh path
 ./install-caddy-node-reality-stream.sh path-set /api/v3/data.php
-./install-caddy-node-reality-stream.sh stream
 ./install-caddy-node-reality-stream.sh summary
+./install-caddy-node-reality-stream.sh diagnose
+./install-caddy-node-reality-stream.sh status
+./install-caddy-node-reality-stream.sh repair
+./install-caddy-node-reality-stream.sh stream
 ./install-caddy-node-reality-stream.sh reality-prepare
 ./install-caddy-node-reality-stream.sh reality-enable
 ./install-caddy-node-reality-stream.sh reality-disable
@@ -81,19 +56,30 @@ bash install-caddy-node-reality-stream.sh --auto
 ./install-caddy-node-reality-stream.sh clean
 ```
 
+## Неинтерактивная установка
+
+```bash
+EMAIL=you@example.com \
+DOMAIN=node.example.com \
+SECRET_KEY='ваш_secret_key' \
+./install-caddy-node-reality-stream.sh --auto
+```
+
+Не публикуйте `SECRET_KEY`, REALITY private key, токены и другие секретные значения в логах, issue или сообщениях.
+
 ## Порты
 
 | Порт | Назначение |
 |---|---|
-| `80/tcp` | HTTP/ACME для Caddy |
+| `80/tcp` | HTTP / ACME для Caddy |
 | `443/tcp` | внешний HTTPS или REALITY |
-| `7443/tcp` | локальный XHTTP backend (`127.0.0.1`) |
-| `8443/tcp` | локальный Caddy за REALITY (`127.0.0.1`) |
+| `7443/tcp` | XHTTP backend на `127.0.0.1` |
+| `8443/tcp` | локальный Caddy за REALITY на `127.0.0.1` |
 | `2222/tcp` | API Remnanode / связь с панелью |
 
 `7443` и `8443` рассчитаны на loopback и обычно не должны открываться наружу.
 
-## Файлы
+## Основные файлы
 
 ```text
 /etc/caddy/Caddyfile
@@ -102,49 +88,33 @@ bash install-caddy-node-reality-stream.sh --auto
 /opt/remnanode/
 /opt/remnanode/reality/
 /var/www/mstream/
-/opt/remna-node-scripts/
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 ```
 
 REALITY-ключи находятся в `/opt/remnanode/reality/reality.env`. Не публикуйте содержимое этого файла.
 
 ## Диагностика
 
-Через меню выберите `Диагностика` или выполните:
-
 ```bash
 ./install-caddy-node-reality-stream.sh diagnose
 ```
 
-Ручные проверки:
+Для краткого состояния:
 
 ```bash
-systemctl status caddy --no-pager
-docker ps -a --filter name=remnanode
-docker logs --tail 50 remnanode
-ss -lntp | grep -E ':80|:443|:2222|:7443|:8443'
-caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+./install-caddy-node-reality-stream.sh status
 ```
+
+## Удаление
+
+Штатная команда:
+
+```bash
+./install-caddy-node-reality-stream.sh clean
+```
+
+Она удаляет локальный контейнер Remnanode, `/opt/remnanode`, основной Caddyfile и стрим-сайт. Сам пакет Caddy и firewall не удаляются. Запись ноды и Config Profile в панели Remnawave также удаляются вручную.
 
 ## Важно
 
-- XHTTP-путь должен совпадать в Config Profile, CDN Rewrite и хосте Remnawave.
-- `path-set` делает бэкап Caddy-конфигов перед изменением пути.
-- Не публикуйте `SECRET_KEY`, REALITY private key и другие секреты.
-- Запись ноды в панели Remnawave после локального удаления удаляется вручную.
-
-## Проверка синтаксиса
-
-```bash
-bash -n install-caddy-node-reality-stream.sh
-bash -n remna-node-manager.sh
-```
-
-При наличии ShellCheck:
-
-```bash
-shellcheck install-caddy-node-reality-stream.sh remna-node-manager.sh
-```
-
-## GHOST OS
-
-В основном установочном скрипте присутствует проверка лицензии GHOST OS. Не удаляйте и не изменяйте лицензионный блок без соответствующего разрешения.
+Перед изменением XHTTP-пути убедитесь, что одинаковое значение будет установлено в Config Profile, CDN Rewrite и хосте Remnawave. Несовпадение пути остановит трафик.
