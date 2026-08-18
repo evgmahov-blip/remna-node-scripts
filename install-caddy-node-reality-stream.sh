@@ -17,6 +17,12 @@ STATE_DIR=/var/lib/remna-node-scripts
 TELEMT_STATE="$STATE_DIR/telemt-integration.env"
 CADDY_MARK_BEGIN="# BEGIN REMNA TELEMT PANEL"
 CADDY_MARK_END="# END REMNA TELEMT PANEL"
+STREAM_WEBROOT=/var/www/mstream
+STREAM_SITE_SOURCES=(
+  "https://rustream.remna.space"
+  "https://est.remna.2rdp.ru"
+  "https://nl.remna.2rdp.ru"
+)
 
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
 TTY=/dev/tty; { [ -r "$TTY" ] && [ -w "$TTY" ]; } || TTY=/dev/stdin
@@ -24,6 +30,39 @@ say(){ printf '%s\n' "$*"; }; ok(){ printf '✓ %s\n' "$*"; }; warn(){ printf '!
 
 ensure_self(){ local current; current="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"; [ "$current" = "$SELF" ] && return 0; $SUDO install -d -m 0755 "$INSTALL_DIR"; $SUDO install -m 0700 "$current" "$SELF"; }
 ensure_core(){ [ -s "$CORE" ] && return 0; command -v curl >/dev/null 2>&1 || die "Нужен curl."; $SUDO install -d -m 0755 "$INSTALL_DIR"; local tmp; tmp="$(mktemp)"; curl -fsSL "$REPO_RAW/install-caddy-node-reality-stream-core.sh" -o "$tmp" || { rm -f "$tmp"; die "Не удалось скачать core-скрипт."; }; bash -n "$tmp" || { rm -f "$tmp"; die "Скачанный core-скрипт повреждён."; }; $SUDO install -m 0700 "$tmp" "$CORE"; rm -f "$tmp"; }
+
+select_stream_source(){
+  local src
+  if [ -n "${STREAM_SITE_URL:-}" ]; then
+    ok "Стрим-сайт: используется заданный STREAM_SITE_URL=$STREAM_SITE_URL"
+    export STREAM_SITE_URL
+    return 0
+  fi
+  command -v curl >/dev/null 2>&1 || die "Нужен curl для проверки источников стрим-сайта."
+  for src in "${STREAM_SITE_SOURCES[@]}"; do
+    if curl -fsSL --connect-timeout 5 --max-time 12 "$src/" -o /dev/null 2>/dev/null; then
+      export STREAM_SITE_URL="$src"
+      ok "Источник стрим-сайта: $src"
+      return 0
+    fi
+    warn "Источник стрим-сайта недоступен: $src"
+  done
+  return 1
+}
+
+prepare_stream_source_for_core(){
+  local cmd="${1:-}"
+  case "$cmd" in
+    stream|site|decoy|set-decoy|reinstall)
+      select_stream_source || die "Все источники стрим-сайта недоступны; существующий сайт не изменён."
+      ;;
+    install|--auto|auto|front-only|front|repair|fix|reality-prepare)
+      if [ ! -s "$STREAM_WEBROOT/index.html" ]; then
+        select_stream_source || die "Все источники стрим-сайта недоступны; установка не будет затирать существующий сайт."
+      fi
+      ;;
+  esac
+}
 
 panel_domain(){ local d="${DOMAIN:-}"; if [ -z "$d" ] && [ -f /etc/caddy/Caddyfile ]; then d="$(awk '/^[A-Za-z0-9.-]+[[:space:]]*\{/{gsub(/[[:space:]]*\{.*/,"",$0); print $1; exit}' /etc/caddy/Caddyfile 2>/dev/null || true)"; fi; printf '%s' "$d"; }
 
@@ -226,7 +265,12 @@ cmd_telemt_remove(){
   ok "Интеграция Telemt Panel удалена безопасно."
 }
 
-run_core(){ ensure_core; bash <(cat "$CORE") "$@"; [ ! -f "$PANEL_CONFIG" ] || ensure_panel_caddy; }
+run_core(){
+  prepare_stream_source_for_core "${1:-}"
+  ensure_core
+  bash <(cat "$CORE") "$@"
+  [ ! -f "$PANEL_CONFIG" ] || ensure_panel_caddy
+}
 menu(){ while true; do cat <<'MENU'
 
 ────────────────────────────────────────────────────────────
