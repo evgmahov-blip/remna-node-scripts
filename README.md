@@ -4,18 +4,21 @@
 
 Проект рассчитан на Ubuntu/Debian и требует root-доступ или `sudo`.
 
-## Быстрый запуск
+## Быстрый запуск — одна команда
+
+Команда работает из любого текущего каталога: сама создаёт `/opt/remna-node-scripts`, скачивает актуальный скрипт из `main`, выставляет права и сразу открывает встроенное меню.
 
 ```bash
-sudo -i
-mkdir -p /opt/remna-node-scripts
-cd /opt/remna-node-scripts
-curl -fsSLO https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/install-caddy-node-reality-stream.sh
-chmod 700 install-caddy-node-reality-stream.sh
-./install-caddy-node-reality-stream.sh
+sudo bash -c 'mkdir -p /opt/remna-node-scripts && curl -fsSL https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/install-caddy-node-reality-stream.sh -o /opt/remna-node-scripts/install-caddy-node-reality-stream.sh && chmod 700 /opt/remna-node-scripts/install-caddy-node-reality-stream.sh && exec /opt/remna-node-scripts/install-caddy-node-reality-stream.sh'
 ```
 
 Запуск **без аргументов** открывает встроенное меню.
+
+Для повторного запуска уже установленного скрипта:
+
+```bash
+sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
+```
 
 ## Меню
 
@@ -39,21 +42,21 @@ chmod 700 install-caddy-node-reality-stream.sh
 ## Команды без меню
 
 ```bash
-./install-caddy-node-reality-stream.sh install
-./install-caddy-node-reality-stream.sh front-only
-./install-caddy-node-reality-stream.sh reinstall
-./install-caddy-node-reality-stream.sh path
-./install-caddy-node-reality-stream.sh path-set /api/v3/data.php
-./install-caddy-node-reality-stream.sh summary
-./install-caddy-node-reality-stream.sh diagnose
-./install-caddy-node-reality-stream.sh status
-./install-caddy-node-reality-stream.sh repair
-./install-caddy-node-reality-stream.sh stream
-./install-caddy-node-reality-stream.sh reality-prepare
-./install-caddy-node-reality-stream.sh reality-enable
-./install-caddy-node-reality-stream.sh reality-disable
-./install-caddy-node-reality-stream.sh reality-info
-./install-caddy-node-reality-stream.sh clean
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh install
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh front-only
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh reinstall
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh path
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh path-set /api/v3/data.php
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh summary
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh diagnose
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh status
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh repair
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh stream
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-prepare
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-enable
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-disable
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-info
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh clean
 ```
 
 ## Неинтерактивная установка
@@ -62,7 +65,7 @@ chmod 700 install-caddy-node-reality-stream.sh
 EMAIL=you@example.com \
 DOMAIN=node.example.com \
 SECRET_KEY='ваш_secret_key' \
-./install-caddy-node-reality-stream.sh --auto
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh --auto
 ```
 
 Не публикуйте `SECRET_KEY`, REALITY private key, токены и другие секретные значения в логах, issue или сообщениях.
@@ -96,13 +99,13 @@ REALITY-ключи находятся в `/opt/remnanode/reality/reality.env`. �
 ## Диагностика
 
 ```bash
-./install-caddy-node-reality-stream.sh diagnose
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh diagnose
 ```
 
 Для краткого состояния:
 
 ```bash
-./install-caddy-node-reality-stream.sh status
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh status
 ```
 
 ## Удаление
@@ -110,7 +113,7 @@ REALITY-ключи находятся в `/opt/remnanode/reality/reality.env`. �
 Штатная команда:
 
 ```bash
-./install-caddy-node-reality-stream.sh clean
+/opt/remna-node-scripts/install-caddy-node-reality-stream.sh clean
 ```
 
 Она удаляет локальный контейнер Remnanode, `/opt/remnanode`, основной Caddyfile и стрим-сайт. Сам пакет Caddy и firewall не удаляются. Запись ноды и Config Profile в панели Remnawave также удаляются вручную.
