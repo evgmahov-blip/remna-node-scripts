@@ -1,22 +1,57 @@
 # Remna Node Scripts
 
-Один Bash-скрипт для установки и обслуживания Remnanode с Caddy, XHTTP через CDN, стрим-сайтом, VLESS RAW REALITY Vision и безопасной интеграцией Telemt + Telemt Panel.
+Один Bash-менеджер для установки и обслуживания Remnanode с Caddy, XHTTP через CDN, стрим-сайтом, VLESS RAW REALITY Vision и безопасной интеграцией Telemt + Telemt Panel.
 
 Проект рассчитан на Ubuntu/Debian и требует root-доступ или `sudo`.
 
 ## Быстрый запуск — одна команда
 
-Команда работает из любого текущего каталога: сама создаёт `/opt/remna-node-scripts`, скачивает актуальный скрипт из `main`, выставляет права и сразу открывает встроенное меню.
+Эта команда работает и на чистой ноде, где `/opt/remna-node-scripts` ещё не существует. Она сама создаёт каталог, скачивает актуальный менеджер из ветки `main`, проверяет синтаксис, выставляет права и запускает меню:
 
 ```bash
-sudo bash -c 'mkdir -p /opt/remna-node-scripts && curl -fsSL https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/install-caddy-node-reality-stream.sh -o /opt/remna-node-scripts/install-caddy-node-reality-stream.sh && chmod 700 /opt/remna-node-scripts/install-caddy-node-reality-stream.sh && exec /opt/remna-node-scripts/install-caddy-node-reality-stream.sh'
+sudo bash -c 'set -e; install -d -m 0755 /opt/remna-node-scripts; tmp=$(mktemp); curl -fsSL https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/install-caddy-node-reality-stream.sh -o "$tmp"; bash -n "$tmp"; install -m 0700 "$tmp" /opt/remna-node-scripts/install-caddy-node-reality-stream.sh; rm -f "$tmp"; exec /opt/remna-node-scripts/install-caddy-node-reality-stream.sh'
 ```
 
-Для повторного запуска:
+Команда не пишет напрямую в конечный файл до проверки `bash -n`, поэтому при неудачном скачивании существующий рабочий менеджер не затирается.
+
+## Безопасное обновление менеджера из `main`
+
+Используйте ту же атомарную схему:
+
+```bash
+sudo bash -c 'set -e; install -d -m 0755 /opt/remna-node-scripts; tmp=$(mktemp); curl -fsSL https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/install-caddy-node-reality-stream.sh -o "$tmp"; bash -n "$tmp"; install -m 0700 "$tmp" /opt/remna-node-scripts/install-caddy-node-reality-stream.sh; rm -f "$tmp"'
+```
+
+После обновления:
 
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 ```
+
+## Что делает менеджер
+
+Менеджер использует актуальный `install-caddy-node-reality-stream-core.sh` из `main`, а при недоступности GitHub может использовать уже сохранённый локальный core, только если он проходит `bash -n`.
+
+Для Remnanode менеджер проверяет и при необходимости добавляет Docker capability:
+
+```yaml
+cap_add:
+  - NET_ADMIN
+```
+
+Если `NET_ADMIN` уже записан в compose, но текущий контейнер был создан раньше без capability, менеджер пересоздаёт только `remnanode` и проверяет фактический `HostConfig.CapAdd` через `docker inspect`.
+
+При подготовке REALITY менеджер не должен оставлять сайт недоступным: если Caddy уже переведён на `127.0.0.1:8443`, но `rw-core` не занял внешний `443`, выполняется безопасный возврат публичного Caddy на `443` из `/etc/caddy/Caddyfile.public`.
+
+## Источники стрим-сайта
+
+Если `STREAM_SITE_URL` не задан вручную, источники проверяются по порядку:
+
+1. `https://rustream.remna.space`
+2. `https://est.remna.2rdp.ru`
+3. `https://nl.remna.2rdp.ru`
+
+Используется первый доступный источник с валидной HTML-страницей. Если все источники недоступны, существующий `/var/www/mstream` не должен затираться.
 
 ## Меню
 
@@ -29,17 +64,36 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 5. Изменение XHTTP-пути.
 6. Обновление стрим-сайта.
 7. Сводку настроек.
-8. Диагностику.
+8. Безопасную диагностику.
 9. Статус сервисов.
 10. Подготовку REALITY.
 11. Включение REALITY.
 12. Отключение REALITY.
 13. Просмотр файлов REALITY без вывода секретов.
 14. Repair текущей ноды.
-15. Установку/настройку Telemt + Telemt Panel.
+15. Безопасное подключение Telemt + Telemt Panel.
 16. Статус Telemt + Telemt Panel.
 17. Безопасное удаление интеграции Telemt Panel.
 18. Clean Remnanode/Caddy.
+
+## Диагностика
+
+```bash
+sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh diagnose
+```
+
+Актуальная диагностика менеджера отдельно проверяет:
+
+- состояние Caddy и внешний `443`;
+- Node API на `2222`;
+- XHTTP backend на `127.0.0.1:7443`;
+- наличие `rw-core` на `443`;
+- фактически применённый `NET_ADMIN`;
+- состояние s6-сервиса Xray;
+- наличие runtime-конфига Xray;
+- CDN только после появления локального XHTTP backend.
+
+Если Xray показывает `down (not started yet)` и runtime-конфигов нет, диагностика не должна ошибочно объявлять локальный firewall `2222` причиной только из-за отсутствующего `7443`.
 
 ## Telemt и Telemt Panel
 
@@ -48,11 +102,9 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 - `telemt/telemt` — MTProxy;
 - `amirotin/telemt_panel` — веб-панель управления Telemt.
 
-### Безопасная работа с существующим Telemt
+Если на сервере уже существуют `telemt1.service`, `telemt2.service`, `telemt3.service` или `telemt.service`, менеджер считает их внешней существующей установкой и не должен переустанавливать или удалять их без явного действия пользователя.
 
-Если на сервере уже существуют `telemt1.service`, `telemt2.service`, `telemt3.service` или `telemt.service`, скрипт считает их внешней существующей установкой и **не переустанавливает, не обновляет и не удаляет их**.
-
-Для конфигурации с несколькими экземплярами скрипт использует первый подходящий API. Типовой вариант:
+Типовая конфигурация нескольких экземпляров:
 
 ```text
 telemt1.service -> внешний порт 5222 -> API 127.0.0.1:9091
@@ -60,39 +112,21 @@ telemt2.service -> внешний порт 5223 -> API 127.0.0.1:9092
 telemt3.service -> внешний порт 8530 -> API 127.0.0.1:9093
 ```
 
-Telemt Panel подключается к API выбранного экземпляра локально. API-порты `9091/9092/9093` наружу открывать не нужно.
-
-### Telemt Panel
-
-Панель работает локально:
+Telemt Panel обычно работает локально на:
 
 ```text
 127.0.0.1:8080
 ```
 
-В конфиг панели добавляется:
+с `base_path = "/telemt"`.
 
-```text
-base_path = "/telemt"
-```
-
-Перед изменением существующего `/etc/telemt-panel/config.toml` создаётся резервная копия.
-
-### HTTPS панели на 18443
-
-Внешний адрес панели имеет вид:
+Внешний адрес панели:
 
 ```text
 https://DOMAIN:18443/telemt/login
 ```
 
-Например:
-
-```text
-https://node.example.com:18443/telemt/login
-```
-
-Схема работы:
+Схема:
 
 ```text
 клиент :18443
@@ -113,50 +147,7 @@ Caddy 127.0.0.1:8443
 Telemt Panel
 ```
 
-Так используется существующий сертификат домена и не создаётся второй конфликтующий TLS automation policy в Caddy.
-
-В Caddy маршрут панели добавляется только после проверки временного конфига через `caddy validate`. Интеграционный блок помечается маркерами, чтобы при удалении можно было убрать только добавленные строки.
-
-Для redirect создаётся отдельный systemd-unit, чтобы правило `18443 -> 443` восстанавливалось после перезагрузки сервера.
-
-Если UFW активен, скрипт открывает `18443/tcp`. Сам Telemt использует свои отдельные внешние порты; `443/tcp` зарезервирован для схемы REALITY/Caddy и не должен использоваться Telemt.
-
-## Проверка Telemt
-
-Через меню выберите пункт `16` или выполните:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh telemt-status
-```
-
-Нормальное состояние выглядит примерно так:
-
-```text
-Telemt Panel: active
-127.0.0.1:8080 -> telemt-panel
-127.0.0.1:9091 -> telemt API
-0.0.0.0:5222 -> telemt
-*:443 -> rw-core
-Redirect 18443->443: присутствует
-```
-
-## Безопасное удаление Telemt-интеграции
-
-Пункт `17` или команда:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh telemt-remove
-```
-
-по умолчанию удаляет только интеграцию, созданную этим скриптом:
-
-- redirect `18443 -> 443`;
-- systemd-unit redirect;
-- добавленный блок `/telemt` в Caddy.
-
-Существующие `telemt1/2/3` не удаляются.
-
-Существующая Telemt Panel также не удаляется, если она была обнаружена до подключения интеграции. Полное удаление допускается только для компонентов, которые сам скрипт установил и отметил как managed.
+Перед изменением существующего `/etc/telemt-panel/config.toml` должна создаваться резервная копия.
 
 ## Команды без меню
 
@@ -182,6 +173,8 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh clean
 ```
 
 ## Неинтерактивная установка Remnanode
+
+После установки менеджера:
 
 ```bash
 EMAIL=you@example.com \
@@ -216,27 +209,12 @@ sudo -E /opt/remna-node-scripts/install-caddy-node-reality-stream.sh --auto
 /etc/caddy/Caddyfile.reality
 /etc/telemt/
 /etc/telemt-panel/config.toml
-/etc/systemd/system/telemt-panel.service
 /opt/remnanode/
 /opt/remnanode/reality/
 /var/www/mstream/
 /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
-```
-
-REALITY-ключи находятся в `/opt/remnanode/reality/reality.env`. Не публикуйте содержимое этого файла.
-
-## Диагностика
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh diagnose
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh status
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh telemt-status
-```
-
-Для ручной проверки портов:
-
-```bash
-ss -ltnp | grep -E ':443 |:18443 |:5222 |:5223 |:8530 |:8080 |:9091 '
+/opt/remna-node-scripts/install-caddy-node-reality-stream-core.sh
+/opt/remna-node-scripts/telemt-manager.sh
 ```
 
 ## Clean Remnanode/Caddy
@@ -245,10 +223,8 @@ ss -ltnp | grep -E ':443 |:18443 |:5222 |:5223 |:8530 |:8080 |:9091 '
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh clean
 ```
 
-Эта команда относится к Remnanode/Caddy: удаляет локальный контейнер Remnanode, `/opt/remnanode`, основной Caddyfile и стрим-сайт. Сам пакет Caddy и записи ноды/Config Profile в панели Remnawave автоматически не удаляются.
+Команда `clean` относится к Remnanode/Caddy. Существующие внешние экземпляры Telemt не должны удаляться этой командой.
 
 ## Важно
 
-Перед изменением XHTTP-пути убедитесь, что одинаковое значение установлено в Config Profile, CDN Rewrite и хосте Remnawave. Несовпадение пути остановит трафик.
-
-Перед любыми ручными изменениями Telemt рекомендуется сохранить `/etc/telemt/`, а перед изменением панели — `/etc/telemt-panel/config.toml`.
+Перед изменением XHTTP-пути убедитесь, что одинаковое значение установлено в Config Profile, CDN Rewrite и хосте Remnawave. Несовпадение пути остановит XHTTP-трафик.
