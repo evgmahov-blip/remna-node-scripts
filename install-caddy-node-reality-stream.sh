@@ -135,6 +135,26 @@ ensure_telemt_route(){
 xray_status(){ $SUDO docker exec remnanode /command/s6-svstat /run/service/xray 2>/dev/null || true; }
 runtime_config_count(){ $SUDO docker exec remnanode sh -c 'find /run /tmp /var/lib /opt -maxdepth 4 -type f \( -iname "*xray*.json" -o -name config.json \) 2>/dev/null | wc -l' 2>/dev/null || echo '?'; }
 
+wait_for_xray_runtime(){
+  local timeout="${XRAY_WAIT_TIMEOUT:-90}" i xs cfg
+  $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode || return 1
+  say "[*] Жду runtime-конфиг/Xray до ${timeout} секунд..."
+  for ((i=1; i<=timeout; i++)); do
+    xs="$(xray_status)"
+    cfg="$(runtime_config_count)"
+    if printf '%s' "$xs" | grep -q '^up' || ss -ltnp 2>/dev/null | grep -q '127.0.0.1:7443 ' || rw_core_on_443; then
+      ok "Xray/runtime появился через ${i} сек."
+      return 0
+    fi
+    if (( i % 15 == 0 )); then
+      say "    ожидание: ${i}/${timeout} сек; Xray=${xs:-неизвестно}; runtime=${cfg:-?}"
+    fi
+    sleep 1
+  done
+  warn "За ${timeout} сек Xray не запустился и runtime-конфиг не появился."
+  return 1
+}
+
 safe_diagnose(){
   set +e
   echo
@@ -155,7 +175,7 @@ safe_diagnose(){
   caddy_state="$($SUDO systemctl is-active caddy 2>/dev/null || true)"
   domain="$(awk '/^[A-Za-z0-9.-]+[[:space:]]*\{/{gsub(/[[:space:]]*\{.*/,"",$0); print $1; exit}' "$CADDYFILE" 2>/dev/null || true)"
   if caddy_public_443 && [ -n "$domain" ]; then
-    webcode="$(curl -kIs --max-time 8 https://127.0.0.1/ -H "Host: $domain" 2>/dev/null | awk 'NR==1{print $2}' || true)"
+    webcode="$(curl -ksS --max-time 8 --resolve "${domain}:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://${domain}/" 2>/dev/null || true)"
   fi
 
   echo
@@ -216,11 +236,24 @@ safe_diagnose(){
 }
 
 run_core(){
-  local cmd="${1:-menu}"; ensure_core
+  local cmd="${1:-menu}" wait_needed=0
+  ensure_core
   case "$cmd" in install|--auto|auto|front-only|front|reinstall|stream|site|decoy|set-decoy) prepare_stream_source ;; esac
   bash <(cat "$CORE") "$@"
-  case "$cmd" in install|--auto|auto|reinstall|repair|fix) ensure_net_admin ;; esac
-  restore_public_caddy_if_needed || true
+  case "$cmd" in
+    install|--auto|auto|reinstall|repair|fix)
+      ensure_net_admin
+      wait_needed=1
+      ;;
+  esac
+  if [ "$wait_needed" = 1 ]; then
+    if ! wait_for_xray_runtime; then
+      restore_public_caddy_if_needed || true
+      warn "Node bootstrap завершён, но Xray runtime не применён; ложный статус 'готово' не выдаю."
+    fi
+  else
+    restore_public_caddy_if_needed || true
+  fi
   ensure_telemt_route || true
 }
 
