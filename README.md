@@ -6,17 +6,15 @@
 
 ## Быстрый запуск — одна команда
 
-Эта команда работает и на чистой ноде, где `/opt/remna-node-scripts` ещё не существует. Она сама создаёт каталог, скачивает актуальный менеджер из ветки `main`, проверяет синтаксис, выставляет права и запускает меню:
+Команда работает и на чистой ноде, где `/opt/remna-node-scripts` ещё не существует. Каталог создаётся до `curl`, файл сначала скачивается во временный путь, проверяется `bash -n` и только потом заменяет рабочий менеджер:
 
 ```bash
 sudo bash -c 'set -e; install -d -m 0755 /opt/remna-node-scripts; tmp=$(mktemp); curl -fsSL https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/install-caddy-node-reality-stream.sh -o "$tmp"; bash -n "$tmp"; install -m 0700 "$tmp" /opt/remna-node-scripts/install-caddy-node-reality-stream.sh; rm -f "$tmp"; exec /opt/remna-node-scripts/install-caddy-node-reality-stream.sh'
 ```
 
-Команда не пишет напрямую в конечный файл до проверки `bash -n`, поэтому при неудачном скачивании существующий рабочий менеджер не затирается.
+Так существующий рабочий менеджер не затирается при неудачном скачивании, а ошибка `curl: (23) Failure writing output to destination` из-за отсутствующего `/opt/remna-node-scripts` не возникает.
 
 ## Безопасное обновление менеджера из `main`
-
-Используйте ту же атомарную схему:
 
 ```bash
 sudo bash -c 'set -e; install -d -m 0755 /opt/remna-node-scripts; tmp=$(mktemp); curl -fsSL https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/install-caddy-node-reality-stream.sh -o "$tmp"; bash -n "$tmp"; install -m 0700 "$tmp" /opt/remna-node-scripts/install-caddy-node-reality-stream.sh; rm -f "$tmp"'
@@ -28,20 +26,157 @@ sudo bash -c 'set -e; install -d -m 0755 /opt/remna-node-scripts; tmp=$(mktemp);
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 ```
 
-## Что делает менеджер
+## Что исправляет manager поверх core
 
-Менеджер использует актуальный `install-caddy-node-reality-stream-core.sh` из `main`, а при недоступности GitHub может использовать уже сохранённый локальный core, только если он проходит `bash -n`.
+Менеджер всегда получает актуальный `install-caddy-node-reality-stream-core.sh` из `main`. Если GitHub временно недоступен, допускается только уже сохранённый локальный core, который проходит `bash -n`.
 
-Для Remnanode менеджер проверяет и при необходимости добавляет Docker capability:
+### SECRET_KEY
+
+Канонический формат установки теперь такой:
+
+```yaml
+services:
+  remnanode:
+    env_file:
+      - .env
+    environment:
+      NODE_PORT: "2222"
+```
+
+Сам ключ хранится только в:
+
+```text
+/opt/remnanode/.env
+```
+
+с правами `0600`:
+
+```text
+SECRET_KEY=...
+```
+
+Менеджер автоматически мигрирует старый inline `SECRET_KEY` из `docker-compose.yml` в `.env`, не печатая значение. Строка `SECRET_KEY: "${SECRET_KEY}"` больше не используется как основной способ передачи секрета: именно на этой схеме ранее можно было получить пустой `SECRET_KEY` внутри контейнера.
+
+Перед пересозданием контейнера проверяется, что значение в `.env` реально непустое. После запуска выполняется проверка, что `SECRET_KEY` действительно присутствует внутри `remnanode`, без вывода самого значения.
+
+### NET_ADMIN
+
+Менеджер обеспечивает:
 
 ```yaml
 cap_add:
   - NET_ADMIN
 ```
 
-Если `NET_ADMIN` уже записан в compose, но текущий контейнер был создан раньше без capability, менеджер пересоздаёт только `remnanode` и проверяет фактический `HostConfig.CapAdd` через `docker inspect`.
+и проверяет фактически применённый `HostConfig.CapAdd` через `docker inspect`. Если compose уже исправлен, но контейнер был создан раньше без capability, пересоздаётся только `remnanode`.
 
-При подготовке REALITY менеджер не должен оставлять сайт недоступным: если Caddy уже переведён на `127.0.0.1:8443`, но `rw-core` не занял внешний `443`, выполняется безопасный возврат публичного Caddy на `443` из `/etc/caddy/Caddyfile.public`.
+Нормальный лог новой Node содержит:
+
+```text
+[OK] CAP_NET_ADMIN is available
+```
+
+### Автоматический handoff TCP/443: Caddy → REALITY
+
+Главная исправленная гонка выглядела так:
+
+1. До назначения Config Profile сайт должен оставаться доступным через публичный Caddy на `:443`.
+2. Панель позже присылает runtime-конфиг.
+3. Xray/`rw-core` пытается занять `0.0.0.0:443` и получает `address already in use`, потому что Caddy всё ещё на `443`.
+4. Старый сценарий требовал вручную копировать `/etc/caddy/Caddyfile.reality` и перезапускать Caddy.
+
+Теперь менеджер устанавливает systemd watcher:
+
+```text
+remna-reality-handoff.timer
+remna-reality-handoff.service
+```
+
+Watcher проверяет свежие логи Remnanode. При подтверждённой ошибке:
+
+```text
+failed to listen TCP on 443 ... address already in use
+```
+
+он автоматически:
+
+```text
+Caddy *:443
+   ↓
+Caddy 127.0.0.1:8443
+   ↓
+ожидание повторной попытки панели
+   ↓
+rw-core *:443
+```
+
+Если `rw-core` не появляется за таймаут, публичный Caddy автоматически возвращается на `443`, чтобы сайт не оставался недоступным.
+
+Финальная рабочая топология:
+
+```text
+*:2222              rw-node
+*:443               rw-core / REALITY
+127.0.0.1:7443      rw-core / XHTTP
+127.0.0.1:8443      Caddy
+```
+
+## Важная совместимость Remnawave Backend ↔ Node
+
+Актуальная `remnawave/node:latest` использует TLS 1.3 и специальный вычисляемый SNI для mTLS-соединения панели с Node.
+
+Старая панель на:
+
+```text
+remnawave/backend:2
+Remnawave Backend v2.8.x
+```
+
+может подключаться к Node с обычным SNI домена ноды (`ger.example.com`). Новая Node такой SNI отвергает ещё до TLS ServerHello. Типичный симптом в панели:
+
+```text
+Client network socket disconnected before secure TLS connection was established
+```
+
+При этом на Node:
+
+```text
+:2222 слушает
+SECRET_KEY OK
+NET_ADMIN OK
+Xray down (not started yet)
+runtime config = 0
+```
+
+а `tcpdump` показывает TCP handshake, ClientHello от панели и немедленное закрытие соединения со стороны Node.
+
+Для новой Node нужна панель Backend 3.x. Если compose панели закреплён так:
+
+```yaml
+image: remnawave/backend:2
+```
+
+обычный `docker compose pull` обновит только ветку 2.x. Для перехода на 3.x сначала обязательно сделайте backup compose и PostgreSQL, затем меняйте image на `remnawave/backend:3` согласно официальной инструкции миграции.
+
+При переходе 2.x → 3.x переменная:
+
+```text
+JWT_AUTH_SECRET
+```
+
+переименована в:
+
+```text
+APP_SECRET
+```
+
+**Значение остаётся тем же.** Если этого не сделать, Backend 3.x будет перезапускаться с ошибкой:
+
+```text
+APP_SECRET: Invalid input: expected string, received undefined
+```
+
+Не генерируйте новый `APP_SECRET` вместо старого `JWT_AUTH_SECRET`, если задача — обычное обновление существующей панели.
 
 ## Источники стрим-сайта
 
@@ -53,47 +188,29 @@ cap_add:
 
 Используется первый доступный источник с валидной HTML-страницей. Если все источники недоступны, существующий `/var/www/mstream` не должен затираться.
 
-## Меню
-
-Встроенное меню содержит:
-
-1. Полную установку Remnanode + Caddy + стрим-сайт.
-2. Переустановку с нуля.
-3. Только фронт Caddy.
-4. Генерацию XHTTP-пути.
-5. Изменение XHTTP-пути.
-6. Обновление стрим-сайта.
-7. Сводку настроек.
-8. Безопасную диагностику.
-9. Статус сервисов.
-10. Подготовку REALITY.
-11. Включение REALITY.
-12. Отключение REALITY.
-13. Просмотр файлов REALITY без вывода секретов.
-14. Repair текущей ноды.
-15. Безопасное подключение Telemt + Telemt Panel.
-16. Статус Telemt + Telemt Panel.
-17. Безопасное удаление интеграции Telemt Panel.
-18. Clean Remnanode/Caddy.
-
 ## Диагностика
 
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh diagnose
 ```
 
-Актуальная диагностика менеджера отдельно проверяет:
+Диагностика проверяет:
 
-- состояние Caddy и внешний `443`;
-- Node API на `2222`;
-- XHTTP backend на `127.0.0.1:7443`;
-- наличие `rw-core` на `443`;
+- Caddy и реальный HTTP-ответ сайта с правильным SNI через `curl --resolve`;
+- Node API `2222`;
+- XHTTP `127.0.0.1:7443`;
+- `rw-core` на внешнем `443`;
 - фактически применённый `NET_ADMIN`;
+- безопасное хранение и реальную передачу `SECRET_KEY`;
 - состояние s6-сервиса Xray;
-- наличие runtime-конфига Xray;
+- runtime-конфиг Xray;
+- конфликт `Xray :443` ↔ `Caddy :443`;
+- состояние auto-handoff;
 - CDN только после появления локального XHTTP backend.
 
-Если Xray показывает `down (not started yet)` и runtime-конфигов нет, диагностика не должна ошибочно объявлять локальный firewall `2222` причиной только из-за отсутствующего `7443`.
+Если Xray показывает `down (not started yet)` и runtime-конфигов нет, отсутствие `7443` **не трактуется автоматически как закрытый локальный порт 2222**.
+
+Если в этот момент панель сообщает TLS disconnect, диагностика подсказывает проверить major-версию Backend.
 
 ## Telemt и Telemt Panel
 
@@ -102,9 +219,9 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh diagnose
 - `telemt/telemt` — MTProxy;
 - `amirotin/telemt_panel` — веб-панель управления Telemt.
 
-Если на сервере уже существуют `telemt1.service`, `telemt2.service`, `telemt3.service` или `telemt.service`, менеджер считает их внешней существующей установкой и не должен переустанавливать или удалять их без явного действия пользователя.
+Существующие `telemt1.service`, `telemt2.service`, `telemt3.service` или `telemt.service` считаются внешней существующей установкой и не должны переустанавливаться/удаляться без явного действия пользователя.
 
-Типовая конфигурация нескольких экземпляров:
+Типовой набор:
 
 ```text
 telemt1.service -> внешний порт 5222 -> API 127.0.0.1:9091
@@ -112,42 +229,41 @@ telemt2.service -> внешний порт 5223 -> API 127.0.0.1:9092
 telemt3.service -> внешний порт 8530 -> API 127.0.0.1:9093
 ```
 
-Telemt Panel обычно работает локально на:
+Telemt Panel:
 
 ```text
 127.0.0.1:8080
+base_path = "/telemt"
 ```
 
-с `base_path = "/telemt"`.
-
-Внешний адрес панели:
+Внешний URL при redirect `18443 -> 443`:
 
 ```text
 https://DOMAIN:18443/telemt/login
 ```
 
-Схема:
+Маршрут `/telemt*` менеджер синхронизирует не только в активный `/etc/caddy/Caddyfile`, но также в `.public` и `.reality`, чтобы он не исчезал после переключения Caddy.
 
-```text
-клиент :18443
-   |
-   v
-redirect TCP/18443 -> TCP/443
-   |
-   v
-REALITY / rw-core :443
-   |
-   v
-Caddy 127.0.0.1:8443
-   |
-   v
-/telemt/* -> 127.0.0.1:8080
-   |
-   v
-Telemt Panel
-```
+## Меню
 
-Перед изменением существующего `/etc/telemt-panel/config.toml` должна создаваться резервная копия.
+1. Полная установка.
+2. Переустановка с нуля.
+3. Только фронт Caddy.
+4. Генерация XHTTP-пути.
+5. Изменение XHTTP-пути.
+6. Обновление стрим-сайта.
+7. Сводка настроек.
+8. Диагностика.
+9. Статус сервисов.
+10. Подготовить REALITY.
+11. Включить REALITY.
+12. Отключить REALITY.
+13. Файлы REALITY без вывода ключей.
+14. Repair текущей ноды.
+15. Подключить Telemt + Panel.
+16. Статус Telemt + Panel.
+17. Убрать интеграцию Telemt Panel.
+18. Clean Remnanode/Caddy.
 
 ## Команды без меню
 
@@ -155,26 +271,18 @@ Telemt Panel
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh install
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh front-only
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reinstall
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh path
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh path-set /api/v3/data.php
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh summary
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh diagnose
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh status
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh repair
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh stream
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-prepare
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-enable
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-disable
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-info
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh telemt-install
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh telemt-status
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh telemt-remove
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh clean
 ```
 
-## Неинтерактивная установка Remnanode
-
-После установки менеджера:
+## Неинтерактивная установка
 
 ```bash
 EMAIL=you@example.com \
@@ -183,23 +291,21 @@ SECRET_KEY='ваш_secret_key' \
 sudo -E /opt/remna-node-scripts/install-caddy-node-reality-stream.sh --auto
 ```
 
-Не публикуйте `SECRET_KEY`, REALITY private key, Telemt secrets, JWT secrets, токены и другие чувствительные значения.
+Не публикуйте `SECRET_KEY`, REALITY private key, Telemt secrets, JWT/APP secrets, токены и другие чувствительные значения.
 
 ## Порты
 
 | Порт | Назначение |
 |---|---|
 | `80/tcp` | HTTP / ACME для Caddy |
-| `443/tcp` | внешний REALITY / HTTPS |
-| `18443/tcp` | внешний HTTPS-доступ к Telemt Panel через redirect на `443` |
-| `7443/tcp` | XHTTP backend на `127.0.0.1` |
-| `8443/tcp` | локальный Caddy за REALITY на `127.0.0.1` |
-| `2222/tcp` | Remnanode / связь с панелью Remnawave |
+| `443/tcp` | публичный Caddy до профиля; после handoff — REALITY/rw-core |
+| `18443/tcp` | HTTPS-доступ к Telemt Panel через redirect на `443` |
+| `7443/tcp` | XHTTP backend, только `127.0.0.1` |
+| `8443/tcp` | Caddy за REALITY, только `127.0.0.1` |
+| `2222/tcp` | Remnanode mTLS API для панели |
 | `8080/tcp` | Telemt Panel, только `127.0.0.1` |
 | `9091+` | Telemt API, только `127.0.0.1` |
-| `5222/5223/8530` | пример внешних портов отдельных экземпляров Telemt |
-
-`7443`, `8443`, `8080` и Telemt API-порты рассчитаны на loopback и не должны быть доступны напрямую из Интернета.
+| `5222/5223/8530` | примеры внешних портов Telemt |
 
 ## Основные файлы
 
@@ -207,23 +313,18 @@ sudo -E /opt/remna-node-scripts/install-caddy-node-reality-stream.sh --auto
 /etc/caddy/Caddyfile
 /etc/caddy/Caddyfile.public
 /etc/caddy/Caddyfile.reality
+/etc/systemd/system/remna-reality-handoff.service
+/etc/systemd/system/remna-reality-handoff.timer
 /etc/telemt/
 /etc/telemt-panel/config.toml
-/opt/remnanode/
+/opt/remnanode/.env
+/opt/remnanode/docker-compose.yml
 /opt/remnanode/reality/
 /var/www/mstream/
 /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 /opt/remna-node-scripts/install-caddy-node-reality-stream-core.sh
 /opt/remna-node-scripts/telemt-manager.sh
 ```
-
-## Clean Remnanode/Caddy
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh clean
-```
-
-Команда `clean` относится к Remnanode/Caddy. Существующие внешние экземпляры Telemt не должны удаляться этой командой.
 
 ## Важно
 
