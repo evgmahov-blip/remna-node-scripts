@@ -73,8 +73,54 @@ container_has_net_admin(){
 }
 
 ensure_net_admin(){
-  local compose=/opt/remnanode/docker-compose.yml tmp need_recreate=0
+  local compose=/opt/remnanode/docker-compose.yml envfile=/opt/remnanode/.env
+  local tmp tmpenv secret need_recreate=0 backup_done=0
   [ -f "$compose" ] || return 0
+
+  # Старые версии core писали SECRET_KEY прямо в docker-compose.yml.
+  # Мигрируем его в root-only .env, не печатая значение ни в stdout, ни в логи.
+  if grep -qE '^[[:space:]]*SECRET_KEY:[[:space:]]*' "$compose" && ! grep -qF '${SECRET_KEY}' "$compose"; then
+    secret="$(awk '
+      /^[[:space:]]*SECRET_KEY:[[:space:]]*/ {
+        s=$0
+        sub(/^[[:space:]]*SECRET_KEY:[[:space:]]*/, "", s)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+        if (substr(s,1,1)=="\"" && substr(s,length(s),1)=="\"") s=substr(s,2,length(s)-2)
+        print s
+        exit
+      }
+    ' "$compose")"
+    [ -n "$secret" ] || die "Найдена inline-строка SECRET_KEY, но безопасно извлечь значение не удалось."
+
+    tmpenv="$(mktemp)"
+    if [ -f "$envfile" ]; then grep -v '^SECRET_KEY=' "$envfile" > "$tmpenv" || true; fi
+    printf 'SECRET_KEY=%s\n' "$secret" >> "$tmpenv"
+    $SUDO install -o root -g root -m 0600 "$tmpenv" "$envfile"
+    rm -f "$tmpenv"
+
+    tmp="$(mktemp)"
+    awk '
+      /^[[:space:]]*SECRET_KEY:[[:space:]]*/ {
+        match($0,/^[[:space:]]*/); i=substr($0,1,RLENGTH)
+        print i "SECRET_KEY: \"${SECRET_KEY}\""
+        next
+      }
+      {print}
+    ' "$compose" > "$tmp"
+    $SUDO cp -a "$compose" "${compose}.bak.$(date +%Y%m%d-%H%M%S)"
+    backup_done=1
+    $SUDO install -o root -g root -m 0600 "$tmp" "$compose"
+    rm -f "$tmp"
+    unset secret
+    need_recreate=1
+    ok "SECRET_KEY вынесен из compose в /opt/remnanode/.env (0600)."
+  fi
+
+  if grep -qF '${SECRET_KEY}' "$compose"; then
+    [ -s "$envfile" ] || die "compose ожидает SECRET_KEY из .env, но /opt/remnanode/.env отсутствует или пуст."
+    $SUDO chmod 0600 "$envfile"
+  fi
+
   if ! grep -qE '^[[:space:]]*-[[:space:]]*NET_ADMIN[[:space:]]*$' "$compose"; then
     tmp="$(mktemp)"
     awk '
@@ -85,16 +131,22 @@ ensure_net_admin(){
         print i "  - NET_ADMIN"
       }
     ' "$compose" > "$tmp"
-    $SUDO cp -a "$compose" "${compose}.bak.$(date +%Y%m%d-%H%M%S)"
+    [ "$backup_done" = 1 ] || $SUDO cp -a "$compose" "${compose}.bak.$(date +%Y%m%d-%H%M%S)"
     $SUDO install -o root -g root -m 0600 "$tmp" "$compose"; rm -f "$tmp"
     need_recreate=1
   fi
-  ( cd /opt/remnanode && $SUDO docker compose config >/dev/null ) || die "docker-compose.yml не прошёл проверку после настройки NET_ADMIN."
+
+  # Не допускаем возврата секрета в явном виде после миграции.
+  if grep -qE '^[[:space:]]*SECRET_KEY:[[:space:]]*' "$compose" && ! grep -qF '${SECRET_KEY}' "$compose"; then
+    die "SECRET_KEY всё ещё хранится inline в compose — останавливаюсь без перезапуска."
+  fi
+
+  ( cd /opt/remnanode && $SUDO docker compose config >/dev/null ) || die "docker-compose.yml не прошёл безопасную проверку."
   if $SUDO docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx remnanode; then
     container_has_net_admin || need_recreate=1
   fi
   if [ "$need_recreate" = 1 ]; then
-    ( cd /opt/remnanode && $SUDO docker compose up -d --force-recreate remnanode ) || die "Не удалось пересоздать remnanode с NET_ADMIN."
+    ( cd /opt/remnanode && $SUDO docker compose up -d --force-recreate remnanode ) || die "Не удалось безопасно пересоздать remnanode."
     sleep 3
   fi
   container_has_net_admin || die "NET_ADMIN указан в compose, но не применился к контейнеру."
@@ -162,11 +214,11 @@ safe_diagnose(){
   echo '  Remna Node — безопасная диагностика'
   echo '────────────────────────────────────────────────────────────'
 
-  ensure_net_admin >/dev/null 2>&1 || warn "Не удалось автоматически проверить/применить NET_ADMIN."
+  ensure_net_admin >/dev/null 2>&1 || warn "Не удалось автоматически проверить/применить безопасный compose/NET_ADMIN."
   restore_public_caddy_if_needed || true
   ensure_telemt_route || true
 
-  local xs cfgcount caps webcode=none xhttp=no nodeapi=no caddy_state domain
+  local xs cfgcount caps webcode=none xhttp=no nodeapi=no caddy_state domain secret_storage
   xs="$(xray_status 2>/dev/null)"
   cfgcount="$(runtime_config_count 2>/dev/null)"
   caps="$($SUDO docker inspect remnanode --format '{{json .HostConfig.CapAdd}}' 2>/dev/null || true)"
@@ -177,6 +229,7 @@ safe_diagnose(){
   if caddy_public_443 && [ -n "$domain" ]; then
     webcode="$(curl -ksS --max-time 8 --resolve "${domain}:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://${domain}/" 2>/dev/null || true)"
   fi
+  if [ -s /opt/remnanode/.env ] && grep -qF '${SECRET_KEY}' /opt/remnanode/docker-compose.yml 2>/dev/null; then secret_storage='✓ .env (0600)'; else secret_storage='! проверь миграцию'; fi
 
   echo
   echo '────────────────────────────────────────────────────────────'
@@ -188,6 +241,7 @@ safe_diagnose(){
   if [ "$xhttp" = yes ]; then printf '  XHTTP       : ✓ 127.0.0.1:7443 слушает\n'; else printf '  XHTTP       : ✗ 127.0.0.1:7443 не слушает\n'; fi
   if rw_core_on_443; then printf '  REALITY     : ✓ rw-core :443\n'; else printf '  REALITY     : не запущен\n'; fi
   if printf '%s' "$caps" | grep -q NET_ADMIN; then printf '  NET_ADMIN   : ✓ есть\n'; else printf '  NET_ADMIN   : ✗ нет\n'; fi
+  printf '  SECRET_KEY  : %s\n' "$secret_storage"
 
   echo
   echo '────────────────────────────────────────────────────────────'
