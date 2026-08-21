@@ -39,9 +39,7 @@ download_checked(){
 
 ensure_core(){
   $SUDO install -d -m 0755 "$INSTALL_DIR"
-  if download_checked "$REPO_RAW/install-caddy-node-reality-stream-core.sh" "$CORE"; then
-    return 0
-  fi
+  if download_checked "$REPO_RAW/install-caddy-node-reality-stream-core.sh" "$CORE"; then return 0; fi
   [ -s "$CORE" ] && bash -n "$CORE" && { warn "GitHub недоступен — использую проверенный локальный core."; return 0; }
   die "Не удалось получить рабочий core-скрипт."
 }
@@ -70,26 +68,36 @@ prepare_stream_source(){
   ok "Источник стрим-сайта: $STREAM_SITE_URL"
 }
 
+container_has_net_admin(){
+  $SUDO docker inspect remnanode --format '{{json .HostConfig.CapAdd}}' 2>/dev/null | grep -q 'NET_ADMIN'
+}
+
 ensure_net_admin(){
-  local compose=/opt/remnanode/docker-compose.yml tmp
+  local compose=/opt/remnanode/docker-compose.yml tmp need_recreate=0
   [ -f "$compose" ] || return 0
-  if grep -qE '^[[:space:]]*-[[:space:]]*NET_ADMIN[[:space:]]*$' "$compose"; then return 0; fi
-  tmp="$(mktemp)"
-  awk '
-    {print}
-    /^[[:space:]]*network_mode:[[:space:]]*host[[:space:]]*$/ {
-      match($0,/^[[:space:]]*/); i=substr($0,1,RLENGTH)
-      print i "cap_add:"
-      print i "  - NET_ADMIN"
-    }
-  ' "$compose" > "$tmp"
-  $SUDO cp -a "$compose" "${compose}.bak.$(date +%Y%m%d-%H%M%S)"
-  $SUDO install -o root -g root -m 0600 "$tmp" "$compose"; rm -f "$tmp"
-  ( cd /opt/remnanode && $SUDO docker compose config >/dev/null ) || die "NET_ADMIN не добавлен: docker compose config не прошёл проверку."
-  ( cd /opt/remnanode && $SUDO docker compose up -d --force-recreate remnanode ) || die "Не удалось пересоздать remnanode с NET_ADMIN."
-  sleep 3
-  $SUDO docker inspect remnanode --format '{{json .HostConfig.CapAdd}}' 2>/dev/null | grep -q 'NET_ADMIN' || die "NET_ADMIN не применился к контейнеру."
-  ok "Remnanode: CAP_NET_ADMIN включён."
+  if ! grep -qE '^[[:space:]]*-[[:space:]]*NET_ADMIN[[:space:]]*$' "$compose"; then
+    tmp="$(mktemp)"
+    awk '
+      {print}
+      /^[[:space:]]*network_mode:[[:space:]]*host[[:space:]]*$/ {
+        match($0,/^[[:space:]]*/); i=substr($0,1,RLENGTH)
+        print i "cap_add:"
+        print i "  - NET_ADMIN"
+      }
+    ' "$compose" > "$tmp"
+    $SUDO cp -a "$compose" "${compose}.bak.$(date +%Y%m%d-%H%M%S)"
+    $SUDO install -o root -g root -m 0600 "$tmp" "$compose"; rm -f "$tmp"
+    need_recreate=1
+  fi
+  ( cd /opt/remnanode && $SUDO docker compose config >/dev/null ) || die "docker-compose.yml не прошёл проверку после настройки NET_ADMIN."
+  if $SUDO docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx remnanode; then
+    container_has_net_admin || need_recreate=1
+  fi
+  if [ "$need_recreate" = 1 ]; then
+    ( cd /opt/remnanode && $SUDO docker compose up -d --force-recreate remnanode ) || die "Не удалось пересоздать remnanode с NET_ADMIN."
+    sleep 3
+  fi
+  container_has_net_admin || die "NET_ADMIN указан в compose, но не применился к контейнеру."
 }
 
 rw_core_on_443(){ ss -lntp 2>/dev/null | grep -E ':443[[:space:]]' | grep -q 'rw-core'; }
@@ -116,30 +124,87 @@ ensure_telemt_route(){
   local tmp; tmp="$(mktemp)"
   awk 'BEGIN{i=0} /^[[:space:]]*handle[[:space:]]*\{[[:space:]]*$/ && !i {print "\thandle /telemt* {"; print "\t\treverse_proxy 127.0.0.1:8080"; print "\t}"; print ""; i=1} {print}' "$CADDYFILE" > "$tmp"
   if $SUDO caddy validate --config "$tmp" --adapter caddyfile >/dev/null; then
-    $SUDO install -o root -g root -m 0644 "$tmp" "$CADDYFILE"; $SUDO systemctl reload caddy >/dev/null 2>&1 || $SUDO systemctl restart caddy >/dev/null 2>&1 || true
-  else warn "Не удалось безопасно восстановить /telemt в Caddy."; fi
+    $SUDO install -o root -g root -m 0644 "$tmp" "$CADDYFILE"
+    $SUDO systemctl reload caddy >/dev/null 2>&1 || $SUDO systemctl restart caddy >/dev/null 2>&1 || true
+  else
+    warn "Не удалось безопасно восстановить /telemt в Caddy."
+  fi
   rm -f "$tmp"
 }
 
-runtime_diagnose(){
+xray_status(){ $SUDO docker exec remnanode /command/s6-svstat /run/service/xray 2>/dev/null || true; }
+runtime_config_count(){ $SUDO docker exec remnanode sh -c 'find /run /tmp /var/lib /opt -maxdepth 4 -type f \( -iname "*xray*.json" -o -name config.json \) 2>/dev/null | wc -l' 2>/dev/null || echo '?'; }
+
+safe_diagnose(){
+  ensure_net_admin
+  restore_public_caddy_if_needed || true
+  ensure_telemt_route || true
+
+  local xs cfgcount caps webcode=none xhttp=no nodeapi=no caddy_state
+  xs="$(xray_status)"
+  cfgcount="$(runtime_config_count)"
+  caps="$($SUDO docker inspect remnanode --format '{{json .HostConfig.CapAdd}}' 2>/dev/null || true)"
+  ss -ltnp 2>/dev/null | grep -q ':2222 ' && nodeapi=yes
+  ss -ltnp 2>/dev/null | grep -q '127.0.0.1:7443 ' && xhttp=yes
+  caddy_state="$($SUDO systemctl is-active caddy 2>/dev/null || true)"
+  if caddy_public_443; then webcode="$(curl -kIs --max-time 8 https://127.0.0.1/ -H "Host: $(awk '/^[A-Za-z0-9.-]+[[:space:]]*\{/{gsub(/[[:space:]]*\{.*/,"",$0); print $1; exit}' "$CADDYFILE" 2>/dev/null)" 2>/dev/null | awk 'NR==1{print $2}')"; fi
+
   echo
   echo '────────────────────────────────────────────────────────────'
-  echo '  [E] Runtime Remnanode/Xray'
+  echo '  [A] Сервисы и порты'
   echo '────────────────────────────────────────────────────────────'
-  if ! $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode; then say '  ✗ remnanode не запущен'; return 0; fi
-  local xs cfgcount caps
-  xs="$($SUDO docker exec remnanode /command/s6-svstat /run/service/xray 2>/dev/null || true)"
-  cfgcount="$($SUDO docker exec remnanode sh -c 'find /run /tmp /var/lib /opt -maxdepth 4 -type f \( -iname "*xray*.json" -o -name config.json \) 2>/dev/null | wc -l' 2>/dev/null || echo '?')"
-  caps="$($SUDO docker inspect remnanode --format '{{json .HostConfig.CapAdd}}' 2>/dev/null || true)"
-  printf '  Node API : '; ss -ltnp 2>/dev/null | grep -q ':2222 ' && echo '✓ :2222 слушает' || echo '✗ :2222 не слушает'
-  printf '  NET_ADMIN: '; printf '%s' "$caps" | grep -q NET_ADMIN && echo '✓ есть' || echo '✗ нет'
-  printf '  Xray     : %s\n' "${xs:-неизвестно}"
-  printf '  configs  : %s runtime-файл(ов)\n' "$cfgcount"
+  printf '  Caddy       : %s\n' "${caddy_state:-неизвестно}"
+  printf '  Web :443    : %s\n' "$([ "$webcode" = 200 ] && echo '✓ HTTP 200' || echo "${webcode:-нет ответа}")"
+  printf '  Node API    : %s\n' "$([ "$nodeapi" = yes ] && echo '✓ :2222 слушает' || echo '✗ :2222 не слушает')"
+  printf '  XHTTP       : %s\n' "$([ "$xhttp" = yes ] && echo '✓ 127.0.0.1:7443 слушает' || echo '✗ 127.0.0.1:7443 не слушает')"
+  printf '  REALITY     : %s\n' "$(rw_core_on_443 && echo '✓ rw-core :443' || echo 'не запущен')"
+  printf '  NET_ADMIN   : %s\n' "$(printf '%s' "$caps" | grep -q NET_ADMIN && echo '✓ есть' || echo '✗ нет')"
+
+  echo
+  echo '────────────────────────────────────────────────────────────'
+  echo '  [B] Remnanode / Xray'
+  echo '────────────────────────────────────────────────────────────'
+  printf '  Xray service: %s\n' "${xs:-неизвестно}"
+  printf '  Runtime cfg : %s файл(ов)\n' "$cfgcount"
   if printf '%s' "$xs" | grep -q 'down (not started yet)' && [ "$cfgcount" = 0 ]; then
-    echo '  ДИАГНОЗ  : Node работает, но Xray ещё не запускался и runtime-конфиг не получен.'
-    echo '              Это НЕ ошибка Caddy и НЕ локальный firewall 2222.'
+    echo '  ДИАГНОЗ     : Node запущена, но Xray ещё ни разу не стартовал.'
+    echo '                Runtime-конфиг Xray отсутствует, поэтому 7443 физически некому слушать.'
+    echo '                TCP/2222 и локальный firewall не являются причиной, если :2222 слушает.'
+  elif printf '%s' "$xs" | grep -q '^down'; then
+    echo '  ДИАГНОЗ     : Xray был запущен/подготовлен, но сейчас остановлен. Нужны Xray runtime-логи.'
+  elif printf '%s' "$xs" | grep -q '^up'; then
+    if [ "$xhttp" = yes ]; then
+      echo '  ДИАГНОЗ     : Xray запущен, XHTTP backend доступен.'
+    else
+      echo '  ДИАГНОЗ     : Xray запущен, но inbound 7443 отсутствует — проверяй применённый runtime-профиль.'
+    fi
   fi
-  if caddy_local_8443 && ! rw_core_on_443; then echo '  ! Caddy локальный :8443, а rw-core:443 отсутствует — сайт будет недоступен; нужен откат.'; fi
+
+  echo
+  echo '────────────────────────────────────────────────────────────'
+  echo '  [C] Caddy / сайт'
+  echo '────────────────────────────────────────────────────────────'
+  if caddy_public_443; then
+    echo '  ✓ Caddy слушает внешний :443 — стрим-сайт сохранён даже при неработающем REALITY.'
+  elif caddy_local_8443 && rw_core_on_443; then
+    echo '  ✓ Финальная схема: rw-core :443 → Caddy 127.0.0.1:8443.'
+  elif caddy_local_8443; then
+    echo '  ✗ Caddy только на 8443, но rw-core:443 отсутствует. Это аварийное состояние.'
+  else
+    echo '  ✗ Не найден ожидаемый listener Caddy на :443 или 127.0.0.1:8443.'
+  fi
+
+  echo
+  echo '────────────────────────────────────────────────────────────'
+  echo '  [D] CDN'
+  echo '────────────────────────────────────────────────────────────'
+  if [ "$xhttp" = yes ]; then
+    echo '  Локальный XHTTP backend поднят. CDN имеет смысл проверять только после этого.'
+    echo '  Проверь с внешнего клиента живой XHTTP-путь и отдельно обычную HTML-страницу.'
+  else
+    echo '  CDN сейчас НЕ является первичной проблемой: 127.0.0.1:7443 не слушает.'
+    echo '  Сначала должен появиться XHTTP backend; до этого запрос на туннель закономерно не заработает.'
+  fi
 }
 
 run_core(){
@@ -149,7 +214,6 @@ run_core(){
   case "$cmd" in install|--auto|auto|reinstall|repair|fix) ensure_net_admin ;; esac
   restore_public_caddy_if_needed || true
   ensure_telemt_route || true
-  case "$cmd" in diagnose|diag) runtime_diagnose ;; esac
 }
 
 telemt(){ ensure_telemt_helper; "$TELEMT_HELPER" "$@"; }
@@ -186,7 +250,7 @@ MENU
     case "$c" in
       1) run_core install ;; 2) run_core reinstall ;; 3) run_core front-only ;; 4) run_core path ;;
       5) printf 'Новый XHTTP-путь: '; read -r p <"$TTY" || true; [ -n "$p" ] && run_core path-set "$p" ;;
-      6) run_core stream ;; 7) run_core summary ;; 8) run_core diagnose || true ;; 9) run_core status ;;
+      6) run_core stream ;; 7) run_core summary ;; 8) safe_diagnose ;; 9) run_core status ;;
       10) run_core reality-prepare ;; 11) run_core reality-enable ;; 12) run_core reality-disable ;; 13) run_core reality-info ;;
       14) run_core repair ;; 15) telemt install ;; 16) telemt status ;; 17) telemt remove ;; 18) run_core clean ;;
       0|'') exit 0 ;; *) warn "Неизвестный пункт: $c" ;;
@@ -199,6 +263,7 @@ main(){
   ensure_self || true
   case "${1:-menu}" in
     menu|'') menu ;;
+    diagnose|diag) safe_diagnose ;;
     telemt-install) telemt install ;; telemt-status) telemt status ;; telemt-remove|telemt-uninstall) telemt remove ;;
     *) run_core "$@" ;;
   esac
