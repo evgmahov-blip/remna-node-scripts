@@ -136,48 +136,55 @@ xray_status(){ $SUDO docker exec remnanode /command/s6-svstat /run/service/xray 
 runtime_config_count(){ $SUDO docker exec remnanode sh -c 'find /run /tmp /var/lib /opt -maxdepth 4 -type f \( -iname "*xray*.json" -o -name config.json \) 2>/dev/null | wc -l' 2>/dev/null || echo '?'; }
 
 safe_diagnose(){
-  ensure_net_admin
+  set +e
+  echo
+  echo '────────────────────────────────────────────────────────────'
+  echo '  Remna Node — безопасная диагностика'
+  echo '────────────────────────────────────────────────────────────'
+
+  ensure_net_admin >/dev/null 2>&1 || warn "Не удалось автоматически проверить/применить NET_ADMIN."
   restore_public_caddy_if_needed || true
   ensure_telemt_route || true
 
-  local xs cfgcount caps webcode=none xhttp=no nodeapi=no caddy_state
-  xs="$(xray_status)"
-  cfgcount="$(runtime_config_count)"
+  local xs cfgcount caps webcode=none xhttp=no nodeapi=no caddy_state domain
+  xs="$(xray_status 2>/dev/null)"
+  cfgcount="$(runtime_config_count 2>/dev/null)"
   caps="$($SUDO docker inspect remnanode --format '{{json .HostConfig.CapAdd}}' 2>/dev/null || true)"
   ss -ltnp 2>/dev/null | grep -q ':2222 ' && nodeapi=yes
   ss -ltnp 2>/dev/null | grep -q '127.0.0.1:7443 ' && xhttp=yes
   caddy_state="$($SUDO systemctl is-active caddy 2>/dev/null || true)"
-  if caddy_public_443; then webcode="$(curl -kIs --max-time 8 https://127.0.0.1/ -H "Host: $(awk '/^[A-Za-z0-9.-]+[[:space:]]*\{/{gsub(/[[:space:]]*\{.*/,"",$0); print $1; exit}' "$CADDYFILE" 2>/dev/null)" 2>/dev/null | awk 'NR==1{print $2}')"; fi
+  domain="$(awk '/^[A-Za-z0-9.-]+[[:space:]]*\{/{gsub(/[[:space:]]*\{.*/,"",$0); print $1; exit}' "$CADDYFILE" 2>/dev/null || true)"
+  if caddy_public_443 && [ -n "$domain" ]; then
+    webcode="$(curl -kIs --max-time 8 https://127.0.0.1/ -H "Host: $domain" 2>/dev/null | awk 'NR==1{print $2}' || true)"
+  fi
 
   echo
   echo '────────────────────────────────────────────────────────────'
   echo '  [A] Сервисы и порты'
   echo '────────────────────────────────────────────────────────────'
   printf '  Caddy       : %s\n' "${caddy_state:-неизвестно}"
-  printf '  Web :443    : %s\n' "$([ "$webcode" = 200 ] && echo '✓ HTTP 200' || echo "${webcode:-нет ответа}")"
-  printf '  Node API    : %s\n' "$([ "$nodeapi" = yes ] && echo '✓ :2222 слушает' || echo '✗ :2222 не слушает')"
-  printf '  XHTTP       : %s\n' "$([ "$xhttp" = yes ] && echo '✓ 127.0.0.1:7443 слушает' || echo '✗ 127.0.0.1:7443 не слушает')"
-  printf '  REALITY     : %s\n' "$(rw_core_on_443 && echo '✓ rw-core :443' || echo 'не запущен')"
-  printf '  NET_ADMIN   : %s\n' "$(printf '%s' "$caps" | grep -q NET_ADMIN && echo '✓ есть' || echo '✗ нет')"
+  if [ "$webcode" = 200 ]; then printf '  Web :443    : ✓ HTTP 200\n'; else printf '  Web :443    : %s\n' "${webcode:-нет ответа}"; fi
+  if [ "$nodeapi" = yes ]; then printf '  Node API    : ✓ :2222 слушает\n'; else printf '  Node API    : ✗ :2222 не слушает\n'; fi
+  if [ "$xhttp" = yes ]; then printf '  XHTTP       : ✓ 127.0.0.1:7443 слушает\n'; else printf '  XHTTP       : ✗ 127.0.0.1:7443 не слушает\n'; fi
+  if rw_core_on_443; then printf '  REALITY     : ✓ rw-core :443\n'; else printf '  REALITY     : не запущен\n'; fi
+  if printf '%s' "$caps" | grep -q NET_ADMIN; then printf '  NET_ADMIN   : ✓ есть\n'; else printf '  NET_ADMIN   : ✗ нет\n'; fi
 
   echo
   echo '────────────────────────────────────────────────────────────'
   echo '  [B] Remnanode / Xray'
   echo '────────────────────────────────────────────────────────────'
   printf '  Xray service: %s\n' "${xs:-неизвестно}"
-  printf '  Runtime cfg : %s файл(ов)\n' "$cfgcount"
-  if printf '%s' "$xs" | grep -q 'down (not started yet)' && [ "$cfgcount" = 0 ]; then
+  printf '  Runtime cfg : %s файл(ов)\n' "${cfgcount:-?}"
+  if printf '%s' "$xs" | grep -q 'down (not started yet)' && [ "${cfgcount:-?}" = 0 ]; then
     echo '  ДИАГНОЗ     : Node запущена, но Xray ещё ни разу не стартовал.'
     echo '                Runtime-конфиг Xray отсутствует, поэтому 7443 физически некому слушать.'
-    echo '                TCP/2222 и локальный firewall не являются причиной, если :2222 слушает.'
+    [ "$nodeapi" = yes ] && echo '                :2222 слушает — локальный firewall/API listener не являются причиной.'
   elif printf '%s' "$xs" | grep -q '^down'; then
-    echo '  ДИАГНОЗ     : Xray был запущен/подготовлен, но сейчас остановлен. Нужны Xray runtime-логи.'
+    echo '  ДИАГНОЗ     : Xray сейчас остановлен. Нужны runtime-логи Xray.'
   elif printf '%s' "$xs" | grep -q '^up'; then
-    if [ "$xhttp" = yes ]; then
-      echo '  ДИАГНОЗ     : Xray запущен, XHTTP backend доступен.'
-    else
-      echo '  ДИАГНОЗ     : Xray запущен, но inbound 7443 отсутствует — проверяй применённый runtime-профиль.'
-    fi
+    if [ "$xhttp" = yes ]; then echo '  ДИАГНОЗ     : Xray запущен, XHTTP backend доступен.'; else echo '  ДИАГНОЗ     : Xray запущен, но inbound 7443 отсутствует.'; fi
+  else
+    echo '  ДИАГНОЗ     : состояние Xray определить не удалось.'
   fi
 
   echo
@@ -185,13 +192,13 @@ safe_diagnose(){
   echo '  [C] Caddy / сайт'
   echo '────────────────────────────────────────────────────────────'
   if caddy_public_443; then
-    echo '  ✓ Caddy слушает внешний :443 — стрим-сайт сохранён даже при неработающем REALITY.'
+    echo '  ✓ Caddy слушает внешний :443 — сайт сохранён при неработающем REALITY.'
   elif caddy_local_8443 && rw_core_on_443; then
     echo '  ✓ Финальная схема: rw-core :443 → Caddy 127.0.0.1:8443.'
   elif caddy_local_8443; then
-    echo '  ✗ Caddy только на 8443, но rw-core:443 отсутствует. Это аварийное состояние.'
+    echo '  ✗ Caddy только на 8443, но rw-core:443 отсутствует.'
   else
-    echo '  ✗ Не найден ожидаемый listener Caddy на :443 или 127.0.0.1:8443.'
+    echo '  ✗ Не найден ожидаемый listener Caddy.'
   fi
 
   echo
@@ -199,12 +206,13 @@ safe_diagnose(){
   echo '  [D] CDN'
   echo '────────────────────────────────────────────────────────────'
   if [ "$xhttp" = yes ]; then
-    echo '  Локальный XHTTP backend поднят. CDN имеет смысл проверять только после этого.'
-    echo '  Проверь с внешнего клиента живой XHTTP-путь и отдельно обычную HTML-страницу.'
+    echo '  XHTTP backend поднят — теперь имеет смысл проверять CDN с внешнего клиента.'
   else
-    echo '  CDN сейчас НЕ является первичной проблемой: 127.0.0.1:7443 не слушает.'
-    echo '  Сначала должен появиться XHTTP backend; до этого запрос на туннель закономерно не заработает.'
+    echo '  CDN сейчас не первичная проблема: 127.0.0.1:7443 не слушает.'
+    echo '  Сначала должен появиться XHTTP backend.'
   fi
+  set -e
+  return 0
 }
 
 run_core(){
