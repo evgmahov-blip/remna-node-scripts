@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+      - name: bash -n
+        run: |
+          set -e
+          for f in *.sh; do
+            echo "checking $f"
+            bash -n "$f"
+          done
+      - name: shellcheck errors
+        run: |
+          shellcheck -S error *.sh
