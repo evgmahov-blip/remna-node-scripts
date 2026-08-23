@@ -352,6 +352,78 @@ status(){
   systemctl is-active remna-protection-update.timer 2>/dev/null | sed 's/^/Update timer : /' || true
 }
 
+self_test(){
+  need_root; load_conf; install_deps
+  echo '=== Protection self-test / auto-repair ==='
+  [ -n "$PANEL_IP" ] && valid_ip "$PANEL_IP" || { warn "PANEL_IP не задан/некорректен."; ensure_panel_ip; load_conf; }
+  valid_ports "$FILTER_PORTS" || die "FILTER_PORTS некорректен."
+
+  write_units
+  apply_rules
+
+  local count_t count_g failed=0 s
+  count_t=$($SUDO ipset list "$SET_TSPU" 2>/dev/null | awk -F': ' '/Number of entries/{print $2+0}' || true)
+  count_g=$($SUDO ipset list "$SET_GOV" 2>/dev/null | awk -F': ' '/Number of entries/{print $2+0}' || true)
+  count_t=${count_t:-0}; count_g=${count_g:-0}
+  if [ "$count_t" -eq 0 ] || [ "$count_g" -eq 0 ]; then
+    warn "Один из blocklist-set пуст — пробую обновить списки."
+    update_blocklists || warn "Обновление списков не удалось; старые правила сохранены."
+  fi
+
+  echo '[1/6] Проверка Node API 2222'
+  check_node_api || { apply_rules; check_node_api || failed=1; }
+
+  echo '[2/6] Проверка ipset'
+  for s in "$SET_TSPU" "$SET_GOV" "$SET_ALLOW" "$SET_DENY" "$SET_COUNTRY"; do
+    if $SUDO ipset list "$s" >/dev/null 2>&1; then ok "$s существует"; else warn "$s отсутствует"; failed=1; fi
+  done
+
+  echo '[3/6] Проверка systemd boot restore и timer'
+  $SUDO systemctl enable remna-protection.service >/dev/null 2>&1 || true
+  $SUDO systemctl enable --now remna-protection-update.timer >/dev/null 2>&1 || true
+  $SUDO systemctl is-enabled remna-protection.service >/dev/null 2>&1 && ok 'remna-protection.service enabled' || { warn 'remna-protection.service не enabled'; failed=1; }
+  $SUDO systemctl is-active remna-protection-update.timer >/dev/null 2>&1 && ok 'update timer active' || { warn 'update timer не active'; failed=1; }
+
+  echo '[4/6] Реальный тест восстановления INPUT hook без reboot'
+  while $SUDO iptables -C INPUT -j "$CHAIN" >/dev/null 2>&1; do $SUDO iptables -D INPUT -j "$CHAIN" || break; done
+  if $SUDO iptables -C INPUT -j "$CHAIN" >/dev/null 2>&1; then
+    warn 'Не удалось временно удалить hook для теста.'
+    failed=1
+  else
+    ok 'hook временно удалён'
+    if ! $SUDO systemctl restart remna-protection.service; then
+      warn 'systemd restore завершился ошибкой — аварийно применяю правила напрямую.'
+      apply_rules || true
+      failed=1
+    fi
+    if $SUDO iptables -C INPUT -j "$CHAIN" >/dev/null 2>&1; then ok 'HOOK_RESTORED_OK'; else warn 'HOOK_RESTORE_FAILED'; apply_rules || true; failed=1; fi
+  fi
+
+  echo '[5/6] Повторная проверка 2222 после restore'
+  check_node_api || { apply_rules; check_node_api || failed=1; }
+
+  echo '[6/6] Проверка широкого UFW allow 2222'
+  if command -v ufw >/dev/null 2>&1 && $SUDO ufw status 2>/dev/null | grep -qi '^Status: active'; then
+    sync_ufw_2222
+    if $SUDO ufw status 2>/dev/null | grep -Eq '^2222/tcp[[:space:]]+ALLOW([[:space:]]+IN)?[[:space:]]+Anywhere'; then
+      warn 'UFW всё ещё содержит широкий allow 2222/tcp.'
+      failed=1
+    else
+      ok 'широкого UFW allow 2222 нет'
+    fi
+  else
+    say 'UFW не активен — защита 2222 обеспечивается REMNA_GUARD.'
+  fi
+
+  status
+  if [ "$failed" -eq 0 ]; then
+    ok 'SELFTEST: PASS — защита восстановима и 2222 закрыт для всех кроме панели.'
+    return 0
+  fi
+  warn 'SELFTEST: FAIL — часть проверок не прошла; см. сообщения выше.'
+  return 1
+}
+
 uninstall(){
   need_root
   $SUDO systemctl disable --now remna-protection-update.timer remna-protection.service >/dev/null 2>&1 || true
@@ -382,6 +454,7 @@ menu(){
  [10] Выключить GeoIP
  [11] Изменить защищаемые порты
  [12] Удалить firewall-защиту
+ [13] Самопроверка + авторемонт
  [0] Назад
 ────────────────────────────────────────────────────────────
 EOF
@@ -399,6 +472,7 @@ EOF
       10) set_conf ENABLE_GEOIP 0; apply_rules ;;
       11) printf 'TCP-порты через запятую (до 15): '; read -r v < "$TTY"; valid_ports "$v" || { warn "Некорректный список портов."; continue; }; set_conf FILTER_PORTS "$v"; apply_rules ;;
       12) printf 'Удалить правила? Введите YES: '; read -r v < "$TTY"; [ "$v" = YES ] && uninstall ;;
+      13) self_test ;;
       0|'') return ;;
       *) warn "Неизвестный пункт" ;;
     esac
@@ -412,13 +486,14 @@ main(){
     update) update_blocklists ;;
     apply) apply_rules ;;
     status) status ;;
+    selftest|self-test|repair) self_test ;;
     panel-set) shift; set_panel_ip "${1:-}" ;;
     ensure-panel) ensure_panel_ip ;;
     check-node-api) check_node_api ;;
     allow-add) shift; add_ip_file allow.txt "$1" ;;
     deny-add) shift; add_ip_file deny.txt "$1" ;;
     uninstall) uninstall ;;
-    *) die "Команда: menu|install|update|apply|status|panel-set|ensure-panel|check-node-api|uninstall" ;;
+    *) die "Команда: menu|install|update|apply|status|selftest|panel-set|ensure-panel|check-node-api|uninstall" ;;
   esac
 }
 main "$@"
