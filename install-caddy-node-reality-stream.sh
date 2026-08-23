@@ -448,6 +448,52 @@ safe_diagnose(){
   return 0
 }
 
+selftest_all(){
+  local failed=0
+  echo
+  echo '════════════════════════════════════════════════════════════'
+  echo ' Remna Node — SELFTEST + AUTO-REPAIR'
+  echo '════════════════════════════════════════════════════════════'
+
+  echo '[1/5] Remnanode compose / SECRET_KEY / NET_ADMIN'
+  ensure_node_compose || failed=1
+
+  echo '[2/5] Protection / 2222 / ipset / boot restore'
+  protection selftest || failed=1
+
+  echo '[3/5] REALITY handoff watcher'
+  install_handoff_watcher || failed=1
+  $SUDO systemctl enable --now remna-reality-handoff.timer >/dev/null 2>&1 || failed=1
+  auto_handoff_once || true
+  if $SUDO systemctl is-active remna-reality-handoff.timer >/dev/null 2>&1; then
+    ok 'remna-reality-handoff.timer active'
+  else
+    warn 'remna-reality-handoff.timer не active'
+    failed=1
+  fi
+
+  echo '[4/5] Caddy / Telemt routes'
+  ensure_telemt_route || true
+  if rw_core_on_443; then
+    caddy_local_8443 && ok 'REALITY topology OK: rw-core:443 + Caddy:8443' || { warn 'rw-core на 443, но Caddy не на 8443'; failed=1; }
+  elif caddy_public_443; then
+    ok 'Caddy public:443 OK; watcher ждёт REALITY'
+  else
+    warn 'ни rw-core:443, ни Caddy:443 не обнаружены'
+    failed=1
+  fi
+
+  echo '[5/5] Итоговая диагностика'
+  safe_diagnose
+
+  if [ "$failed" -eq 0 ]; then
+    ok 'SELFTEST ALL: PASS'
+    return 0
+  fi
+  warn 'SELFTEST ALL: есть неисправности, которые не удалось исправить автоматически.'
+  return 1
+}
+
 run_core(){
   local cmd="${1:-menu}" wait_needed=0
   ensure_core
@@ -505,6 +551,7 @@ Remna Node Manager — safe mode
  [18] Clean Remnanode/Caddy
  [19] Защита ноды (RKN/TSPU/GOV/GeoIP/Allow/Deny)
  [20] Закрыть TCP/2222 только для IP панели
+ [21] SELFTEST + авторемонт всего узла
  [0]  Выход
 ────────────────────────────────────────────────────────────
 MENU
@@ -515,7 +562,7 @@ MENU
       6) run_core stream ;; 7) run_core summary ;; 8) safe_diagnose ;; 9) run_core status ;;
       10) run_core reality-prepare ;; 11) run_core reality-enable ;; 12) run_core reality-disable ;; 13) run_core reality-info ;;
       14) run_core repair ;; 15) telemt install ;; 16) telemt status ;; 17) telemt remove ;; 18) run_core clean ;;
-      19) protection menu ;; 20) protection panel-set ;;
+      19) protection menu ;; 20) protection panel-set ;; 21) selftest_all ;;
       0|'') exit 0 ;; *) warn "Неизвестный пункт: $c" ;;
     esac
     printf '\nEnter — вернуться в меню... '; read -r _ <"$TTY" || true
@@ -527,9 +574,10 @@ main(){
   case "${1:-menu}" in
     menu|'') menu ;;
     diagnose|diag) safe_diagnose ;;
+    selftest|self-test|check-all|repair-all) selftest_all ;;
     handoff-check) set +e; auto_handoff_once; exit 0 ;;
     telemt-install) telemt install ;; telemt-status) telemt status ;; telemt-remove|telemt-uninstall) telemt remove ;;
-    protect|protection) protection menu ;; protect-install) protection install ;; protect-status) protection status ;;
+    protect|protection) protection menu ;; protect-install) protection install ;; protect-status) protection status ;; protect-selftest) protection selftest ;;
     panel-set) shift; protection panel-set "${1:-}" ;;
     *) run_core "$@" ;;
   esac
