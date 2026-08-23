@@ -120,9 +120,7 @@ out=set()
 for raw in open(src,encoding='utf-8',errors='ignore'):
     s=raw.strip()
     if not s or s.startswith('#'): continue
-    vals=[]
-    if mode=='gov': vals=re.findall(r'(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?',s)
-    else: vals=[s.split()[0]]
+    vals=re.findall(r'(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?',s) if mode=='gov' else [s.split()[0]]
     for v in vals:
         try:
             n=ipaddress.ip_network(v,strict=False)
@@ -194,6 +192,21 @@ remove_jump_all(){
   if command -v ip6tables >/dev/null; then while $SUDO ip6tables -C INPUT -j "$CHAIN6" >/dev/null 2>&1; do $SUDO ip6tables -D INPUT -j "$CHAIN6"; done; fi
 }
 
+sync_ufw_2222(){
+  command -v ufw >/dev/null 2>&1 || return 0
+  $SUDO ufw status 2>/dev/null | grep -qi '^Status: active' || return 0
+  # Удаляем широкие правила, которые старые версии core добавляли через `ufw allow 2222/tcp`.
+  while $SUDO ufw status numbered 2>/dev/null | grep -Eq '^\[[[:space:]]*[0-9]+\][[:space:]]+2222/tcp[[:space:]]+ALLOW[[:space:]]+Anywhere'; do
+    local num
+    num=$($SUDO ufw status numbered | awk '/2222\/tcp/ && /ALLOW/ && /Anywhere/{gsub(/\[|\]/,"",$1); print $1; exit}')
+    [ -n "$num" ] || break
+    yes | $SUDO ufw delete "$num" >/dev/null 2>&1 || break
+  done
+  if [ "$(ip_version "$PANEL_IP")" = 4 ]; then
+    $SUDO ufw allow from "$PANEL_IP" to any port 2222 proto tcp comment 'Remnawave panel only' >/dev/null 2>&1 || true
+  fi
+}
+
 apply_rules(){
   need_root; load_conf; install_deps
   [ -n "$PANEL_IP" ] && valid_ip "$PANEL_IP" || die "PANEL_IP не задан/некорректен: отказываюсь менять firewall, чтобы не отрезать панель."
@@ -228,6 +241,7 @@ apply_rules(){
   remove_jump_all
   $SUDO iptables -I INPUT 1 -j "$CHAIN"
   command -v ip6tables >/dev/null 2>&1 && $SUDO ip6tables -I INPUT 1 -j "$CHAIN6" || true
+  sync_ufw_2222
   log "rules applied panel=$PANEL_IP ports=$FILTER_PORTS geo=$ENABLE_GEOIP"
 }
 
