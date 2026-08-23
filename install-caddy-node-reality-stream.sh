@@ -6,6 +6,7 @@ INSTALL_DIR=/opt/remna-node-scripts
 SELF="$INSTALL_DIR/install-caddy-node-reality-stream.sh"
 CORE="$INSTALL_DIR/install-caddy-node-reality-stream-core.sh"
 TELEMT_HELPER="$INSTALL_DIR/telemt-manager.sh"
+PROTECTION_HELPER="$INSTALL_DIR/protection-manager.sh"
 NODE_DIR=/opt/remnanode
 NODE_COMPOSE="$NODE_DIR/docker-compose.yml"
 NODE_ENV="$NODE_DIR/.env"
@@ -61,6 +62,12 @@ ensure_telemt_helper(){
   die "Не удалось получить Telemt helper."
 }
 
+ensure_protection_helper(){
+  if download_checked "$REPO_RAW/protection-manager.sh" "$PROTECTION_HELPER"; then return 0; fi
+  [ -s "$PROTECTION_HELPER" ] && bash -n "$PROTECTION_HELPER" && { warn "GitHub недоступен — использую локальный protection helper."; return 0; }
+  die "Не удалось получить protection-manager.sh."
+}
+
 choose_stream_source(){
   local src tmp
   [ -n "${STREAM_SITE_URL:-}" ] && { printf '%s\n' "$STREAM_SITE_URL"; return 0; }
@@ -101,7 +108,6 @@ ensure_node_compose(){
   local tmp tmpenv inline secret envlen need_recreate=0 backup_done=0
   [ -f "$compose" ] || return 0
 
-  # Извлекаем только настоящий inline SECRET_KEY. Строка ${SECRET_KEY} не считается значением.
   inline="$(awk '
     /^[[:space:]]*SECRET_KEY:[[:space:]]*/ {
       s=$0; sub(/^[[:space:]]*SECRET_KEY:[[:space:]]*/, "", s)
@@ -127,13 +133,11 @@ ensure_node_compose(){
     ok "SECRET_KEY перенесён в $envfile (0600), значение не выводилось."
   fi
 
-  # Если compose уже ссылается на переменную, но .env пуст, не пересоздаём контейнер с пустым ключом.
   if grep -qF '${SECRET_KEY}' "$compose" && [ "$envlen" -eq 0 ]; then
     warn "$envfile содержит пустой SECRET_KEY. Контейнер не пересоздаю, пока ключ не будет записан."
     return 1
   fi
 
-  # Новый канонический формат: env_file: .env. Убираем SECRET_KEY из environment полностью.
   tmp="$(mktemp)"
   awk '
     /^[[:space:]]*SECRET_KEY:[[:space:]]*/ {next}
@@ -195,7 +199,6 @@ ensure_node_compose(){
   container_has_secret || die "SECRET_KEY не попал внутрь remnanode. Проверь $NODE_ENV и env_file в compose."
 }
 
-# Старое имя оставлено для совместимости внутренних вызовов.
 ensure_net_admin(){ ensure_node_compose; }
 
 rw_core_on_443(){ ss -lntp 2>/dev/null | grep -E ':443[[:space:]]' | grep -q 'rw-core'; }
@@ -247,7 +250,6 @@ auto_handoff_once(){
     return 0
   fi
 
-  # Ключевой случай: профиль уже пришёл, Xray попытался занять 443 и упал, потому что там Caddy.
   if caddy_public_443 && node_has_443_conflict; then
     warn "Xray получил профиль, но :443 занят Caddy — выполняю автоматический handoff Caddy → 127.0.0.1:8443."
     switch_caddy_to_reality || { warn "Не удалось переключить Caddy на REALITY-конфиг."; return 1; }
@@ -345,6 +347,8 @@ wait_for_xray_runtime(){
   return 1
 }
 
+protection(){ ensure_protection_helper; "$PROTECTION_HELPER" "$@"; }
+
 safe_diagnose(){
   set +e
   echo
@@ -432,6 +436,14 @@ safe_diagnose(){
   else
     echo '  CDN сейчас не первичная проблема: 127.0.0.1:7443 не слушает.'
   fi
+
+  echo
+  echo '────────────────────────────────────────────────────────────'
+  echo '  [E] Защита / Node API'
+  echo '────────────────────────────────────────────────────────────'
+  if protection check-node-api 2>/dev/null; then :; else
+    echo '  ✗ TCP/2222 не защищён. В меню выбери «Защита ноды» → «Задать IP панели».'
+  fi
   set -e
   return 0
 }
@@ -444,6 +456,8 @@ run_core(){
   case "$cmd" in
     install|--auto|auto|reinstall|repair|fix)
       ensure_node_compose
+      if [ -n "${PANEL_IP:-}" ]; then PANEL_IP_ENV="$PANEL_IP" protection ensure-panel || warn "Не удалось ограничить TCP/2222 IP панели.";
+      else protection ensure-panel || warn "TCP/2222 пока не ограничен: задай IP панели в разделе защиты."; fi
       wait_needed=1
       ;;
   esac
@@ -489,6 +503,8 @@ Remna Node Manager — safe mode
  [16] Статус Telemt + Panel
  [17] Убрать интеграцию Telemt Panel
  [18] Clean Remnanode/Caddy
+ [19] Защита ноды (RKN/TSPU/GOV/GeoIP/Allow/Deny)
+ [20] Закрыть TCP/2222 только для IP панели
  [0]  Выход
 ────────────────────────────────────────────────────────────
 MENU
@@ -499,6 +515,7 @@ MENU
       6) run_core stream ;; 7) run_core summary ;; 8) safe_diagnose ;; 9) run_core status ;;
       10) run_core reality-prepare ;; 11) run_core reality-enable ;; 12) run_core reality-disable ;; 13) run_core reality-info ;;
       14) run_core repair ;; 15) telemt install ;; 16) telemt status ;; 17) telemt remove ;; 18) run_core clean ;;
+      19) protection menu ;; 20) protection panel-set ;;
       0|'') exit 0 ;; *) warn "Неизвестный пункт: $c" ;;
     esac
     printf '\nEnter — вернуться в меню... '; read -r _ <"$TTY" || true
@@ -512,6 +529,8 @@ main(){
     diagnose|diag) safe_diagnose ;;
     handoff-check) set +e; auto_handoff_once; exit 0 ;;
     telemt-install) telemt install ;; telemt-status) telemt status ;; telemt-remove|telemt-uninstall) telemt remove ;;
+    protect|protection) protection menu ;; protect-install) protection install ;; protect-status) protection status ;;
+    panel-set) shift; protection panel-set "${1:-}" ;;
     *) run_core "$@" ;;
   esac
 }
