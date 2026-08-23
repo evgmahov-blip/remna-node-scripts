@@ -195,12 +195,9 @@ remove_jump_all(){
 sync_ufw_2222(){
   command -v ufw >/dev/null 2>&1 || return 0
   $SUDO ufw status 2>/dev/null | grep -qi '^Status: active' || return 0
-  # Удаляем широкие правила, которые старые версии core добавляли через `ufw allow 2222/tcp`.
-  while $SUDO ufw status numbered 2>/dev/null | grep -Eq '^\[[[:space:]]*[0-9]+\][[:space:]]+2222/tcp[[:space:]]+ALLOW[[:space:]]+Anywhere'; do
-    local num
-    num=$($SUDO ufw status numbered | awk '/2222\/tcp/ && /ALLOW/ && /Anywhere/{gsub(/\[|\]/,"",$1); print $1; exit}')
-    [ -n "$num" ] || break
-    yes | $SUDO ufw delete "$num" >/dev/null 2>&1 || break
+  # Старые installer могли оставить глобальный `ufw allow 2222/tcp`.
+  while $SUDO ufw status 2>/dev/null | grep -Eq '^2222/tcp[[:space:]]+ALLOW([[:space:]]+IN)?[[:space:]]+Anywhere'; do
+    $SUDO ufw --force delete allow 2222/tcp >/dev/null 2>&1 || break
   done
   if [ "$(ip_version "$PANEL_IP")" = 4 ]; then
     $SUDO ufw allow from "$PANEL_IP" to any port 2222 proto tcp comment 'Remnawave panel only' >/dev/null 2>&1 || true
