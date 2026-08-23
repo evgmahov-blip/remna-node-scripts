@@ -132,7 +132,11 @@ PY
 }
 
 atomic_load_set(){
-  local target=$1 file=$2 max=${3:-2000000} tmp="${target}_TMP" restore count
+  local target file max tmp restore count
+  target=$1
+  file=$2
+  max=${3:-2000000}
+  tmp="${target}_TMP"
   count=$(grep -cve '^[[:space:]]*$' "$file" 2>/dev/null || true)
   [ "$count" -gt 0 ] || return 1
   restore=$(mktemp)
@@ -195,7 +199,6 @@ remove_jump_all(){
 sync_ufw_2222(){
   command -v ufw >/dev/null 2>&1 || return 0
   $SUDO ufw status 2>/dev/null | grep -qi '^Status: active' || return 0
-  # Старые installer могли оставить глобальный `ufw allow 2222/tcp`.
   while $SUDO ufw status 2>/dev/null | grep -Eq '^2222/tcp[[:space:]]+ALLOW([[:space:]]+IN)?[[:space:]]+Anywhere'; do
     $SUDO ufw --force delete allow 2222/tcp >/dev/null 2>&1 || break
   done
