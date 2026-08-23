@@ -19,7 +19,7 @@ SET_ALLOW=REMNA_ALLOW
 SET_DENY=REMNA_DENY
 SET_COUNTRY=REMNA_COUNTRY_ALLOW
 TSPU_URL=https://raw.githubusercontent.com/tread-lightly/CyberOK_Skipa_ips/main/lists/skipa_cidr.txt
-GOV_URL=https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklist_v4.txt
+GOV_URL=https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists_iptables/blacklist-v4.ipset
 
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO=sudo; fi
 TTY=/dev/tty; { [ -r "$TTY" ] && [ -w "$TTY" ]; } || TTY=/dev/stdin
@@ -47,6 +47,17 @@ PY
 ip_version(){ python3 - "$1" <<'PY'
 import ipaddress,sys
 print(ipaddress.ip_address(sys.argv[1]).version)
+PY
+}
+valid_ports(){
+  python3 - "$1" <<'PY'
+import sys
+raw=sys.argv[1].strip()
+try:
+    vals=[int(x.strip()) for x in raw.split(',') if x.strip()]
+    ok=bool(vals) and len(vals)<=15 and all(1<=x<=65535 for x in vals)
+except Exception: ok=False
+raise SystemExit(0 if ok else 1)
 PY
 }
 
@@ -110,17 +121,15 @@ for raw in open(src,encoding='utf-8',errors='ignore'):
     s=raw.strip()
     if not s or s.startswith('#'): continue
     vals=[]
-    if mode=='gov':
-        vals=re.findall(r'(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?',s)
-    else:
-        vals=[s.split()[0]]
+    if mode=='gov': vals=re.findall(r'(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?',s)
+    else: vals=[s.split()[0]]
     for v in vals:
         try:
             n=ipaddress.ip_network(v,strict=False)
             if n.version==4: out.add(str(n))
         except Exception: pass
 with open(dst,'w',encoding='utf-8') as f:
-    for x in sorted(out,key=lambda x:(int(ipaddress.ip_network(x).network_address),ipaddress.ip_network(x).prefixlen))): f.write(x+'\n')
+    for x in sorted(out,key=lambda x:(int(ipaddress.ip_network(x).network_address),ipaddress.ip_network(x).prefixlen)): f.write(x+'\n')
 PY
 }
 
@@ -145,6 +154,7 @@ ensure_set(){ $SUDO ipset create "$1" hash:net family inet maxelem "${2:-2000000
 
 update_blocklists(){
   need_root; load_conf; install_deps
+  [ -n "$PANEL_IP" ] && valid_ip "$PANEL_IP" || die "PANEL_IP не задан/некорректен. Сначала: protection-manager.sh panel-set <IP>."
   local raw san good=0
   raw=$(mktemp); san=$(mktemp)
   if curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 "$TSPU_URL" -o "$raw"; then
@@ -186,6 +196,8 @@ remove_jump_all(){
 
 apply_rules(){
   need_root; load_conf; install_deps
+  [ -n "$PANEL_IP" ] && valid_ip "$PANEL_IP" || die "PANEL_IP не задан/некорректен: отказываюсь менять firewall, чтобы не отрезать панель."
+  valid_ports "$FILTER_PORTS" || die "FILTER_PORTS некорректен (1..65535, максимум 15 портов для multiport)."
   ensure_set "$SET_TSPU"; ensure_set "$SET_GOV"; ensure_set "$SET_ALLOW" 65536; ensure_set "$SET_DENY" 65536; ensure_set "$SET_COUNTRY" 3000000
   [ -s "$DATA/tspu.txt" ] && atomic_load_set "$SET_TSPU" "$DATA/tspu.txt" || true
   [ -s "$DATA/gov.txt" ] && atomic_load_set "$SET_GOV" "$DATA/gov.txt" || true
@@ -194,33 +206,29 @@ apply_rules(){
   if [ "$ENABLE_GEOIP" = 1 ]; then build_geo_country_file || true; [ -s "$DATA/countries.txt" ] && atomic_load_set "$SET_COUNTRY" "$DATA/countries.txt" 3000000 || true; fi
 
   $SUDO iptables -N "$CHAIN" >/dev/null 2>&1 || true; $SUDO iptables -F "$CHAIN"
-  # Node API: first allow panel, then deny everyone else. Never guess PANEL_IP.
-  if [ -n "$PANEL_IP" ] && valid_ip "$PANEL_IP" && [ "$(ip_version "$PANEL_IP")" = 4 ]; then
-    $SUDO iptables -A "$CHAIN" -p tcp -s "$PANEL_IP" --dport 2222 -j ACCEPT
-  fi
+  if [ "$(ip_version "$PANEL_IP")" = 4 ]; then $SUDO iptables -A "$CHAIN" -p tcp -s "$PANEL_IP" --dport 2222 -j ACCEPT; fi
   $SUDO iptables -A "$CHAIN" -p tcp --dport 2222 -j DROP
   $SUDO iptables -A "$CHAIN" -m set --match-set "$SET_ALLOW" src -j ACCEPT
   $SUDO iptables -A "$CHAIN" -m set --match-set "$SET_DENY" src -j DROP
   local ports=${FILTER_PORTS// /}
-  if [ "$ENABLE_TSPU" = 1 ] && [ -n "$ports" ]; then $SUDO iptables -A "$CHAIN" -p tcp -m multiport --dports "$ports" -m set --match-set "$SET_TSPU" src -j DROP; fi
-  if [ "$ENABLE_GOV" = 1 ] && [ -n "$ports" ]; then $SUDO iptables -A "$CHAIN" -p tcp -m multiport --dports "$ports" -m set --match-set "$SET_GOV" src -j DROP; fi
-  if [ "$ENABLE_GEOIP" = 1 ] && [ -s "$DATA/countries.txt" ] && [ -n "$ports" ]; then
+  if [ "$ENABLE_TSPU" = 1 ]; then $SUDO iptables -A "$CHAIN" -p tcp -m multiport --dports "$ports" -m set --match-set "$SET_TSPU" src -j DROP; fi
+  if [ "$ENABLE_GOV" = 1 ]; then $SUDO iptables -A "$CHAIN" -p tcp -m multiport --dports "$ports" -m set --match-set "$SET_GOV" src -j DROP; fi
+  if [ "$ENABLE_GEOIP" = 1 ] && [ -s "$DATA/countries.txt" ]; then
     $SUDO iptables -A "$CHAIN" -p tcp -m multiport --dports "$ports" -m set --match-set "$SET_COUNTRY" src -j ACCEPT
     $SUDO iptables -A "$CHAIN" -p tcp -m multiport --dports "$ports" -j DROP
   fi
   $SUDO iptables -A "$CHAIN" -j RETURN
 
-  # IPv6: 2222 is closed to the Internet unless PANEL_IP itself is IPv6.
   if command -v ip6tables >/dev/null 2>&1; then
     $SUDO ip6tables -N "$CHAIN6" >/dev/null 2>&1 || true; $SUDO ip6tables -F "$CHAIN6"
-    if [ -n "$PANEL_IP" ] && valid_ip "$PANEL_IP" && [ "$(ip_version "$PANEL_IP")" = 6 ]; then $SUDO ip6tables -A "$CHAIN6" -p tcp -s "$PANEL_IP" --dport 2222 -j ACCEPT; fi
+    if [ "$(ip_version "$PANEL_IP")" = 6 ]; then $SUDO ip6tables -A "$CHAIN6" -p tcp -s "$PANEL_IP" --dport 2222 -j ACCEPT; fi
     $SUDO ip6tables -A "$CHAIN6" -p tcp --dport 2222 -j DROP
     $SUDO ip6tables -A "$CHAIN6" -j RETURN
   fi
   remove_jump_all
   $SUDO iptables -I INPUT 1 -j "$CHAIN"
   command -v ip6tables >/dev/null 2>&1 && $SUDO ip6tables -I INPUT 1 -j "$CHAIN6" || true
-  log "rules applied panel=${PANEL_IP:-unset} ports=$FILTER_PORTS geo=$ENABLE_GEOIP"
+  log "rules applied panel=$PANEL_IP ports=$FILTER_PORTS geo=$ENABLE_GEOIP"
 }
 
 set_panel_ip(){
@@ -236,13 +244,13 @@ set_panel_ip(){
 ensure_panel_ip(){
   load_conf
   if [ -n "${PANEL_IP_ENV:-}" ]; then set_panel_ip "$PANEL_IP_ENV"; return; fi
-  if [ -n "$PANEL_IP" ]; then apply_rules; return; fi
+  if [ -n "$PANEL_IP" ] && valid_ip "$PANEL_IP"; then apply_rules; return; fi
   if [ -n "${PANEL_IP_OVERRIDE:-}" ]; then set_panel_ip "$PANEL_IP_OVERRIDE"; return; fi
   if [ -t 0 ] || [ "$TTY" = /dev/tty ]; then
     warn "Порт 2222 нельзя оставлять открытым всем. Укажи IP сервера панели."
     set_panel_ip
   else
-    warn "PANEL_IP не задан: защиту 2222 не применяю автоматически, чтобы не отрезать панель. Передай PANEL_IP_ENV=x.x.x.x."
+    warn "PANEL_IP не задан: firewall не меняю, чтобы не отрезать панель. Передай PANEL_IP_ENV=x.x.x.x."
     return 1
   fi
 }
@@ -250,8 +258,9 @@ ensure_panel_ip(){
 check_node_api(){
   load_conf
   printf 'Panel IP     : %s\n' "${PANEL_IP:-НЕ ЗАДАН}"
-  if $SUDO iptables -C INPUT -j "$CHAIN" >/dev/null 2>&1 && $SUDO iptables -C "$CHAIN" -p tcp --dport 2222 -j DROP >/dev/null 2>&1; then
-    printf 'TCP/2222    : protected (default DROP)\n'
+  if [ -n "$PANEL_IP" ] && valid_ip "$PANEL_IP" && $SUDO iptables -C INPUT -j "$CHAIN" >/dev/null 2>&1 && $SUDO iptables -C "$CHAIN" -p tcp --dport 2222 -j DROP >/dev/null 2>&1; then
+    if [ "$(ip_version "$PANEL_IP")" = 4 ] && ! $SUDO iptables -C "$CHAIN" -p tcp -s "$PANEL_IP" --dport 2222 -j ACCEPT >/dev/null 2>&1; then printf 'TCP/2222    : BROKEN (panel allow missing)\n'; return 1; fi
+    printf 'TCP/2222    : protected (panel allow + default DROP)\n'
   else
     printf 'TCP/2222    : UNPROTECTED\n'
     return 1
@@ -271,8 +280,8 @@ write_units(){
   $SUDO tee "$SERVICE" >/dev/null <<EOF
 [Unit]
 Description=Remna Node protection rules
-After=network-pre.target docker.service
-Before=network-online.target
+After=network-pre.target
+Before=docker.service
 
 [Service]
 Type=oneshot
@@ -311,9 +320,10 @@ EOF
 }
 
 install_all(){
-  need_root; write_defaults; install_deps; write_units
+  need_root; write_defaults; install_deps
   ensure_panel_ip
-  update_blocklists || { warn "Списки не обновились; правила 2222 всё равно применены."; apply_rules; }
+  write_units
+  update_blocklists || { warn "Списки не обновились; применяю сохранённые правила."; apply_rules; }
   ok "Защита установлена."
 }
 
@@ -373,7 +383,7 @@ EOF
       8) printf 'IP/CIDR: '; read -r v < "$TTY"; remove_ip_file deny.txt "$v" ;;
       9) printf 'Коды стран через запятую (например FI,DE): '; read -r v < "$TTY"; set_conf GEO_COUNTRIES "$v"; set_conf ENABLE_GEOIP 1; apply_rules ;;
       10) set_conf ENABLE_GEOIP 0; apply_rules ;;
-      11) printf 'TCP-порты через запятую: '; read -r v < "$TTY"; set_conf FILTER_PORTS "$v"; apply_rules ;;
+      11) printf 'TCP-порты через запятую (до 15): '; read -r v < "$TTY"; valid_ports "$v" || { warn "Некорректный список портов."; continue; }; set_conf FILTER_PORTS "$v"; apply_rules ;;
       12) printf 'Удалить правила? Введите YES: '; read -r v < "$TTY"; [ "$v" = YES ] && uninstall ;;
       0|'') return ;;
       *) warn "Неизвестный пункт" ;;
