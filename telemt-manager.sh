@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-PANEL_INSTALL_URL="https://raw.githubusercontent.com/amirotin/telemt_panel/main/install.sh"
-TELEMT_INSTALL_URL="https://raw.githubusercontent.com/telemt/telemt/main/install.sh"
+TELEMT_VERSION=3.5.5
+TELEMT_INSTALL_COMMIT=ac71d92ec41dea00a7eafd6b8d350c3486633500
+TELEMT_INSTALL_BLOB_SHA=955c73d4af5c040d174eb8cd4e7d1e22b70f0759
+TELEMT_INSTALL_URL="https://raw.githubusercontent.com/telemt/telemt/${TELEMT_INSTALL_COMMIT}/install.sh"
+PANEL_VERSION=v0.6.2
+PANEL_INSTALL_COMMIT=7a02d77619f2e9df624fa9e05a606fd6b0e16943
+PANEL_INSTALL_BLOB_SHA=6068fe4bd248c4ae4ff846b11a5ae0bd95a28dca
+PANEL_INSTALL_URL="https://raw.githubusercontent.com/amirotin/telemt_panel/${PANEL_INSTALL_COMMIT}/install.sh"
 PANEL_CONFIG=/etc/telemt-panel/config.toml
 PANEL_PORT=18443
 PANEL_PATH=/telemt
@@ -15,6 +21,22 @@ if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
 TTY=/dev/tty; { [ -r "$TTY" ] && [ -w "$TTY" ]; } || TTY=/dev/stdin
 say(){ printf '%s\n' "$*"; }; ok(){ printf '✓ %s\n' "$*"; }; warn(){ printf '! %s\n' "$*" >&2; }; die(){ printf '✗ %s\n' "$*" >&2; exit 1; }
 
+git_blob_sha(){
+  local file="$1" size
+  command -v sha1sum >/dev/null 2>&1 || return 1
+  size="$(wc -c <"$file" | tr -d '[:space:]')"
+  { printf 'blob %s\000' "$size"; cat "$file"; } | sha1sum | awk '{print $1}'
+}
+download_git_blob_checked(){
+  local url="$1" expected="$2" dst="$3" actual
+  rm -f "$dst"
+  curl -fsSL --connect-timeout 10 --max-time 60 --retry 2 "$url" -o "$dst" || { rm -f "$dst"; return 1; }
+  actual="$(git_blob_sha "$dst")" || { rm -f "$dst"; return 1; }
+  [ "$actual" = "$expected" ] || { warn "Integrity check failed: git blob $actual != $expected ($url)"; rm -f "$dst"; return 1; }
+  sh -n "$dst" || { rm -f "$dst"; return 1; }
+  chmod 0700 "$dst"
+}
+
 panel_domain(){ local d="${DOMAIN:-}"; if [ -z "$d" ] && [ -f /etc/caddy/Caddyfile ]; then d="$(awk '/^[A-Za-z0-9.-]+[[:space:]]*\{/{gsub(/[[:space:]]*\{.*/,"",$0); print $1; exit}' /etc/caddy/Caddyfile 2>/dev/null || true)"; fi; printf '%s' "$d"; }
 list_telemt_units(){ systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '$1 ~ /^telemt[0-9]*\.service$/ {print $1}' | sort -V; }
 choose_existing_telemt(){
@@ -23,7 +45,19 @@ choose_existing_telemt(){
   printf '||\n'
 }
 save_state(){ $SUDO install -d -o root -g root -m 0700 "$STATE_DIR"; printf 'MANAGED_TELEMT=%s\nMANAGED_PANEL=%s\nTELEMT_UNIT=%s\nTELEMT_API_PORT=%s\nTELEMT_CONFIG=%s\n' "$1" "$2" "$3" "$4" "$5" | $SUDO tee "$TELEMT_STATE" >/dev/null; $SUDO chmod 600 "$TELEMT_STATE"; }
-load_state(){ MANAGED_TELEMT=0; MANAGED_PANEL=0; TELEMT_UNIT=""; TELEMT_API_PORT=""; TELEMT_CONFIG=""; [ -s "$TELEMT_STATE" ] && . "$TELEMT_STATE"; }
+load_state(){
+  MANAGED_TELEMT=0; MANAGED_PANEL=0; TELEMT_UNIT=""; TELEMT_API_PORT=""; TELEMT_CONFIG=""
+  [ -s "$TELEMT_STATE" ] || return 0
+  local key value
+  while IFS='=' read -r key value; do
+    case "$key" in
+      MANAGED_TELEMT|MANAGED_PANEL|TELEMT_UNIT|TELEMT_API_PORT|TELEMT_CONFIG) printf -v "$key" '%s' "$value" ;;
+    esac
+  done < "$TELEMT_STATE"
+  [[ "$MANAGED_TELEMT" =~ ^[01]$ ]] || MANAGED_TELEMT=0
+  [[ "$MANAGED_PANEL" =~ ^[01]$ ]] || MANAGED_PANEL=0
+  [[ "$TELEMT_API_PORT" =~ ^[0-9]*$ ]] || TELEMT_API_PORT=""
+}
 
 render_caddy_with_panel(){
   awk -v begin="$CADDY_MARK_BEGIN" -v end="$CADDY_MARK_END" '
@@ -96,10 +130,16 @@ telemt_install(){
     printf 'Внешний порт Telemt [5222]: '; read -r port <"$TTY" || true; port="${port:-5222}"; [ "$port" != 443 ] || die "443 зарезервирован для REALITY/Caddy"
     printf 'Fake-TLS домен [www.apple.com]: '; read -r tlsdomain <"$TTY" || true; tlsdomain="${tlsdomain:-www.apple.com}"
     ss -ltn 2>/dev/null | grep -Eq ":${port}[[:space:]]" && die "TCP/$port уже занят"
-    tmp="$(mktemp)"; curl -fsSL "$TELEMT_INSTALL_URL" -o "$tmp"; $SUDO sh "$tmp" -l ru -d "$tlsdomain" -p "$port"; rm -f "$tmp"; open_port "$port"
+    tmp="$(mktemp)"; download_git_blob_checked "$TELEMT_INSTALL_URL" "$TELEMT_INSTALL_BLOB_SHA" "$tmp" || die "Telemt installer integrity check failed"
+    $SUDO env VERSION="$TELEMT_VERSION" sh "$tmp" -l ru -d "$tlsdomain" -p "$port"; rm -f "$tmp"; open_port "$port"
     unit=telemt.service; api=9091; config=/etc/telemt/telemt.toml; managed_telemt=1
   fi
-  if systemctl cat telemt-panel.service >/dev/null 2>&1 && [ -f "$PANEL_CONFIG" ]; then ok "Существующая Telemt Panel найдена — не переустанавливаю."; else tmp="$(mktemp)"; curl -fsSL "$PANEL_INSTALL_URL" -o "$tmp"; $SUDO bash "$tmp"; rm -f "$tmp"; managed_panel=1; fi
+  if systemctl cat telemt-panel.service >/dev/null 2>&1 && [ -f "$PANEL_CONFIG" ]; then
+    ok "Существующая Telemt Panel найдена — не переустанавливаю."
+  else
+    tmp="$(mktemp)"; download_git_blob_checked "$PANEL_INSTALL_URL" "$PANEL_INSTALL_BLOB_SHA" "$tmp" || die "Telemt Panel installer integrity check failed"
+    $SUDO sh "$tmp" install "$PANEL_VERSION"; rm -f "$tmp"; managed_panel=1
+  fi
   configure_panel_file "${unit%.service}" "$api" "$config"; ensure_panel_caddy; install_redirect_service; open_port "$PANEL_PORT"; save_state "$managed_telemt" "$managed_panel" "$unit" "$api" "$config"
   pdomain="$(panel_domain)"; ok "Telemt-интеграция готова."; [ -z "$pdomain" ] || say "Panel HTTPS: https://${pdomain}:${PANEL_PORT}${PANEL_PATH}/login"
 }
