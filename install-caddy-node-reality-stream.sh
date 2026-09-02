@@ -101,14 +101,27 @@ container_has_net_admin(){
   $SUDO docker inspect remnanode --format '{{json .HostConfig.CapAdd}}' 2>/dev/null | grep -q 'NET_ADMIN'
 }
 
-container_has_secret(){
-  $SUDO docker exec remnanode sh -c '[ -n "$SECRET_KEY" ]' >/dev/null 2>&1
+container_secret_matches(){
+  local expected actual
+  [ -f "$NODE_ENV" ] || return 1
+  expected="$(awk -F= '/^SECRET_KEY=/{print substr($0,index($0,"=")+1); exit}' "$NODE_ENV" 2>/dev/null)"
+  [ -n "$expected" ] || return 1
+  actual="$($SUDO docker exec remnanode sh -c 'printf %s "$SECRET_KEY"' 2>/dev/null)" || return 1
+  [ "$actual" = "$expected" ]
+  unset expected actual
 }
 
 ensure_node_compose(){
   local compose="$NODE_COMPOSE" envfile="$NODE_ENV"
-  local tmp tmpenv inline secret envlen need_recreate=0 backup_done=0
+  local tmp tmpenv inline secret envlen need_recreate=0 backup_done=0 services service_count
   [ -f "$compose" ] || return 0
+
+  services="$(cd "$NODE_DIR" && $SUDO docker compose config --services 2>/dev/null)" || { warn "Не удалось разобрать compose; изменения не применяю."; return 1; }
+  service_count="$(printf '%s\n' "$services" | sed '/^[[:space:]]*$/d' | wc -l)"
+  if [ "$service_count" -ne 1 ] || ! printf '%s\n' "$services" | grep -qx remnanode; then
+    warn "Compose содержит дополнительные сервисы. Автоматическую AWK-миграцию отключаю, чтобы не изменить чужие SECRET_KEY/env_file/cap_add."
+    return 1
+  fi
 
   inline="$(awk '
     /^[[:space:]]*SECRET_KEY:[[:space:]]*/ {
@@ -189,7 +202,7 @@ ensure_node_compose(){
 
   if $SUDO docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx remnanode; then
     container_has_net_admin || need_recreate=1
-    container_has_secret || need_recreate=1
+    container_secret_matches || need_recreate=1
   fi
 
   if [ "$need_recreate" = 1 ]; then
@@ -198,7 +211,7 @@ ensure_node_compose(){
   fi
 
   container_has_net_admin || die "NET_ADMIN не применился к remnanode."
-  container_has_secret || die "SECRET_KEY не попал внутрь remnanode. Проверь $NODE_ENV и env_file в compose."
+  container_secret_matches || die "SECRET_KEY внутри remnanode не совпадает с $NODE_ENV. Проверь env_file и пересоздание контейнера."
 }
 
 ensure_net_admin(){ ensure_node_compose; }
