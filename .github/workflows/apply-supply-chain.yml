@@ -1,0 +1,42 @@
+name: Apply supply chain patch
+
+on:
+  push:
+    branches: [supply-chain-v2.1]
+    paths:
+      - tools/apply_supply_chain.py
+      - .github/workflows/apply-supply-chain.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: supply-chain-v2.1
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 tools/apply_supply_chain.py
+      - name: Syntax check
+        run: |
+          bash -n install-caddy-node-reality-stream.sh
+          bash -n install-caddy-node-reality-stream-core.sh
+          bash -n protection-manager.sh
+          bash -n telemt-manager.sh
+      - name: ShellCheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck -S error install-caddy-node-reality-stream.sh install-caddy-node-reality-stream-core.sh protection-manager.sh telemt-manager.sh
+      - name: Commit changes
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add install-caddy-node-reality-stream-core.sh telemt-manager.sh
+          git commit -m 'fix: pin external installers and runtime versions'
+          git push origin HEAD:supply-chain-v2.1
