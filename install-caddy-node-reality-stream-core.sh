@@ -73,6 +73,10 @@ WEBROOT=/var/www/mstream
 STREAM_SITE_URL="${STREAM_SITE_URL:-https://rustream.remna.space}"
 STREAM_SITE_ARCHIVE="${STREAM_SITE_ARCHIVE:-}"
 STREAM_HEALTH_UPSTREAM="${STREAM_HEALTH_UPSTREAM:-https://stream.deepbeat.ru:8443/health}"
+REMNA_NODE_IMAGE="${REMNA_NODE_IMAGE:-remnawave/node:3.4.1}"
+DOCKER_INSTALL_COMMIT=42dcae692436f34526524ed46d3b32885c9355f5
+DOCKER_INSTALL_BLOB_SHA=c67c0e799b42c0435949a3f83785749480d5f14d
+DOCKER_INSTALL_URL="https://raw.githubusercontent.com/docker/docker-install/${DOCKER_INSTALL_COMMIT}/install.sh"
 
 # ── Цвета (гасим при не-TTY: pipe/CI) ────────────────────────────────────────
 if [ -t 1 ]; then
@@ -121,6 +125,27 @@ persist_self() {
   $SUDO install -d -o root -g root -m 0755 "$SCRIPT_INSTALL_DIR"
   $SUDO install -o root -g root -m 0700 "$current" "$SCRIPT_INSTALL_PATH"
   ok "Скрипт сохранён → $SCRIPT_INSTALL_PATH"
+}
+
+git_blob_sha() {
+  local file="$1" size
+  command -v sha1sum >/dev/null 2>&1 || return 1
+  size="$(wc -c <"$file" | tr -d '[:space:]')"
+  { printf 'blob %s\000' "$size"; cat "$file"; } | sha1sum | awk '{print $1}'
+}
+
+download_git_blob_checked() {
+  local url="$1" expected="$2" dst="$3" actual
+  rm -f "$dst"
+  curl -fsSL --connect-timeout 10 --max-time 60 --retry 2 "$url" -o "$dst" || { rm -f "$dst"; return 1; }
+  actual="$(git_blob_sha "$dst")" || { rm -f "$dst"; return 1; }
+  if [ "$actual" != "$expected" ]; then
+    warn "Integrity check failed for $url (git blob $actual != $expected)"
+    rm -f "$dst"
+    return 1
+  fi
+  sh -n "$dst" || { rm -f "$dst"; return 1; }
+  chmod 0700 "$dst"
 }
 
 install_prerequisites() {
@@ -239,10 +264,11 @@ install_node() {
     $SUDO apt-get install -y curl ca-certificates
   fi
   if ! command -v docker >/dev/null 2>&1; then
-    log "Ставлю Docker..."
-    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+    log "Ставлю Docker из зафиксированного официального installer commit..."
+    download_git_blob_checked "$DOCKER_INSTALL_URL" "$DOCKER_INSTALL_BLOB_SHA" /tmp/get-docker.sh \
+      || die "Не удалось скачать/проверить Docker installer."
     $SUDO sh /tmp/get-docker.sh
-    rm -f /tmp/get-docker.sh
+    $SUDO rm -f /tmp/get-docker.sh
   fi
   command -v docker >/dev/null 2>&1 || die "Docker не установлен."
   $SUDO docker compose version >/dev/null 2>&1 || die "Docker Compose plugin не найден."
@@ -253,7 +279,7 @@ services:
   remnanode:
     container_name: remnanode
     hostname: remnanode
-    image: remnawave/node:latest
+    image: ${REMNA_NODE_IMAGE}
     network_mode: host
     restart: always
     environment:
