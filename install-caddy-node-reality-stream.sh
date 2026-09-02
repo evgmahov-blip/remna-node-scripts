@@ -16,6 +16,8 @@ CADDY_REALITY=/etc/caddy/Caddyfile.reality
 PANEL_CONFIG=/etc/telemt-panel/config.toml
 HANDOFF_SERVICE=/etc/systemd/system/remna-reality-handoff.service
 HANDOFF_TIMER=/etc/systemd/system/remna-reality-handoff.timer
+HANDOFF_COOLDOWN=/run/remna-reality-handoff.cooldown
+HANDOFF_COOLDOWN_SECONDS=${HANDOFF_COOLDOWN_SECONDS:-300}
 STREAM_SOURCES=(
   "https://rustream.remna.space"
   "https://est.remna.2rdp.ru"
@@ -73,7 +75,7 @@ choose_stream_source(){
   [ -n "${STREAM_SITE_URL:-}" ] && { printf '%s\n' "$STREAM_SITE_URL"; return 0; }
   tmp="$(mktemp)"
   for src in "${STREAM_SOURCES[@]}"; do
-    if curl -kfsSL --connect-timeout 5 --max-time 15 --range 0-131071 "$src/" -o "$tmp" 2>/dev/null && grep -Eqi '<html|<!doctype|<head|<body' "$tmp"; then
+    if curl -fsSL --connect-timeout 5 --max-time 15 --range 0-131071 "$src/" -o "$tmp" 2>/dev/null && grep -Eqi '<html|<!doctype|<head|<body' "$tmp"; then
       rm -f "$tmp"
       printf '%s\n' "$src"
       return 0
@@ -99,14 +101,27 @@ container_has_net_admin(){
   $SUDO docker inspect remnanode --format '{{json .HostConfig.CapAdd}}' 2>/dev/null | grep -q 'NET_ADMIN'
 }
 
-container_has_secret(){
-  $SUDO docker exec remnanode sh -c '[ -n "$SECRET_KEY" ]' >/dev/null 2>&1
+container_secret_matches(){
+  local expected actual
+  [ -f "$NODE_ENV" ] || return 1
+  expected="$(awk -F= '/^SECRET_KEY=/{print substr($0,index($0,"=")+1); exit}' "$NODE_ENV" 2>/dev/null)"
+  [ -n "$expected" ] || return 1
+  actual="$($SUDO docker exec remnanode sh -c 'printf %s "$SECRET_KEY"' 2>/dev/null)" || return 1
+  [ "$actual" = "$expected" ]
+  unset expected actual
 }
 
 ensure_node_compose(){
   local compose="$NODE_COMPOSE" envfile="$NODE_ENV"
-  local tmp tmpenv inline secret envlen need_recreate=0 backup_done=0
+  local tmp tmpenv inline secret envlen need_recreate=0 backup_done=0 services service_count
   [ -f "$compose" ] || return 0
+
+  services="$(cd "$NODE_DIR" && $SUDO docker compose config --services 2>/dev/null)" || { warn "Не удалось разобрать compose; изменения не применяю."; return 1; }
+  service_count="$(printf '%s\n' "$services" | sed '/^[[:space:]]*$/d' | wc -l)"
+  if [ "$service_count" -ne 1 ] || ! printf '%s\n' "$services" | grep -qx remnanode; then
+    warn "Compose содержит дополнительные сервисы. Автоматическую AWK-миграцию отключаю, чтобы не изменить чужие SECRET_KEY/env_file/cap_add."
+    return 1
+  fi
 
   inline="$(awk '
     /^[[:space:]]*SECRET_KEY:[[:space:]]*/ {
@@ -187,7 +202,7 @@ ensure_node_compose(){
 
   if $SUDO docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx remnanode; then
     container_has_net_admin || need_recreate=1
-    container_has_secret || need_recreate=1
+    container_secret_matches || need_recreate=1
   fi
 
   if [ "$need_recreate" = 1 ]; then
@@ -196,7 +211,7 @@ ensure_node_compose(){
   fi
 
   container_has_net_admin || die "NET_ADMIN не применился к remnanode."
-  container_has_secret || die "SECRET_KEY не попал внутрь remnanode. Проверь $NODE_ENV и env_file в compose."
+  container_secret_matches || die "SECRET_KEY внутри remnanode не совпадает с $NODE_ENV. Проверь env_file и пересоздание контейнера."
 }
 
 ensure_net_admin(){ ensure_node_compose; }
@@ -208,9 +223,25 @@ xhttp_on_7443(){ ss -lntp 2>/dev/null | grep -E '127\.0\.0\.1:7443[[:space:]]' |
 
 node_has_443_conflict(){
   command -v docker >/dev/null 2>&1 || return 1
-  $SUDO docker logs --since 3m remnanode 2>&1 | tr -d '\000' | \
+  $SUDO docker logs --since 20s remnanode 2>&1 | tr -d '\000' | \
     grep -aEq 'failed to listen TCP on 443.*address already in use|listen tcp 0\.0\.0\.0:443: bind: address already in use|Xray Core process is not running anymore.*exitcode 255'
 }
+
+handoff_in_cooldown(){
+  local until now
+  [ -r "$HANDOFF_COOLDOWN" ] || return 1
+  read -r until < "$HANDOFF_COOLDOWN" || return 1
+  [[ "$until" =~ ^[0-9]+$ ]] || return 1
+  now="$(date +%s)"
+  [ "$now" -lt "$until" ]
+}
+
+set_handoff_cooldown(){
+  local until=$(( $(date +%s) + HANDOFF_COOLDOWN_SECONDS ))
+  printf '%s\n' "$until" | $SUDO tee "$HANDOFF_COOLDOWN" >/dev/null
+}
+
+clear_handoff_cooldown(){ $SUDO rm -f "$HANDOFF_COOLDOWN" 2>/dev/null || true; }
 
 switch_caddy_to_reality(){
   [ -s "$CADDY_REALITY" ] || return 1
@@ -244,6 +275,7 @@ auto_handoff_once(){
   [ -s "$CADDY_REALITY" ] || return 0
 
   if rw_core_on_443; then
+    clear_handoff_cooldown
     if ! caddy_local_8443; then
       switch_caddy_to_reality || { warn "rw-core уже на :443, но Caddy не удалось перевести на 8443."; return 1; }
     fi
@@ -251,10 +283,15 @@ auto_handoff_once(){
   fi
 
   if caddy_public_443 && node_has_443_conflict; then
+    if handoff_in_cooldown; then
+      warn "Handoff недавно завершился rollback; повтор пропущен до окончания cooldown."
+      return 0
+    fi
     warn "Xray получил профиль, но :443 занят Caddy — выполняю автоматический handoff Caddy → 127.0.0.1:8443."
     switch_caddy_to_reality || { warn "Не удалось переключить Caddy на REALITY-конфиг."; return 1; }
     for ((i=1; i<=wait; i++)); do
       if rw_core_on_443; then
+        clear_handoff_cooldown
         ok "REALITY поднялся автоматически: rw-core :443, Caddy 127.0.0.1:8443."
         return 0
       fi
@@ -262,6 +299,8 @@ auto_handoff_once(){
     done
     warn "После handoff rw-core не занял :443 за ${wait} сек — возвращаю публичный Caddy."
     switch_caddy_to_public || true
+    set_handoff_cooldown
+    warn "Повторный handoff заблокирован на ${HANDOFF_COOLDOWN_SECONDS} сек, чтобы исключить flap по старой записи лога."
     return 1
   fi
   return 0
@@ -356,10 +395,8 @@ safe_diagnose(){
   echo '  Remna Node — безопасная диагностика'
   echo '────────────────────────────────────────────────────────────'
 
-  ensure_node_compose >/dev/null 2>&1 || true
-  install_handoff_watcher >/dev/null 2>&1 || true
-  auto_handoff_once || true
-  ensure_telemt_route || true
+  # Diagnose is intentionally read-only: it must never rewrite compose/Caddy,
+  # recreate containers, install watchers or perform a REALITY handoff.
 
   local xs cfgcount caps webcode=none xhttp=no nodeapi=no caddy_state domain secret_storage envlen conflict=no
   xs="$(xray_status 2>/dev/null)"
@@ -398,7 +435,7 @@ safe_diagnose(){
   printf '  Runtime cfg : %s файл(ов)\n' "${cfgcount:-?}"
   if [ "$conflict" = yes ]; then
     echo '  ДИАГНОЗ     : профиль уже пришёл, но Xray упал из-за занятого :443.'
-    echo '                Менеджер попытался автоматически передать :443 от Caddy к rw-core.'
+    echo '                Для исправления запусти selftest/repair: они могут безопасно выполнить handoff.'
   elif printf '%s' "$xs" | grep -q 'down (not started yet)' && [ "${cfgcount:-?}" = 0 ]; then
     echo '  ДИАГНОЗ     : Node API поднят, но runtime-конфиг Xray ещё не получен.'
     [ "$nodeapi" = yes ] && echo '                :2222 слушает — отсутствие 7443 само по себе НЕ означает локальный firewall.'
@@ -498,7 +535,7 @@ run_core(){
   local cmd="${1:-menu}" wait_needed=0
   ensure_core
   case "$cmd" in install|--auto|auto|front-only|front|reinstall|stream|site|decoy|set-decoy) prepare_stream_source ;; esac
-  bash <(cat "$CORE") "$@"
+  bash "$CORE" "$@"
   case "$cmd" in
     install|--auto|auto|reinstall|repair|fix)
       ensure_node_compose

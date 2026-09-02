@@ -80,18 +80,29 @@ EOF
 
 load_conf(){
   write_defaults
-  # shellcheck disable=SC1090
-  . "$CONF"
-  PANEL_IP=${PANEL_IP:-}
-  ENABLE_TSPU=${ENABLE_TSPU:-1}
-  ENABLE_GOV=${ENABLE_GOV:-1}
-  ENABLE_GEOIP=${ENABLE_GEOIP:-0}
-  FILTER_PORTS=${FILTER_PORTS:-443,18443,5222,5223,8530}
-  GEO_COUNTRIES=${GEO_COUNTRIES:-}
+  PANEL_IP=
+  ENABLE_TSPU=1
+  ENABLE_GOV=1
+  ENABLE_GEOIP=0
+  FILTER_PORTS=443,18443,5222,5223,8530
+  GEO_COUNTRIES=
+  local key value
+  while IFS='=' read -r key value; do
+    case "$key" in
+      PANEL_IP|ENABLE_TSPU|ENABLE_GOV|ENABLE_GEOIP|FILTER_PORTS|GEO_COUNTRIES) printf -v "$key" '%s' "$value" ;;
+    esac
+  done < "$CONF"
 }
 
 set_conf(){
   local key=$1 value=$2 tmp
+  case "$key" in
+    PANEL_IP) [ -z "$value" ] || valid_ip "$value" || die "Некорректный PANEL_IP" ;;
+    ENABLE_TSPU|ENABLE_GOV|ENABLE_GEOIP) [[ "$value" =~ ^[01]$ ]] || die "Для $key допустимы только 0 или 1" ;;
+    FILTER_PORTS) valid_ports "$value" || die "Некорректный список портов" ;;
+    GEO_COUNTRIES) [[ "$value" =~ ^([A-Za-z]{2})(,[A-Za-z]{2})*$|^$ ]] || die "GEO_COUNTRIES: ожидается список ISO-кодов, например FI,DE,NL" ;;
+    *) die "Запрещён неизвестный ключ конфигурации: $key" ;;
+  esac
   tmp=$(mktemp)
   awk -F= -v k="$key" -v v="$value" 'BEGIN{done=0} $1==k{print k"="v;done=1;next}{print} END{if(!done)print k"="v}' "$CONF" > "$tmp"
   $SUDO install -o root -g root -m 0600 "$tmp" "$CONF"
@@ -124,7 +135,10 @@ for raw in open(src,encoding='utf-8',errors='ignore'):
     for v in vals:
         try:
             n=ipaddress.ip_network(v,strict=False)
-            if n.version==4: out.add(str(n))
+            # Refuse extremely broad networks from third-party blocklists.
+            # A poisoned feed containing 0.0.0.0/0 (or similar) must never
+            # be able to black-hole practically the entire Internet.
+            if n.version==4 and n.prefixlen >= 8: out.add(str(n))
         except Exception: pass
 with open(dst,'w',encoding='utf-8') as f:
     for x in sorted(out,key=lambda x:(int(ipaddress.ip_network(x).network_address),ipaddress.ip_network(x).prefixlen)): f.write(x+'\n')
