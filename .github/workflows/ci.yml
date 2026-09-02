@@ -25,3 +25,8 @@ jobs:
       - name: shellcheck errors
         run: |
           shellcheck -S error *.sh
+      - name: supply-chain guard
+        run: |
+          set -e
+          ! grep -nE 'image:[[:space:]]*remnawave/node:latest|https://get\.docker\.com|telemt/telemt/main/install\.sh|amirotin/telemt_panel/main/install\.sh' install-caddy-node-reality-stream-core.sh telemt-manager.sh
+          ! grep -nE '^REPO_RAW=.*remna-node-scripts/main' install-caddy-node-reality-stream.sh
