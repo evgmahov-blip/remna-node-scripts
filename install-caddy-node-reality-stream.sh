@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-REPO_REF=32bdefa2872aef9c59fd3af99ea106773a7e2530
+REPO_REF=7e0568c1a45b5696a32df40628ff6cb7e9f9780e
 REPO_RAW="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${REPO_REF}"
-CORE_BLOB_SHA=a9074d627869935311669cf23f417d913b84a4e6
-TELEMT_BLOB_SHA=51604bcdd1435f2870b3428ed81b46c8389fdb8c
+CORE_BLOB_SHA=cb9e3af522a2e4e2da1c0c11431d68f33f22da30
+TELEMT_BLOB_SHA=1bd587cd9732d7dd100a29719328c16f38956d12
 PROTECTION_BLOB_SHA=9185f9723d959250a5ee766b0ff71e0a977a1982
+CADDY_GUARD_BLOB_SHA=74851e48f908d398e6ef7b0e90308c220afe5c52
 REMNA_NODE_IMAGE="${REMNA_NODE_IMAGE:-remnawave/node:3.4.1}"
 INSTALL_DIR=/opt/remna-node-scripts
 SELF="$INSTALL_DIR/install-caddy-node-reality-stream.sh"
 CORE="$INSTALL_DIR/install-caddy-node-reality-stream-core.sh"
 TELEMT_HELPER="$INSTALL_DIR/telemt-manager.sh"
 PROTECTION_HELPER="$INSTALL_DIR/protection-manager.sh"
+CADDY_GUARD="$INSTALL_DIR/caddy-resilient-start.sh"
 NODE_DIR=/opt/remnanode
 NODE_COMPOSE="$NODE_DIR/docker-compose.yml"
 NODE_ENV="$NODE_DIR/.env"
@@ -91,6 +93,19 @@ ensure_protection_helper(){
   if download_checked "$REPO_RAW/protection-manager.sh" "$PROTECTION_BLOB_SHA" "$PROTECTION_HELPER"; then return 0; fi
   verified_script "$PROTECTION_HELPER" "$PROTECTION_BLOB_SHA" && { warn "GitHub недоступен — использую локальный protection helper с ожидаемым blob SHA."; return 0; }
   die "Не удалось получить protection-manager.sh."
+}
+
+ensure_caddy_guard_helper(){
+  if download_checked "$REPO_RAW/caddy-resilient-start.sh" "$CADDY_GUARD_BLOB_SHA" "$CADDY_GUARD"; then return 0; fi
+  verified_script "$CADDY_GUARD" "$CADDY_GUARD_BLOB_SHA" && { warn "GitHub недоступен — использую локальный Caddy guard с ожидаемым blob SHA."; return 0; }
+  die "Не удалось получить caddy-resilient-start.sh."
+}
+
+arm_caddy_guard(){
+  command -v systemctl >/dev/null 2>&1 || return 0
+  ensure_caddy_guard_helper
+  CADDYFILE="$CADDYFILE" CADDY_PUBLIC="$CADDY_PUBLIC" CADDY_REALITY="$CADDY_REALITY" \
+    $SUDO "$CADDY_GUARD" install-dropin
 }
 
 choose_stream_source(){
@@ -272,41 +287,68 @@ set_handoff_cooldown(){
 
 clear_handoff_cooldown(){ $SUDO rm -f "$HANDOFF_COOLDOWN" 2>/dev/null || true; }
 
-switch_caddy_to_reality(){
-  [ -s "$CADDY_REALITY" ] || return 1
-  $SUDO caddy validate --config "$CADDY_REALITY" --adapter caddyfile >/dev/null || return 1
-  [ -s "$CADDY_PUBLIC" ] || $SUDO cp -a "$CADDYFILE" "$CADDY_PUBLIC"
-  $SUDO cp -a "$CADDYFILE" "${CADDYFILE}.before-reality.$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
-  $SUDO install -o root -g root -m 0644 "$CADDY_REALITY" "$CADDYFILE"
-  $SUDO systemctl restart caddy || return 1
-  sleep 2
-  caddy_local_8443
+caddy_prepare_for_owner(){
+  ensure_caddy_guard_helper
+  CADDYFILE="$CADDYFILE" CADDY_PUBLIC="$CADDY_PUBLIC" CADDY_REALITY="$CADDY_REALITY" \
+    $SUDO "$CADDY_GUARD" prepare
 }
 
-switch_caddy_to_public(){
-  [ -s "$CADDY_PUBLIC" ] || return 1
-  $SUDO caddy validate --config "$CADDY_PUBLIC" --adapter caddyfile >/dev/null || return 1
-  $SUDO install -o root -g root -m 0644 "$CADDY_PUBLIC" "$CADDYFILE"
+restart_caddy_for_owner(){
+  caddy_prepare_for_owner || return 1
   $SUDO systemctl restart caddy || return 1
   sleep 2
-  caddy_public_443
+  if rw_core_on_443; then caddy_local_8443; else caddy_public_443; fi
+}
+
+wait_for_rw_core_443(){
+  local wait="${1:-35}" i
+  for ((i=1; i<=wait; i++)); do
+    rw_core_on_443 && return 0
+    sleep 1
+  done
+  return 1
+}
+
+restart_remnanode_if_present(){
+  command -v docker >/dev/null 2>&1 || return 0
+  $SUDO docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx remnanode || return 0
+  $SUDO docker restart remnanode >/dev/null 2>&1 || true
+}
+
+handoff_caddy_to_rw_core(){
+  local wait="${HANDOFF_WAIT_TIMEOUT:-35}"
+  [ -s "$CADDY_REALITY" ] || return 0
+  caddy_prepare_for_owner >/dev/null 2>&1 || return 1
+  warn "Xray получил REALITY, но :443 занят Caddy — освобождаю :443 и жду rw-core."
+  $SUDO systemctl stop caddy || return 1
+  sleep 1
+  restart_remnanode_if_present
+  if wait_for_rw_core_443 "$wait"; then
+    restart_caddy_for_owner || return 1
+    ok "REALITY поднялся автоматически: rw-core :443, Caddy 127.0.0.1:8443."
+    return 0
+  fi
+  warn "rw-core не занял :443 за ${wait} сек — возвращаю публичный Caddy."
+  restart_caddy_for_owner || true
+  set_handoff_cooldown
+  warn "Повторный handoff заблокирован на ${HANDOFF_COOLDOWN_SECONDS} сек, чтобы исключить flap по старой записи лога."
+  return 1
 }
 
 restore_public_caddy_if_needed(){
   rw_core_on_443 && return 0
   caddy_local_8443 || return 0
-  switch_caddy_to_public || { warn "Не удалось вернуть Caddy на внешний :443."; return 1; }
+  restart_caddy_for_owner || { warn "Не удалось вернуть Caddy на внешний :443."; return 1; }
   warn "REALITY/Xray не запущен — Caddy возвращён на :443, сайт сохранён."
 }
 
 auto_handoff_once(){
-  local wait="${HANDOFF_WAIT_TIMEOUT:-35}" i
   [ -s "$CADDY_REALITY" ] || return 0
 
   if rw_core_on_443; then
     clear_handoff_cooldown
     if ! caddy_local_8443; then
-      switch_caddy_to_reality || { warn "rw-core уже на :443, но Caddy не удалось перевести на 8443."; return 1; }
+      restart_caddy_for_owner || { warn "rw-core уже на :443, но Caddy не удалось перевести на 8443."; return 1; }
     fi
     return 0
   fi
@@ -316,21 +358,7 @@ auto_handoff_once(){
       warn "Handoff недавно завершился rollback; повтор пропущен до окончания cooldown."
       return 0
     fi
-    warn "Xray получил профиль, но :443 занят Caddy — выполняю автоматический handoff Caddy → 127.0.0.1:8443."
-    switch_caddy_to_reality || { warn "Не удалось переключить Caddy на REALITY-конфиг."; return 1; }
-    for ((i=1; i<=wait; i++)); do
-      if rw_core_on_443; then
-        clear_handoff_cooldown
-        ok "REALITY поднялся автоматически: rw-core :443, Caddy 127.0.0.1:8443."
-        return 0
-      fi
-      sleep 1
-    done
-    warn "После handoff rw-core не занял :443 за ${wait} сек — возвращаю публичный Caddy."
-    switch_caddy_to_public || true
-    set_handoff_cooldown
-    warn "Повторный handoff заблокирован на ${HANDOFF_COOLDOWN_SECONDS} сек, чтобы исключить flap по старой записи лога."
-    return 1
+    handoff_caddy_to_rw_core || return 1
   fi
   return 0
 }
@@ -388,6 +416,7 @@ ensure_telemt_route(){
   ensure_telemt_route_file "$CADDYFILE"
   ensure_telemt_route_file "$CADDY_PUBLIC"
   ensure_telemt_route_file "$CADDY_REALITY"
+  caddy_prepare_for_owner >/dev/null 2>&1 || true
   $SUDO systemctl reload caddy >/dev/null 2>&1 || $SUDO systemctl restart caddy >/dev/null 2>&1 || true
 }
 
@@ -474,7 +503,7 @@ safe_diagnose(){
   printf '  Runtime cfg : %s файл(ов)\n' "${cfgcount:-?}"
   if [ "$conflict" = yes ]; then
     echo '  ДИАГНОЗ     : профиль уже пришёл, но Xray упал из-за занятого :443.'
-    echo '                Для исправления запусти selftest/repair: они могут безопасно выполнить handoff.'
+    echo '                Для исправления запусти selftest/repair: они освободят :443, дождутся rw-core и запустят Caddy через topology guard.'
   elif printf '%s' "$xs" | grep -q 'down (not started yet)' && [ "${cfgcount:-?}" = 0 ]; then
     echo '  ДИАГНОЗ     : Node API поднят, но runtime-конфиг Xray ещё не получен.'
     [ "$nodeapi" = yes ] && echo '                :2222 слушает — отсутствие 7443 само по себе НЕ означает локальный firewall.'
@@ -503,7 +532,7 @@ safe_diagnose(){
     echo '  ✓ Финальная схема: rw-core :443 → Caddy 127.0.0.1:8443.'
   elif caddy_public_443; then
     echo '  ✓ Публичный Caddy держит :443 до первого успешного старта REALITY.'
-    [ -s "$CADDY_REALITY" ] && echo '  ✓ Авто-handoff armed: при ошибке Xray "address already in use" Caddy уйдёт на 8443 автоматически.'
+    [ -s "$CADDY_REALITY" ] && echo '  ✓ Авто-handoff armed: при конфликте :443 watcher освободит порт и запустит Caddy через topology guard.'
   elif caddy_local_8443; then
     echo '  ! Caddy на 8443, но rw-core:443 пока отсутствует; watcher попробует завершить handoff или вернёт public.'
   else
@@ -546,7 +575,8 @@ selftest_all(){
   echo '[2/5] Protection / 2222 / ipset / boot restore'
   protection selftest || failed=1
 
-  echo '[3/5] REALITY handoff watcher'
+  echo '[3/5] Caddy topology guard / REALITY handoff watcher'
+  arm_caddy_guard || failed=1
   install_handoff_watcher || failed=1
   $SUDO systemctl enable --now remna-reality-handoff.timer >/dev/null 2>&1 || failed=1
   auto_handoff_once || true
@@ -589,6 +619,10 @@ selftest_all(){
 run_core(){
   local cmd="${1:-menu}" wait_needed=0
   ensure_core
+  case "$cmd" in install|--auto|auto|front-only|front|reinstall|repair|fix|reality-prepare|reality-enable|reality-disable|path-set|set-path)
+      arm_caddy_guard
+      ;;
+  esac
   case "$cmd" in install|--auto|auto|front-only|front|reinstall|stream|site|decoy|set-decoy) prepare_stream_source ;; esac
   bash "$CORE" "$@"
   case "$cmd" in
@@ -614,7 +648,7 @@ run_core(){
   ensure_telemt_route || true
 }
 
-telemt(){ ensure_telemt_helper; "$TELEMT_HELPER" "$@"; }
+telemt(){ arm_caddy_guard || true; ensure_telemt_helper; "$TELEMT_HELPER" "$@"; }
 
 menu(){
   while true; do
