@@ -19,8 +19,10 @@ CADDY_MARK_END="# END REMNA TELEMT PANEL"
 CADDY_GUARD=/opt/remna-node-scripts/caddy-resilient-start.sh
 
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+APT_LOCK_TIMEOUT=${APT_LOCK_TIMEOUT:-300}
 TTY=/dev/tty; { [ -r "$TTY" ] && [ -w "$TTY" ]; } || TTY=/dev/stdin
 say(){ printf '%s\n' "$*"; }; ok(){ printf '✓ %s\n' "$*"; }; warn(){ printf '! %s\n' "$*" >&2; }; die(){ printf '✗ %s\n' "$*" >&2; exit 1; }
+apt_get(){ $SUDO apt-get -o DPkg::Lock::Timeout="$APT_LOCK_TIMEOUT" "$@"; }
 
 git_blob_sha(){
   local file="$1" size
@@ -107,7 +109,7 @@ configure_panel_file(){
   ok "Telemt Panel настроена; backup: $backup"
 }
 install_redirect_service(){
-  command -v iptables >/dev/null 2>&1 || { $SUDO apt-get update -y; $SUDO apt-get install -y iptables; }
+  command -v iptables >/dev/null 2>&1 || { apt_get update -y; apt_get install -y iptables; }
   cat <<UNIT | $SUDO tee /etc/systemd/system/telemt-panel-${PANEL_PORT}.service >/dev/null
 [Unit]
 Description=Redirect TCP/${PANEL_PORT} to TCP/443 for Telemt Panel shared TLS
