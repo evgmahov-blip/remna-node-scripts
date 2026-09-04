@@ -116,6 +116,8 @@ trap 'err_trap $? $LINENO "$BASH_COMMAND"' ERR
 # ── sudo / окружение ─────────────────────────────────────────────────────────
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
 command -v apt-get >/dev/null 2>&1 || die "Нужен Ubuntu/Debian (apt-get не найден)."
+APT_LOCK_TIMEOUT=${APT_LOCK_TIMEOUT:-300}
+apt_get(){ $SUDO apt-get -o DPkg::Lock::Timeout="$APT_LOCK_TIMEOUT" "$@"; }
 
 persist_self() {
   local current
@@ -157,8 +159,8 @@ install_prerequisites() {
   done
   [ "$missing" -eq 0 ] && [ -s /etc/ssl/certs/ca-certificates.crt ] && return 0
   log "Устанавливаю базовые зависимости..."
-  $SUDO apt-get update -y
-  $SUDO apt-get install -y curl wget ca-certificates openssl iproute2 coreutils tar gawk sed grep
+  apt_get update -y
+  apt_get install -y curl wget ca-certificates openssl iproute2 coreutils tar gawk sed grep
 }
 
 # ── Ввод: env в приоритете; интерактив читаем с /dev/tty (работает и под curl|bash)
@@ -261,8 +263,8 @@ install_node() {
   log "Docker + Remnanode..."
   export DEBIAN_FRONTEND=noninteractive
   if ! command -v curl >/dev/null 2>&1 || [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then
-    $SUDO apt-get update -y
-    $SUDO apt-get install -y curl ca-certificates
+    apt_get update -y
+    apt_get install -y curl ca-certificates
   fi
   if ! command -v docker >/dev/null 2>&1; then
     log "Ставлю Docker из зафиксированного официального installer commit..."
@@ -309,12 +311,12 @@ install_caddy() {
   if command -v caddy >/dev/null 2>&1; then ok "Caddy уже установлен: $(caddy version 2>/dev/null | head -1)"; return 0; fi
   log "Установка Caddy из репозитория Cloudsmith..."
   export DEBIAN_FRONTEND=noninteractive
-  $SUDO apt-get update -y
-  $SUDO apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gnupg
+  apt_get update -y
+  apt_get install -y debian-keyring debian-archive-keyring apt-transport-https curl gnupg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | $SUDO gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | $SUDO tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-  $SUDO apt-get update -y
-  $SUDO apt-get install -y caddy
+  apt_get update -y
+  apt_get install -y caddy
   ok "Caddy установлен: $(caddy version 2>/dev/null | head -1)"
 }
 
