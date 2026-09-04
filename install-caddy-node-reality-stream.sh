@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-REPO_REF=7e0568c1a45b5696a32df40628ff6cb7e9f9780e
+REPO_REF=19bd51a7ee6b8f04003c9aa906c0a9af9d71134b
 REPO_RAW="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${REPO_REF}"
 CORE_BLOB_SHA=cb9e3af522a2e4e2da1c0c11431d68f33f22da30
 TELEMT_BLOB_SHA=1bd587cd9732d7dd100a29719328c16f38956d12
 PROTECTION_BLOB_SHA=9185f9723d959250a5ee766b0ff71e0a977a1982
-CADDY_GUARD_BLOB_SHA=74851e48f908d398e6ef7b0e90308c220afe5c52
+CADDY_GUARD_BLOB_SHA=fc908882069fe50602c2411a46f4a5db77bddb74
 REMNA_NODE_IMAGE="${REMNA_NODE_IMAGE:-remnawave/node:3.4.1}"
 INSTALL_DIR=/opt/remna-node-scripts
 SELF="$INSTALL_DIR/install-caddy-node-reality-stream.sh"

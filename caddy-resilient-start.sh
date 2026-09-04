@@ -116,7 +116,7 @@ install_dropin(){
   tmp=$(mktemp)
   cat > "$tmp" <<EOF
 [Service]
-ExecStartPre=$SELF prepare
+ExecStartPre=+$SELF prepare
 EOF
   $SUDO install -o root -g root -m 0644 "$tmp" "$DROPIN"
   rm -f "$tmp"
