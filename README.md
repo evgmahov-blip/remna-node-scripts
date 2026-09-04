@@ -76,7 +76,7 @@ cap_add:
 [OK] CAP_NET_ADMIN is available
 ```
 
-### Автоматический handoff TCP/443: Caddy → REALITY
+### Caddy topology guard и handoff TCP/443
 
 Главная исправленная гонка выглядела так:
 
@@ -85,7 +85,23 @@ cap_add:
 3. Xray/`rw-core` пытается занять `0.0.0.0:443` и получает `address already in use`, потому что Caddy всё ещё на `443`.
 4. Старый сценарий требовал вручную копировать `/etc/caddy/Caddyfile.reality` и перезапускать Caddy.
 
-Теперь менеджер устанавливает systemd watcher:
+Теперь менеджер устанавливает topology guard для каждого start/restart Caddy:
+
+```text
+/etc/systemd/system/caddy.service.d/10-remna-topology-guard.conf
+/opt/remna-node-scripts/caddy-resilient-start.sh
+```
+
+Guard выбирает режим только по владельцу TCP/443:
+
+```text
+rw-core держит :443  → Caddy 127.0.0.1:8443
+rw-core не держит    → Caddy *:443
+```
+
+XHTTP `127.0.0.1:7443` намеренно не участвует в выборе режима Caddy. Если `7443` отсутствует, диагностика покажет неполный Config Profile, но Caddy не должен падать или откатываться только из-за этого.
+
+Для первого перехода после назначения REALITY менеджер также устанавливает systemd watcher:
 
 ```text
 remna-reality-handoff.timer
@@ -103,11 +119,11 @@ failed to listen TCP on 443 ... address already in use
 ```text
 Caddy *:443
    ↓
-Caddy 127.0.0.1:8443
-   ↓
-ожидание повторной попытки панели
+временно освобождает :443
    ↓
 rw-core *:443
+   ↓
+Caddy start/restart через topology guard
 ```
 
 Если `rw-core` не появляется за таймаут, публичный Caddy автоматически возвращается на `443`, чтобы сайт не оставался недоступным.
@@ -313,6 +329,7 @@ sudo -E /opt/remna-node-scripts/install-caddy-node-reality-stream.sh --auto
 /etc/caddy/Caddyfile
 /etc/caddy/Caddyfile.public
 /etc/caddy/Caddyfile.reality
+/etc/systemd/system/caddy.service.d/10-remna-topology-guard.conf
 /etc/systemd/system/remna-reality-handoff.service
 /etc/systemd/system/remna-reality-handoff.timer
 /etc/telemt/
@@ -323,6 +340,7 @@ sudo -E /opt/remna-node-scripts/install-caddy-node-reality-stream.sh --auto
 /var/www/mstream/
 /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 /opt/remna-node-scripts/install-caddy-node-reality-stream-core.sh
+/opt/remna-node-scripts/caddy-resilient-start.sh
 /opt/remna-node-scripts/telemt-manager.sh
 ```
 
