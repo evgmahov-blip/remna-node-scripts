@@ -32,3 +32,8 @@ jobs:
           ! grep -nE '^REPO_RAW=.*remna-node-scripts/main' install-caddy-node-reality-stream.sh
       - name: Caddy pre-start privilege guard
         run: grep -Fq 'ExecStartPre=+$SELF prepare' caddy-resilient-start.sh
+      - name: apt lock wait guard
+        run: |
+          grep -Fq 'DPkg::Lock::Timeout=' install-caddy-node-reality-stream-core.sh
+          grep -Fq 'DPkg::Lock::Timeout=' protection-manager.sh
+          grep -Fq 'DPkg::Lock::Timeout=' telemt-manager.sh
