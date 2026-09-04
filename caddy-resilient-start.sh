@@ -31,6 +31,11 @@ validate(){
   [ -s "$1" ] && $SUDO caddy validate --config "$1" --adapter caddyfile >/dev/null 2>&1
 }
 
+current_caddyfile_is_public(){
+  [ -s "$CADDYFILE" ] || return 1
+  ! grep -Eq '^[[:space:]]*(https_port[[:space:]]+8443|default_bind[[:space:]]+127\.0\.0\.1|bind[[:space:]]+127\.0\.0\.1)' "$CADDYFILE"
+}
+
 make_local_fallback(){
   local src tmp
   src="$CADDY_PUBLIC"
@@ -85,9 +90,9 @@ prepare(){
     return 0
   fi
 
-  # First install may not have Caddyfile.public yet. Keep the just-generated
-  # Caddyfile if it validates.
-  if validate "$CADDYFILE"; then
+  # First install may not have Caddyfile.public yet. Keep only a public current
+  # Caddyfile; local 8443 configs are valid but wrong when rw-core is absent.
+  if current_caddyfile_is_public && validate "$CADDYFILE"; then
     say 'CADDY_PREPARE=current reason=no-public-backup-yet'
     return 0
   fi
@@ -95,7 +100,7 @@ prepare(){
   die "Нет валидного Caddyfile для безопасного запуска."
 }
 
-install_guard(){
+install_dropin(){
   command -v systemctl >/dev/null 2>&1 || die "systemd/systemctl не найден."
   $SUDO install -d -o root -g root -m 0755 /opt/remna-node-scripts "$DROPIN_DIR"
 
@@ -117,6 +122,10 @@ EOF
   rm -f "$tmp"
 
   $SUDO systemctl daemon-reload
+}
+
+install_guard(){
+  install_dropin
   prepare
   $SUDO systemctl enable caddy >/dev/null 2>&1 || true
   if ! $SUDO systemctl restart caddy; then
@@ -154,8 +163,9 @@ status(){
 
 case "${1:-status}" in
   prepare) prepare ;;
+  install-dropin|arm) install_dropin ;;
   install|enable) install_guard ;;
   remove|disable) remove_guard ;;
   status) status ;;
-  *) die "Использование: $0 {install|prepare|status|remove}" ;;
+  *) die "Использование: $0 {install|install-dropin|prepare|status|remove}" ;;
 esac
