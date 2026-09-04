@@ -16,6 +16,7 @@ STATE_DIR=/var/lib/remna-node-scripts
 TELEMT_STATE="$STATE_DIR/telemt-integration.env"
 CADDY_MARK_BEGIN="# BEGIN REMNA TELEMT PANEL"
 CADDY_MARK_END="# END REMNA TELEMT PANEL"
+CADDY_GUARD=/opt/remna-node-scripts/caddy-resilient-start.sh
 
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
 TTY=/dev/tty; { [ -r "$TTY" ] && [ -w "$TTY" ]; } || TTY=/dev/stdin
@@ -82,7 +83,9 @@ remove_caddy_panel_block(){
   $SUDO caddy validate --config "$tmp" --adapter caddyfile >/dev/null || { rm -f "$tmp"; warn "Не удалось безопасно убрать Telemt-блок из $f"; return 1; }
   $SUDO install -o root -g root -m 0644 "$tmp" "$f"; rm -f "$tmp"
 }
-ensure_panel_caddy(){ local f; command -v caddy >/dev/null 2>&1 || die "Caddy не найден."; for f in /etc/caddy/Caddyfile /etc/caddy/Caddyfile.public /etc/caddy/Caddyfile.reality; do patch_caddy_file "$f"; done; $SUDO systemctl reload caddy >/dev/null 2>&1 || $SUDO systemctl restart caddy >/dev/null 2>&1 || true; }
+caddy_prepare_for_owner(){ [ -x "$CADDY_GUARD" ] && $SUDO "$CADDY_GUARD" prepare >/dev/null 2>&1 || true; }
+caddy_reload_or_restart(){ caddy_prepare_for_owner; $SUDO systemctl reload caddy >/dev/null 2>&1 || $SUDO systemctl restart caddy >/dev/null 2>&1 || true; }
+ensure_panel_caddy(){ local f; command -v caddy >/dev/null 2>&1 || die "Caddy не найден."; for f in /etc/caddy/Caddyfile /etc/caddy/Caddyfile.public /etc/caddy/Caddyfile.reality; do patch_caddy_file "$f"; done; caddy_reload_or_restart; }
 
 configure_panel_file(){
   local unit="$1" api="$2" config="$3" tmp backup; [ -f "$PANEL_CONFIG" ] || die "Не найден $PANEL_CONFIG"
@@ -147,7 +150,7 @@ telemt_status(){ local pdomain; say "Telemt units:"; list_telemt_units | while r
 telemt_remove(){
   local yn tmp f; load_state; printf 'Убрать интеграцию Telemt Panel (18443 + /telemt)? [y/N] '; read -r yn <"$TTY" || true; [[ "$yn" =~ ^[Yy]$ ]] || return 0
   $SUDO systemctl disable --now "telemt-panel-${PANEL_PORT}.service" >/dev/null 2>&1 || true; $SUDO rm -f "/etc/systemd/system/telemt-panel-${PANEL_PORT}.service"; $SUDO iptables -t nat -D PREROUTING -p tcp --dport "$PANEL_PORT" -j REDIRECT --to-ports 443 2>/dev/null || true
-  for f in /etc/caddy/Caddyfile /etc/caddy/Caddyfile.public /etc/caddy/Caddyfile.reality; do remove_caddy_panel_block "$f" || true; done; $SUDO systemctl reload caddy >/dev/null 2>&1 || true
+  for f in /etc/caddy/Caddyfile /etc/caddy/Caddyfile.public /etc/caddy/Caddyfile.reality; do remove_caddy_panel_block "$f" || true; done; caddy_reload_or_restart
   warn "Существующие Telemt/Panel не удаляются автоматически."; $SUDO rm -f "$TELEMT_STATE"; $SUDO systemctl daemon-reload; ok "Интеграция удалена."
 }
 
