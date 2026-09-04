@@ -22,6 +22,7 @@ TSPU_URL=https://raw.githubusercontent.com/tread-lightly/CyberOK_Skipa_ips/main/
 GOV_URL=https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists_iptables/blacklist-v4.ipset
 
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO=sudo; fi
+APT_LOCK_TIMEOUT=${APT_LOCK_TIMEOUT:-300}
 TTY=/dev/tty; { [ -r "$TTY" ] && [ -w "$TTY" ]; } || TTY=/dev/stdin
 say(){ printf '%s\n' "$*"; }
 ok(){ printf '✓ %s\n' "$*"; }
@@ -30,6 +31,7 @@ die(){ printf '✗ %s\n' "$*" >&2; exit 1; }
 log(){ $SUDO install -d -m 0755 "$LOGDIR"; printf '[%s] %s\n' "$(date '+%F %T')" "$*" | $SUDO tee -a "$ACTION_LOG" >/dev/null; }
 
 need_root(){ [ -z "$SUDO" ] || $SUDO -v; }
+apt_get(){ $SUDO apt-get -o DPkg::Lock::Timeout="$APT_LOCK_TIMEOUT" "$@"; }
 ensure_dirs(){ $SUDO install -d -o root -g root -m 0700 "$BASE" "$DATA"; $SUDO install -d -o root -g root -m 0755 "$LOGDIR"; }
 
 valid_ip(){ python3 - "$1" <<'PY'
@@ -113,8 +115,8 @@ install_deps(){
   local miss=() p
   for p in curl ipset iptables python3; do command -v "$p" >/dev/null 2>&1 || miss+=("$p"); done
   if [ ${#miss[@]} -gt 0 ]; then
-    $SUDO apt-get update -y
-    $SUDO apt-get install -y curl ipset iptables python3
+    apt_get update -y
+    apt_get install -y curl ipset iptables python3
   fi
   command -v ipset >/dev/null || die "ipset не установлен."
   local test="REMNA_TEST_$$"
