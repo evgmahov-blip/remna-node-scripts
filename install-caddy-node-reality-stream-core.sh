@@ -19,9 +19,9 @@ fi
 #  version: r9
 #  install-caddy-node-reality-stream.sh — Caddy + стрим-сайт для основной
 #  XHTTP-ноды за Beeline CDN и подготовка второго VLESS RAW REALITY Vision
-#  на том же внешнем TCP/443. Опционально поднимает Remnanode. При полной
-#  установке сразу переводит Caddy на 127.0.0.1:8443. Config Profile
-#  назначается вручную после установки; rw-core затем сам занимает TCP/443.
+#  на том же внешнем TCP/443. Опционально поднимает Remnanode. Caddy выбирает
+#  режим по фактическому владельцу TCP/443: rw-core на :443 → локальный
+#  127.0.0.1:8443, rw-core нет → публичный :443.
 #
 #  Запуск без аргументов открывает МЕНЮ. Также доступны подкоманды:
 #    install | --auto   полная установка (нода по SECRET_KEY + Caddy)
@@ -67,6 +67,7 @@ XHTTP_INBOUND=$REALITY_DIR/xhttp-inbound.json
 PROFILE_INBOUNDS=$REALITY_DIR/inbounds-ready.json
 SCRIPT_INSTALL_DIR=/opt/remna-node-scripts
 SCRIPT_INSTALL_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream.sh
+CADDY_GUARD=$SCRIPT_INSTALL_DIR/caddy-resilient-start.sh
 PROFILE_WATCH_SERVICE=remna-profile-wait.service  # legacy: удаляется при обновлении/сносе
 PROFILE_WATCH_UNIT=/etc/systemd/system/$PROFILE_WATCH_SERVICE
 WEBROOT=/var/www/mstream
@@ -549,12 +550,42 @@ install_decoy() { install_stream_site; }
 install_decoy_builtin() { die "Случайные заглушки в этом форке отключены."; }
 
 # ── Валидация + запуск Caddy ─────────────────────────────────────────────────
+caddy_prepare_for_owner() {
+  if [ -x "$CADDY_GUARD" ]; then
+    CADDYFILE="$CADDYFILE" CADDY_PUBLIC="$CADDY_PUBLIC" CADDY_REALITY="$CADDY_REALITY" \
+      CADDY_LOCAL_PORT="$CADDY_LOCAL_PORT" $SUDO "$CADDY_GUARD" prepare
+    return $?
+  fi
+  command -v ss >/dev/null 2>&1 || return 0
+  command -v caddy >/dev/null 2>&1 || return 0
+  if rw_core_on_443; then
+    [ -s "$CADDY_REALITY" ] || return 0
+    $SUDO caddy validate --config "$CADDY_REALITY" --adapter caddyfile >/dev/null 2>&1 || return 1
+    $SUDO install -o root -g root -m 0644 "$CADDY_REALITY" "$CADDYFILE"
+  else
+    [ -s "$CADDY_PUBLIC" ] || return 0
+    $SUDO caddy validate --config "$CADDY_PUBLIC" --adapter caddyfile >/dev/null 2>&1 || return 1
+    $SUDO install -o root -g root -m 0644 "$CADDY_PUBLIC" "$CADDYFILE"
+  fi
+}
+
+restart_caddy_for_owner() {
+  caddy_prepare_for_owner
+  $SUDO systemctl restart caddy
+}
+
+reload_or_restart_caddy_for_owner() {
+  caddy_prepare_for_owner || true
+  $SUDO systemctl reload caddy >/dev/null 2>&1 || restart_caddy_for_owner
+}
+
 start_caddy() {
   log "Проверка и запуск Caddy..."
+  caddy_prepare_for_owner
   $SUDO caddy fmt --overwrite "$CADDYFILE" >/dev/null 2>&1 || true
   $SUDO caddy validate --config "$CADDYFILE" --adapter caddyfile || die "Caddyfile не прошёл валидацию."
   $SUDO systemctl enable caddy >/dev/null 2>&1 || true
-  if ! $SUDO systemctl restart caddy; then
+  if ! restart_caddy_for_owner; then
     $SUDO journalctl -u caddy -n 40 --no-pager 2>/dev/null || true
     die "Caddy не запустился."
   fi
@@ -582,7 +613,7 @@ check_site_port() {
     if [ "$code" = 403 ]; then
       warn "Caddy вернул 403; исправляю права стрим-сайта."
       fix_site_permissions
-      $SUDO systemctl reload caddy >/dev/null 2>&1 || $SUDO systemctl restart caddy >/dev/null 2>&1 || true
+      reload_or_restart_caddy_for_owner >/dev/null 2>&1 || true
     fi
     sleep 3
   done
@@ -604,10 +635,25 @@ listener_is() {
   [ -z "$bind_re" ] || printf '%s\n' "$lines" | grep -Eq "$bind_re"
 }
 
+rw_core_on_443() {
+  listener_is "$REALITY_PORT" 'rw-core'
+}
+
+caddy_public_443() {
+  listener_is "$REALITY_PORT" 'caddy'
+}
+
+caddy_local_8443() {
+  listener_is "$CADDY_LOCAL_PORT" 'caddy' '127\.0\.0\.1:8443'
+}
+
+reality_front_ready() {
+  rw_core_on_443 && caddy_local_8443
+}
+
 final_topology_ready() {
-  listener_is "$REALITY_PORT" 'rw-core' &&
+  reality_front_ready &&
   listener_is "$BACKEND_PORT" 'rw-core' '127\.0\.0\.1:7443' &&
-  listener_is "$CADDY_LOCAL_PORT" 'caddy' '127\.0\.0\.1:8443' &&
   listener_is "$NODE_PORT" 'rw-node'
 }
 
@@ -619,6 +665,26 @@ node_has_443_conflict() {
   command -v docker >/dev/null 2>&1 || return 1
   $SUDO docker logs --since 10m remnanode 2>&1 | tr -d '\000' | \
     grep -aEq 'failed to listen TCP on 443.*address already in use|listen tcp 0\.0\.0\.0:443: bind: address already in use'
+}
+
+restart_remnanode_if_present() {
+  command -v docker >/dev/null 2>&1 || return 0
+  $SUDO docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'remnanode' || return 0
+  $SUDO docker restart remnanode >/dev/null 2>&1 || true
+}
+
+wait_for_rw_core_443() {
+  local timeout="${1:-35}" i
+  for i in $(seq 1 "$timeout"); do
+    rw_core_on_443 && return 0
+    sleep 1
+  done
+  return 1
+}
+
+warn_if_xhttp_missing() {
+  listener_is "$BACKEND_PORT" 'rw-core' '127\.0\.0\.1:7443' && return 0
+  warn "REALITY держит :443, но XHTTP 127.0.0.1:${BACKEND_PORT} отсутствует — Caddy оставлен живым, профиль нужно дополнить XHTTP inbound."
 }
 
 # ── Проверка бэкенда 7443 + честный вердикт (нода жива / упала / только фронт)
@@ -698,7 +764,8 @@ ${B}④ Готовые inbound для Config Profile:${N}
   REALITY : ${C}${REALITY_INBOUND}${N}
   Оба     : ${C}${PROFILE_INBOUNDS}${N}
   В них уже стоят домен ${DOMAIN:-—}, путь ${TUNNEL_PATH:-—}, Origin/Referer и target 127.0.0.1:${CADDY_LOCAL_PORT}.
-  После install Caddy уже слушает только 127.0.0.1:${CADDY_LOCAL_PORT}. Назначь профиль вручную — rw-core сам займёт внешний TCP/443; дополнительных команд на ноде не требуется.
+  Caddy topology guard выбирает режим по владельцу TCP/443: rw-core держит :443 → Caddy 127.0.0.1:${CADDY_LOCAL_PORT}; rw-core нет → публичный Caddy :443.
+  Отсутствие XHTTP 127.0.0.1:${BACKEND_PORT} не останавливает Caddy, но означает неполный Config Profile.
 
 ${B}Проверка:${N} нода 🟢 в панели → ss -lntp | grep ${BACKEND_PORT} (LISTEN) → подключись клиентом (Happ/INCY).
 EOF
@@ -713,34 +780,42 @@ stage_reality_front() {
   $SUDO caddy validate --config "$CADDY_REALITY" --adapter caddyfile || \
     die "Caddyfile REALITY невалиден."
 
-  # Сразу освобождаем внешний TCP/443. До назначения профиля сайт временно
-  # доступен только локально на 8443; после старта REALITY он появляется на 443
-  # через fallback без дополнительной команды и без watcher.
-  $SUDO install -o root -g root -m 0644 "$CADDY_REALITY" "$CADDYFILE"
-  $SUDO systemctl restart caddy || die "Не удалось перевести Caddy на 127.0.0.1:${CADDY_LOCAL_PORT}."
-  sleep 2
-
-  listener_is "$CADDY_LOCAL_PORT" 'caddy' '127\.0\.0\.1:8443' || \
-    die "Caddy не слушает 127.0.0.1:${CADDY_LOCAL_PORT}."
-  verify_site_port "$CADDY_LOCAL_PORT"
-
   # Удаляем watcher прошлых версий, если он был установлен.
   $SUDO systemctl disable --now "$PROFILE_WATCH_SERVICE" >/dev/null 2>&1 || true
   $SUDO rm -f "$PROFILE_WATCH_UNIT"
   $SUDO systemctl daemon-reload >/dev/null 2>&1 || true
 
-  if command -v docker >/dev/null 2>&1 && \
-     $SUDO docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'remnanode'; then
-    $SUDO docker restart remnanode >/dev/null 2>&1 || true
-    sleep 3
+  if rw_core_on_443; then
+    restart_caddy_for_owner || die "rw-core держит :443, но Caddy не удалось запустить на 127.0.0.1:${CADDY_LOCAL_PORT}."
+    verify_site_port "$REALITY_PORT"
+    warn_if_xhttp_missing
+    ok "Схема выбрана по владельцу TCP/443: rw-core → :443; Caddy → 127.0.0.1:${CADDY_LOCAL_PORT}."
+    return 0
   fi
 
+  if command -v docker >/dev/null 2>&1 &&
+     $SUDO docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'remnanode' &&
+     node_has_443_conflict; then
+    warn "Освобождаю TCP/443 для REALITY и жду rw-core; Caddy затем стартует через topology guard."
+    $SUDO systemctl stop caddy 2>/dev/null || true
+    restart_remnanode_if_present
+    if wait_for_rw_core_443 "${REALITY_HANDOFF_WAIT:-35}"; then
+      restart_caddy_for_owner || die "rw-core занял :443, но Caddy не удалось запустить на 127.0.0.1:${CADDY_LOCAL_PORT}."
+      verify_site_port "$REALITY_PORT"
+      warn_if_xhttp_missing
+      ok "Схема выбрана по владельцу TCP/443: rw-core → :443; Caddy → 127.0.0.1:${CADDY_LOCAL_PORT}."
+      return 0
+    fi
+    warn "rw-core не занял TCP/443 — возвращаю публичный Caddy."
+  fi
+
+  restart_caddy_for_owner || die "Не удалось запустить Caddy в публичном режиме."
+  verify_site_port "$REALITY_PORT"
   if final_topology_ready; then
-    verify_site_port "$REALITY_PORT"
-    ok "Профиль уже активен: rw-core → :443 и 127.0.0.1:${BACKEND_PORT}; Caddy → 127.0.0.1:${CADDY_LOCAL_PORT}."
+    ok "Профиль активен: rw-core → :443 и 127.0.0.1:${BACKEND_PORT}; Caddy → 127.0.0.1:${CADDY_LOCAL_PORT}."
   else
-    ok "Локальная часть готова: Caddy → 127.0.0.1:${CADDY_LOCAL_PORT}; TCP/443 освобождён для REALITY."
-    warn "Теперь назначь Config Profile вручную. После сохранения rw-core запустится сам; команду reality-enable выполнять не нужно."
+    ok "Caddy оставлен на публичном TCP/443, потому что rw-core пока не держит :443."
+    warn "После назначения REALITY profile watcher/guard освободит :443 для rw-core и переведёт Caddy на 127.0.0.1:${CADDY_LOCAL_PORT}."
   fi
 }
 
@@ -885,11 +960,11 @@ cmd_path_set() {
     }
   done
   TUNNEL_PATH="$requested"
-  $SUDO systemctl reload caddy || {
+  reload_or_restart_caddy_for_owner || {
     for f in "$CADDYFILE" "$CADDY_PUBLIC" "$CADDY_REALITY"; do
       [ -f "$backup_dir/$(basename "$f")" ] && $SUDO cp -a "$backup_dir/$(basename "$f")" "$f"
     done
-    $SUDO systemctl restart caddy || true
+    restart_caddy_for_owner || true
     die "Caddy не применил новый путь; выполнен откат."
   }
   if [ -s "$REALITY_ENV" ]; then
@@ -1171,35 +1246,35 @@ cmd_reality_prepare() {
 
 reality_enable_impl() {
   resolve_existing
-  if final_topology_ready; then
-    fix_site_permissions
-    verify_site_port "$REALITY_PORT"
-    ok "Уже включено: rw-core → :443; Caddy → 127.0.0.1:${CADDY_LOCAL_PORT}; XHTTP → 127.0.0.1:${BACKEND_PORT}"
-    return 0
-  fi
   [ -s "$CADDY_REALITY" ] || prepare_profile_files
   $SUDO caddy validate --config "$CADDY_REALITY" --adapter caddyfile || die "Caddyfile REALITY невалиден."
   [ -s "$CADDY_PUBLIC" ] || $SUDO cp -a "$CADDYFILE" "$CADDY_PUBLIC"
   fix_site_permissions
-  $SUDO install -o root -g root -m 0644 "$CADDY_REALITY" "$CADDYFILE"
-  $SUDO systemctl restart caddy || true
-  sleep 2
-  if ! ss -lntp 2>/dev/null | grep -q "127.0.0.1:${CADDY_LOCAL_PORT}"; then
-    warn "Caddy не поднялся на 127.0.0.1:${CADDY_LOCAL_PORT}; откатываю."
-    $SUDO install -o root -g root -m 0644 "$CADDY_PUBLIC" "$CADDYFILE"
-    $SUDO systemctl restart caddy || true
-    die "Переключение отменено."
+
+  if rw_core_on_443; then
+    restart_caddy_for_owner || die "rw-core держит :443, но Caddy не удалось запустить на 127.0.0.1:${CADDY_LOCAL_PORT}."
+    verify_site_port "$REALITY_PORT"
+    if final_topology_ready; then
+      ok "Готово: rw-core → :443; Caddy → 127.0.0.1:${CADDY_LOCAL_PORT}; XHTTP → 127.0.0.1:${BACKEND_PORT}"
+    else
+      warn_if_xhttp_missing
+      ok "Caddy работает через REALITY fallback; отсутствие XHTTP 127.0.0.1:${BACKEND_PORT} не останавливает Caddy."
+    fi
+    show_topology
+    return 0
   fi
-  verify_site_port "$CADDY_LOCAL_PORT"
-  if command -v docker >/dev/null 2>&1 && $SUDO docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'remnanode'; then
-    $SUDO docker restart remnanode >/dev/null 2>&1 || true
-  fi
-  log "Caddy локально готов. Жду rw-core на :443 и XHTTP на 127.0.0.1:${BACKEND_PORT}..."
+
+  warn "rw-core пока не держит :443 — временно останавливаю Caddy, чтобы REALITY мог занять порт."
+  $SUDO systemctl stop caddy 2>/dev/null || true
+  restart_remnanode_if_present
+  log "Жду rw-core на :443; Caddy будет запущен через topology guard..."
   local i
   for i in $(seq 1 120); do
-    if final_topology_ready; then
+    if rw_core_on_443; then
+      restart_caddy_for_owner || die "rw-core занял :443, но Caddy не удалось запустить на 127.0.0.1:${CADDY_LOCAL_PORT}."
       if check_site_port "$REALITY_PORT" 8; then
-        ok "Готово: rw-core → :443; Caddy → 127.0.0.1:${CADDY_LOCAL_PORT}; XHTTP → 127.0.0.1:${BACKEND_PORT}"
+        warn_if_xhttp_missing
+        ok "Готово: режим выбран по владельцу TCP/443; Caddy не зависит от наличия XHTTP ${BACKEND_PORT}."
         show_topology
         return 0
       fi
@@ -1212,8 +1287,7 @@ reality_enable_impl() {
     sleep 1
   done
   warn "rw-core не занял :443; откатываю публичный Caddy."
-  $SUDO install -o root -g root -m 0644 "$CADDY_PUBLIC" "$CADDYFILE"
-  $SUDO systemctl restart caddy || true
+  restart_caddy_for_owner || true
   verify_site_port 443 || true
   $SUDO docker logs --since 5m remnanode 2>&1 | tr -d '\000' | \
     sed -E 's/(token=)[^&[:space:]]+/\1<REDACTED>/Ig; s/("privateKey"[[:space:]]*:[[:space:]]*")[^"]+/\1<REDACTED>/Ig' | tail -60 || true
@@ -1233,9 +1307,7 @@ cmd_reality_disable() {
     die "Сначала удали/отключи Reality inbound в Config Profile и дождись освобождения :443."
   fi
   [ -s "$CADDY_PUBLIC" ] || die "Не найден $CADDY_PUBLIC"
-  $SUDO install -o root -g root -m 0644 "$CADDY_PUBLIC" "$CADDYFILE"
-  $SUDO caddy validate --config "$CADDYFILE" --adapter caddyfile || die "Публичный Caddyfile невалиден."
-  $SUDO systemctl restart caddy
+  restart_caddy_for_owner || die "Публичный Caddyfile невалиден или Caddy не запустился."
   ok "Возвращён публичный Caddy на :443."
 }
 
