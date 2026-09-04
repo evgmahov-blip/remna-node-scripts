@@ -402,16 +402,16 @@ wait_for_xray_runtime(){
     auto_handoff_once >/dev/null 2>&1 || true
     xs="$(xray_status)"
     cfg="$(runtime_config_count)"
-    if printf '%s' "$xs" | grep -q '^up' || xhttp_on_7443 || rw_core_on_443; then
-      ok "Xray/runtime появился через ${i} сек."
+    if xhttp_on_7443; then
+      ok "XHTTP/runtime появился через ${i} сек."
       return 0
     fi
     if (( i % 15 == 0 )); then
-      say "    ожидание: ${i}/${timeout} сек; Xray=${xs:-неизвестно}; runtime=${cfg:-?}"
+      say "    ожидание: ${i}/${timeout} сек; Xray=${xs:-неизвестно}; runtime=${cfg:-?}; 7443=нет"
     fi
     sleep 1
   done
-  warn "За ${timeout} сек Xray не запустился и runtime-конфиг не появился."
+  warn "За ${timeout} сек XHTTP 127.0.0.1:7443 не появился. Если rw-core уже держит :443, назначенный профиль содержит REALITY, но не содержит ожидаемый XHTTP inbound."
   return 1
 }
 
@@ -421,7 +421,10 @@ protection_node_api_readonly(){
   command -v iptables >/dev/null 2>&1 || return 1
   $SUDO iptables -C INPUT -j REMNA_GUARD >/dev/null 2>&1 || return 1
   $SUDO iptables -C REMNA_GUARD -p tcp --dport 2222 -j DROP >/dev/null 2>&1 || return 1
-  $SUDO iptables -S REMNA_GUARD 2>/dev/null | grep -Eq -- '-p tcp .*--dport 2222 .* -j ACCEPT'
+  $SUDO iptables -S REMNA_GUARD 2>/dev/null | awk '
+    /-A REMNA_GUARD/ && /-p tcp/ && /--dport 2222/ && /-j ACCEPT/ {allow=1}
+    END {exit allow ? 0 : 1}
+  '
 }
 
 safe_diagnose(){
@@ -480,7 +483,14 @@ safe_diagnose(){
   elif printf '%s' "$xs" | grep -q '^down'; then
     echo '  ДИАГНОЗ     : Xray остановлен после попытки старта; смотри docker logs remnanode.'
   elif printf '%s' "$xs" | grep -q '^up'; then
-    if [ "$xhttp" = yes ]; then echo '  ДИАГНОЗ     : Xray запущен, XHTTP backend доступен.'; else echo '  ДИАГНОЗ     : Xray запущен, но inbound 7443 отсутствует в назначенном профиле.'; fi
+    if [ "$xhttp" = yes ]; then
+      echo '  ДИАГНОЗ     : Xray запущен, XHTTP backend доступен.'
+    elif rw_core_on_443; then
+      echo '  ДИАГНОЗ     : REALITY inbound активен на :443, но XHTTP inbound 127.0.0.1:7443 отсутствует.'
+      echo '                Исправь назначенный Config Profile: в нём должны быть ОБА inbound — REALITY и XHTTP.'
+    else
+      echo '  ДИАГНОЗ     : Xray запущен, но inbound 7443 отсутствует в назначенном профиле.'
+    fi
   else
     echo '  ДИАГНОЗ     : состояние Xray определить не удалось.'
   fi
@@ -558,6 +568,13 @@ selftest_all(){
     failed=1
   fi
 
+  if rw_core_on_443 && ! xhttp_on_7443; then
+    warn 'REALITY уже активен, но XHTTP 127.0.0.1:7443 отсутствует — назначенный Config Profile неполный.'
+    warn 'В профиле должны одновременно присутствовать REALITY inbound :443 и XHTTP inbound 127.0.0.1:7443.'
+    failed=1
+  fi
+  protection_node_api_readonly || { warn 'Финальная проверка защиты TCP/2222 не пройдена.'; failed=1; }
+
   echo '[5/5] Итоговая диагностика'
   safe_diagnose
 
@@ -589,7 +606,7 @@ run_core(){
   if [ "$wait_needed" = 1 ]; then
     if ! wait_for_xray_runtime; then
       restore_public_caddy_if_needed || true
-      warn "Node bootstrap завершён, но Xray runtime пока не применён. Публичный сайт сохранён; watcher ждёт профиль и сам отдаст :443 REALITY."
+      warn "Node bootstrap завершён, но XHTTP runtime пока не применён. Если REALITY уже поднялся, проверь что назначенный Config Profile содержит оба inbound."
     fi
   else
     auto_handoff_once || true
