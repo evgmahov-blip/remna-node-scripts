@@ -98,9 +98,7 @@ fi
 install_packages
 
 echo '[2/13] Получаю сертификат Let\x27s Encrypt'
-CADDY_WAS_ACTIVE=0
 if systemctl is-active --quiet caddy 2>/dev/null; then
-  CADDY_WAS_ACTIVE=1
   systemctl stop caddy
 fi
 certbot certonly --standalone --non-interactive --agree-tos --email "$EMAIL" -d "$DOMAIN"
@@ -214,7 +212,12 @@ https://${DOMAIN}:443 {
     }
 
     @subscription path ${SUB_PATH}*
-    reverse_proxy @subscription 127.0.0.1:${SUB_PORT}
+    reverse_proxy @subscription https://127.0.0.1:${SUB_PORT} {
+        header_up Host ${DOMAIN}
+        transport http {
+            tls_server_name ${DOMAIN}
+        }
+    }
 
     @xhttp path ${XHTTP_PATH}*
     reverse_proxy @xhttp 127.0.0.1:${XHTTP_PORT} {
