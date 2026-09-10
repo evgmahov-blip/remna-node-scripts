@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-TASK_NAME="REMNA NODE FULL CLEAN + NEXT"
-PINNED_REF="9f995774f85ddba77826444992725a6a51e2ac20"
-REMOTE="https://raw.githubusercontent.com/evgmahov-blip/setup-remna-node/${PINNED_REF}/production/full-clean-reinstall.sh"
+TASK_NAME="REMNA NODE FULL CLEAN + NEXT V2"
+PINNED_REF="abf33e3b2cf8926e240743c7d9e4776265bec1fc"
+REMOTE="https://raw.githubusercontent.com/evgmahov-blip/setup-remna-node/${PINNED_REF}/production/full-clean-reinstall-v2.sh"
 MODE="${1:-menu}"
 TMP="$(mktemp)"
 
