@@ -125,14 +125,9 @@ wait_http() {
 echo '[1/13] Предварительные проверки'
 command -v getent >/dev/null 2>&1 || true
 RESOLVED_IP="$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk 'NR==1{print $1}')"
-PUBLIC_IP="$(curl -4fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
-echo "Domain:     $DOMAIN"
-echo "DNS IPv4:   ${RESOLVED_IP:-не найден}"
-echo "Public IPv4:${PUBLIC_IP:-не определён}"
-if [ -n "$PUBLIC_IP" ] && [ -n "$RESOLVED_IP" ] && [ "$PUBLIC_IP" != "$RESOLVED_IP" ]; then
-  echo '[ОШИБКА] DNS A-запись не указывает на этот сервер.'
-  exit 1
-fi
+echo "Domain:   $DOMAIN"
+echo "DNS IPv4: ${RESOLVED_IP:-не найден}"
+[ -n "$RESOLVED_IP" ] || echo '[INFO] IPv4 DNS не найден локальным resolver; окончательную проверку сделает ACME challenge.'
 
 if ss -ltn '( sport = :80 )' 2>/dev/null | grep -q LISTEN; then
   echo '[INFO] TCP/80 занят. Если это Caddy, временно остановлю его для Certbot.'
@@ -269,7 +264,12 @@ https://${DOMAIN}:443 {
     }
 
     @panel path ${PANEL_PATH}*
-    reverse_proxy @panel 127.0.0.1:${PANEL_PORT}
+    reverse_proxy @panel https://127.0.0.1:${PANEL_PORT} {
+        header_up Host ${DOMAIN}
+        transport http {
+            tls_server_name ${DOMAIN}
+        }
+    }
 
     @subscription path ${SUB_PATH}*
     reverse_proxy @subscription https://127.0.0.1:${SUB_PORT} {
@@ -297,12 +297,17 @@ caddy validate --config /etc/caddy/Caddyfile
 systemctl enable --now caddy
 systemctl reload caddy
 
-echo '[10/13] Проверяю приватность панели 3x-ui'
+echo '[10/13] Включаю TLS только на loopback-панели и проверяю приватность'
 /usr/local/x-ui/x-ui setting -listenIP "127.0.0.1" >/dev/null
+/usr/local/x-ui/x-ui setting -webCert "/etc/caddy/certs/${DOMAIN}/fullchain.pem" -webCertKey "/etc/caddy/certs/${DOMAIN}/privkey.pem"
 systemctl restart x-ui
 sleep 3
 ss -ltn | awk -v p=":${PANEL_PORT}" '$4 ~ p {print $4}' | grep -Eq '^(127\.0\.0\.1|\[::1\]):' || {
   echo '[ОШИБКА] Панель 3x-ui слушает не только loopback.' >&2
+  exit 1
+}
+curl -fsS --resolve "${DOMAIN}:${PANEL_PORT}:127.0.0.1" "https://${DOMAIN}:${PANEL_PORT}${PANEL_PATH}" >/dev/null || {
+  echo '[ОШИБКА] TLS loopback-панели не отвечает с ожидаемым SNI.' >&2
   exit 1
 }
 
@@ -319,6 +324,7 @@ install -o root -g caddy -m 0640 "\$SRC/fullchain.pem" "\$DST/fullchain.pem"
 install -o root -g caddy -m 0640 "\$SRC/privkey.pem" "\$DST/privkey.pem"
 caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
+systemctl restart x-ui
 HOOK
 chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/3xui-happ-node.sh
 
