@@ -1,183 +1,100 @@
-# 3x-ui + XHTTP + Hysteria2 + Happ node installer
+# 3x-ui + XHTTP + Hysteria2 + Happ
 
-Автоматическое развёртывание ноды со схемой:
+Отдельный installer для 3x-ui/Happ с XHTTP и Hysteria2.
 
-- `TCP/443 -> Caddy -> VLESS/XHTTP` по скрытому пути
-- `UDP/443 -> Xray/Hysteria2`
-- публичный masking site на корне домена
-- `3x-ui` panel на отдельном порту с HTTPS
-- Happ subscription с двумя профилями
-- клиентский routing profile: RU/private -> DIRECT, остальное -> PROXY
-- автоматическое продление Let's Encrypt с reload Caddy и restart x-ui
-- radio stub site из `Balbuto/radio-stub-site`
+Эта версия минимизирует внешний trust surface: 3x-ui закреплён на конкретном source commit и release digest, панель не слушает публичный интерфейс, а маскировочный сайт по умолчанию локальный.
 
-## Требования
+## Что устанавливается
 
-- чистый VPS с root-доступом
-- A-запись домена уже указывает на IPv4 сервера
-- TCP/80, TCP/443 и UDP/443 доступны извне
-- Debian/Ubuntu или RHEL-like система с `apt`, `dnf` или `yum`
+- 3x-ui `v3.7.0`;
+- VLESS/XHTTP inbound на loopback;
+- Hysteria2 UDP/443;
+- Happ subscription;
+- Caddy на TCP/443;
+- 3x-ui Panel на `127.0.0.1:<PANEL_PORT>`, доступная снаружи только через Caddy по случайному `PANEL_PATH`;
+- встроенная статическая маскировочная страница.
 
-## Быстрый запуск
+## Запуск
+
+Используйте immutable snapshot репозитория:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/feature/3xui-happ-node-installer/3xui-happ-node/install.sh -o /root/install-3xui-happ-node.sh
-chmod 700 /root/install-3xui-happ-node.sh
-/root/install-3xui-happ-node.sh
+curl -fsSL --proto '=https' --tlsv1.2 \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/11a11459d91356e3358fad831f86a233982fd49e/3xui-happ-node/install.sh \
+  -o /root/install-3xui-happ-node.sh
+bash -n /root/install-3xui-happ-node.sh
+sudo bash /root/install-3xui-happ-node.sh
 ```
 
-Скрипт запросит:
+`bash -n` проверяет только синтаксис. Supply-chain защита находится внутри installer: upstream source и release artifacts закреплены и проверяются digest-ами.
 
-- DNS имя ноды, например `stream.example.com`
-- email для Let's Encrypt
-
-Остальные параметры генерируются автоматически.
-
-## Переменные окружения
-
-Можно запускать без интерактива:
+Можно передать параметры через окружение:
 
 ```bash
-DOMAIN='stream.example.com' \
-EMAIL='admin@example.com' \
-PANEL_PORT='8000' \
-XHTTP_PORT='18443' \
-SUB_PORT='2096' \
-CLIENT_NAME='main' \
-INSTALL_RADIO_STUB='yes' \
-bash /root/install-3xui-happ-node.sh
+sudo DOMAIN=stream.example.com EMAIL=admin@example.com \
+  bash /root/install-3xui-happ-node.sh
 ```
 
-Дополнительно можно заранее задать:
+## Закреплённый upstream 3x-ui
 
 ```text
-PANEL_USER
-PANEL_PASS
-PANEL_PATH
-SUB_PATH
-XHTTP_PATH
-SUB_ID
-XUI_VERSION
-WEBROOT
+version:       3.7.0
+tag:           v3.7.0
+source commit: f727d04f6522bb94a8fb52e8352fdcafb51c11e1
+install.sh:    Git blob 4ff60a069362e618d5149abc4cbc5246629c93ea
 ```
 
-Если эти значения не указаны, безопасные случайные значения создаются автоматически.
+Installer загружает upstream `install.sh` по commit SHA, сверяет Git blob SHA, переписывает оставшиеся upstream helper URL с `main` на тот же audited commit, отдельно скачивает release archive `v3.7.0`, сверяет официальный SHA-256 для текущей архитектуры и запускает upstream installer с явным аргументом `v3.7.0`.
 
-## Что создаётся
+Обновление версии 3x-ui требует явного изменения source commit и release SHA-256. Автоматического перехода на `latest` нет.
 
-После успешной установки скрипт выводит:
+## Панель
+
+После установки 3x-ui принудительно переводится на:
 
 ```text
-Сайт:              https://stream.example.com/
-Радио-админка:      https://stream.example.com/admin.html
-3x-ui панель:       https://stream.example.com:8000/<random-path>/
-Happ subscription:  https://stream.example.com/<random-sub-path>/<sub-id>
-XHTTP:              stream.example.com:443 TCP
-Hysteria2:          stream.example.com:443 UDP
+127.0.0.1:<PANEL_PORT>
 ```
 
-Панельные username/password также выводятся в конце установки. Сохраните их.
+Caddy публикует только скрытый path:
+
+```text
+https://stream.example.com/<random-panel-path>/
+```
+
+Публичный `PANEL_PORT` не нужен. Если listener панели обнаружен не на loopback, installer завершается ошибкой.
+
+## Credentials
+
+Username/password больше не выводятся в stdout. Они сохраняются в:
+
+```text
+/root/3xui-happ-node.credentials
+```
+
+Права файла: `0600`. В нём находятся URL панели, username, password и URL подписки.
+
+## Маскировочный сайт
+
+По умолчанию `INSTALL_RADIO_STUB=no`: создаётся простая локальная HTML-страница без внешнего JS/CSS.
+
+Если явно установить `INSTALL_RADIO_STUB=yes`, будет загружен только `index.html` из закреплённого commit `Balbuto/radio-stub-site` и проверен по Git blob SHA. `admin.html` не устанавливается.
 
 ## TLS
 
-Для Caddy/XHTTP намеренно разрешён только TLS 1.2:
-
-```caddy
-protocols tls1.2 tls1.2
-```
-
-Hysteria2 работает через QUIC и использует TLS 1.3. Это разные транспортные пути.
+Caddy разрешает TLS 1.2 и TLS 1.3. Hysteria2 использует QUIC/TLS 1.3.
 
 ## Сертификаты
 
-Let's Encrypt управляется Certbot.
+Certbot получает сертификат для `DOMAIN`. Deploy hook копирует сертификат в Caddy cert directory, валидирует Caddyfile и reload-ит Caddy. Поскольку 3x-ui панель работает за Caddy по loopback HTTP, ей не требуется собственная копия публичного TLS key.
 
-Исходные файлы:
+## После установки
 
-```text
-/etc/letsencrypt/live/<domain>/fullchain.pem
-/etc/letsencrypt/live/<domain>/privkey.pem
+```bash
+systemctl is-active caddy
+systemctl is-active x-ui
+ss -lntup
+curl -I https://stream.example.com/
 ```
 
-Для Caddy и панели создаётся читаемая копия:
-
-```text
-/etc/caddy/certs/<domain>/fullchain.pem
-/etc/caddy/certs/<domain>/privkey.pem
-```
-
-Deploy-hook Certbot после обновления:
-
-1. обновляет копию сертификата;
-2. валидирует Caddyfile;
-3. reload Caddy;
-4. restart x-ui.
-
-## Caddy routing
-
-Корень домена отдаёт masking site.
-
-Только два специальных пути уходят во внутренние сервисы:
-
-```text
-/<subscription-path>/* -> 127.0.0.1:2096
-/<xhttp-path>/*        -> 127.0.0.1:18443
-```
-
-Caddy слушает только HTTP/1.1 и HTTP/2, поэтому UDP/443 остаётся свободным для Hysteria2.
-
-## Radio stub site
-
-По умолчанию устанавливаются:
-
-- `index.html`
-- `admin.html`
-
-из проекта `Balbuto/radio-stub-site`.
-
-Админка радиосайта хранит настройки в `localStorage` браузера. Это клиентская настройка заглушки, а не серверная система управления.
-
-## Happ routing
-
-Инсталлятор передаёт routing profile через subscription headers.
-
-Текущая логика:
-
-```text
-RU/private -> DIRECT
-остальное  -> PROXY
-```
-
-Профиль содержит `geoip:ru`, `geoip:private` и приватные RFC1918/CGNAT сети.
-
-`geosite:category-ru` оставлен как текущий доменный rule. Перед массовым production-развёртыванием желательно отдельно проверить, что используемая версия Happ содержит соответствующий geosite dataset.
-
-## Безопасность
-
-После первой проверки рекомендуется закрыть публичный panel port и разрешить его только с административных IP через UFW/nftables либо вынести панель за отдельный reverse proxy.
-
-Скрипт специально не меняет firewall автоматически, чтобы не потерять SSH-доступ на удалённой машине.
-
-## Проверка после установки
-
-Ожидаемые listeners:
-
-```text
-TCP 80                 Caddy
-TCP 443                Caddy
-UDP 443                Xray/Hysteria2
-127.0.0.1:18443        Xray/XHTTP
-127.0.0.1:2096         x-ui subscription
-TCP 8000               x-ui panel
-```
-
-Публичная Happ subscription должна содержать две ссылки:
-
-```text
-vless://...
-hysteria2://...
-```
-
-## Обновление
-
-Перед обновлением инсталлятора рекомендуется проверить diff ветки и протестировать на отдельной ноде. Скрипт ориентирован прежде всего на первичное развёртывание чистого сервера, а не на повторный запуск поверх уже работающей конфигурации.
+Убедитесь, что TCP `PANEL_PORT` не слушает `0.0.0.0` / `[::]`. Секреты из credentials-файла не вставляйте в issue, CI logs или публичные чаты.
