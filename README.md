@@ -11,13 +11,13 @@
 Используйте immutable snapshot, а не `main`:
 
 ```bash
-sudo bash -c 'tmp=$(mktemp); trap '\''rm -f "$tmp"'\'' EXIT; curl -fsSL --proto "=https" --tlsv1.2 https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/11a11459d91356e3358fad831f86a233982fd49e/install.sh -o "$tmp" && bash -n "$tmp" && bash "$tmp"'
+sudo bash -c 'tmp=$(mktemp); trap '\''rm -f "$tmp"'\'' EXIT; curl -fsSL --proto "=https" --tlsv1.2 https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/7b443a2c385b904e3a66d9a37b2fb3c4bb533413/install.sh -o "$tmp" && bash -n "$tmp" && bash "$tmp"'
 ```
 
 ### Clean install / полная переустановка
 
 ```bash
-sudo bash -c 'tmp=$(mktemp); trap '\''rm -f "$tmp"'\'' EXIT; curl -fsSL --proto "=https" --tlsv1.2 https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/11a11459d91356e3358fad831f86a233982fd49e/clean-install.sh -o "$tmp" && bash -n "$tmp" && bash "$tmp"'
+sudo bash -c 'tmp=$(mktemp); trap '\''rm -f "$tmp"'\'' EXIT; curl -fsSL --proto "=https" --tlsv1.2 https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/7b443a2c385b904e3a66d9a37b2fb3c4bb533413/clean-install.sh -o "$tmp" && bash -n "$tmp" && bash "$tmp"'
 ```
 
 Перед очисткой manager сохраняет предусмотренные им backup-файлы и не делает глобальный reset firewall/Docker. SSH, default route, DNS, hostname и чужие Docker-сервисы не должны удаляться.
@@ -32,7 +32,7 @@ sudo bash -c 'tmp=$(mktemp); trap '\''rm -f "$tmp"'\'' EXIT; curl -fsSL --proto 
 2. `install.sh` / `clean-install.sh` скачивают закреплённый `full-clean-reinstall.sh`;
 3. перед запуском вычисляется Git blob SHA и сравнивается с ожидаемым;
 4. `full-clean-reinstall.sh` таким же образом проверяет публичный manager;
-5. manager загружает core / Telemt / protection / Caddy guard только из закреплённого commit и сверяет Git blob SHA.
+5. manager загружает core / protection / Caddy guard только из закреплённого commit и сверяет Git blob SHA.
 
 Закрытый `setup-remna-node` в production-цепочке больше не используется.
 
@@ -44,7 +44,6 @@ sudo bash -c 'tmp=$(mktemp); trap '\''rm -f "$tmp"'\'' EXIT; curl -fsSL --proto 
 - XHTTP и REALITY;
 - Caddy frontend;
 - локальный маскировочный сайт;
-- Telemt + Telemt Panel;
 - firewall-защиту Node API и дополнительные TSPU/GOV/GeoIP списки;
 - диагностику, repair и self-test.
 
@@ -68,13 +67,8 @@ sudo bash full-clean-reinstall.sh
 - Сторонний `deepbeat` reverse proxy удалён.
 - TSPU/GOV snapshots закреплены на commit + Git blob SHA.
 - GeoIP загружается из закреплённого commit и обновляется fail-closed: неполный набор не заменяет рабочий.
-- Telemt Panel слушает только loopback и публикуется через Caddy; старый public `18443 -> 443` redirect удаляется.
-- Секреты Remnawave и 3x-ui не должны печататься в stdout.
+- Секреты Remnawave не должны печататься в stdout.
 - Не публикуйте `SECRET_KEY`, REALITY private key, сертификаты, токены и файлы credentials.
-
-## 3x-ui + Happ
-
-Отдельный сценарий находится в [3xui-happ-node](./3xui-happ-node/README.md). Он также использует закреплённые upstream commit/release digest, держит панель на loopback и сохраняет реквизиты в root-only файл.
 
 ## Manager
 
