@@ -42,18 +42,12 @@ jobs:
           # privacy-sensitive endpoints.
           mapfile -d '' shell_files < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
 
-          ! grep -nE 'ghostos\.space|GHOST_(LIC|ID|SITE|DL|Q)|stream\.deepbeat\.ru|rustream\.remna\.space|\.2rdp\.ru|setup-remna-node|radio-stub-site/main|CyberOK_Skipa_ips/main|AS_Network_List/main|ipdeny\.com' "${shell_files[@]}"
+          ! grep -nE 'ghostos\.space|GHOST_(LIC|ID|SITE|DL|Q)|stream\.deepbeat\.ru|rustream\.remna\.space|\.2rdp\.ru|setup-remna-node|radio-stub-site/main|CyberOK_Skipa_ips/main|AS_Network_List/main|ipdeny\.com|telemt|3x-ui|3xui' "${shell_files[@]}"
 
           ! grep -nE 'protocols[[:space:]]+tls1\.2[[:space:]]+tls1\.2|printf .*Password:|printf .*Username:' "${shell_files[@]}"
 
           # Existing image / installer invariants.
-          ! grep -nE             'image:[[:space:]]*remnawave/node:latest|https://get\.docker\.com|telemt/telemt/main/install\.sh|amirotin/telemt_panel/main/install\.sh'             install-caddy-node-reality-stream-core.sh telemt-manager.sh
-
-          # 3x-ui must stay pinned to the audited source snapshot and official
-          # v3.7.0 release digests.
-          grep -Fq 'XUI_COMMIT=f727d04f6522bb94a8fb52e8352fdcafb51c11e1' 3xui-happ-node/install.sh
-          grep -Fq 'XUI_INSTALL_BLOB_SHA=4ff60a069362e618d5149abc4cbc5246629c93ea' 3xui-happ-node/install.sh
-          grep -Fq '0f8dd7baef3458f6591574e24814f322cf7f5e1e27f0a594683745e50be84ec5' 3xui-happ-node/install.sh
+          ! grep -nE 'image:[[:space:]]*remnawave/node:latest|https://get\.docker\.com' install-caddy-node-reality-stream-core.sh
 
           # Firewall data sources must be immutable snapshots.
           grep -Fq 'TSPU_COMMIT=a465e13f4cb43c1692eb650430eb857900558c5d' protection-manager.sh
@@ -92,7 +86,7 @@ jobs:
       - name: strict-mode guards
         run: |
           set -e
-          for f in             install.sh             clean-install.sh             full-clean-reinstall.sh             install-caddy-node-reality-stream-core.sh             protection-manager.sh             telemt-manager.sh             3xui-happ-node/install.sh
+          for f in             install.sh             clean-install.sh             full-clean-reinstall.sh             install-caddy-node-reality-stream-core.sh             protection-manager.sh
           do
             grep -Fq 'set -Eeuo pipefail' "$f"
           done
@@ -105,4 +99,3 @@ jobs:
           grep -Fq 'DPkg::Lock::Timeout=' full-clean-reinstall.sh
           grep -Fq 'DPkg::Lock::Timeout=' install-caddy-node-reality-stream-core.sh
           grep -Fq 'DPkg::Lock::Timeout=' protection-manager.sh
-          grep -Fq 'DPkg::Lock::Timeout=' telemt-manager.sh
