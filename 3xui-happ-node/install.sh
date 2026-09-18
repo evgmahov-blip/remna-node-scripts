@@ -17,12 +17,55 @@ PANEL_PORT="${PANEL_PORT:-8000}"
 XHTTP_PORT="${XHTTP_PORT:-18443}"
 SUB_PORT="${SUB_PORT:-2096}"
 CLIENT_NAME="${CLIENT_NAME:-main}"
-INSTALL_RADIO_STUB="${INSTALL_RADIO_STUB:-yes}"
-XUI_VERSION="${XUI_VERSION:-3.7.0}"
+INSTALL_RADIO_STUB="${INSTALL_RADIO_STUB:-no}"
+XUI_VERSION=3.7.0
+XUI_TAG="v${XUI_VERSION}"
+XUI_COMMIT=f727d04f6522bb94a8fb52e8352fdcafb51c11e1
+XUI_INSTALL_BLOB_SHA=4ff60a069362e618d5149abc4cbc5246629c93ea
+RADIO_COMMIT=276908d5fed3faaadfb3a331ab7acad18824a9b9
+RADIO_INDEX_BLOB_SHA=794845d7ac21dc76a96250fe0da9b5f71037507f
 WEBROOT="${WEBROOT:-/var/www/mstream}"
+CREDENTIALS_FILE="${CREDENTIALS_FILE:-/root/3xui-happ-node.credentials}"
 
 rand_alnum() { tr -dc 'a-z0-9' </dev/urandom | head -c "${1:-16}"; }
 rand_pass() { tr -dc 'A-Za-z0-9_!@#%+=' </dev/urandom | head -c "${1:-24}"; }
+
+git_blob_sha() {
+  local file="$1" size
+  size="$(wc -c <"$file" | tr -d '[:space:]')"
+  { printf 'blob %s\000' "$size"; cat "$file"; } | sha1sum | awk '{print $1}'
+}
+download_git_blob_checked() {
+  local url="$1" expected="$2" dst="$3" actual
+  rm -f "$dst"
+  curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 2 "$url" -o "$dst"
+  actual="$(git_blob_sha "$dst")"
+  [ "$actual" = "$expected" ] || { echo "[ОШИБКА] git blob SHA не совпал: $actual != $expected ($url)" >&2; rm -f "$dst"; return 1; }
+}
+xui_release_sha256() {
+  case "$(uname -m)" in
+    x86_64|x64|amd64) printf '%s' '0f8dd7baef3458f6591574e24814f322cf7f5e1e27f0a594683745e50be84ec5' ;;
+    i386|i486|i586|i686|x86) printf '%s' 'fe5db2bf3acbf97654dce9ef8f9d36d1ad97e3ec0c137b441208a4d39a5bad0f' ;;
+    aarch64|arm64|armv8*) printf '%s' '3caf1db1e8b10bb1fa1324c945522690bcf01c533ee75b377268f1c01a3ce896' ;;
+    armv7*|armv7) printf '%s' 'fc5cffd218cdb6da0c22c1ce9981ee91f269f657ea71463a1a1b5a9d930d7983' ;;
+    armv6*|armv6) printf '%s' 'db285ff17c2a889b2ca09c63bdac82f61f41a6b637e749a89dfff07388b8384e' ;;
+    armv5*|armv5) printf '%s' 'd198e607e530560ac7904fb408fed61447caa52bbf893b9ab5d8df6137924c67' ;;
+    s390x) printf '%s' 'ff72abf4987b1929d273f79c3b591d6dd7c84fd0a59ead058d488aa238ab1a07' ;;
+    *) return 1 ;;
+  esac
+}
+xui_release_arch() {
+  case "$(uname -m)" in
+    x86_64|x64|amd64) printf '%s' amd64 ;;
+    i386|i486|i586|i686|x86) printf '%s' 386 ;;
+    aarch64|arm64|armv8*) printf '%s' arm64 ;;
+    armv7*|armv7) printf '%s' armv7 ;;
+    armv6*|armv6) printf '%s' armv6 ;;
+    armv5*|armv5) printf '%s' armv5 ;;
+    s390x) printf '%s' s390x ;;
+    *) return 1 ;;
+  esac
+}
 
 if [ -z "$DOMAIN" ]; then
   read -r -p 'DNS имя ноды (например stream.example.com): ' DOMAIN
@@ -111,16 +154,28 @@ install -o root -g caddy -m 0640 "$LE_DIR/fullchain.pem" "/etc/caddy/certs/${DOM
 install -o root -g caddy -m 0640 "$LE_DIR/privkey.pem" "/etc/caddy/certs/${DOMAIN}/privkey.pem"
 chmod 0750 "/etc/caddy/certs/${DOMAIN}"
 
-echo '[3/13] Устанавливаю 3x-ui'
+echo '[3/13] Устанавливаю 3x-ui из закреплённого commit/release'
 export XUI_USERNAME="$PANEL_USER"
 export XUI_PASSWORD="$PANEL_PASS"
 export XUI_PANEL_PORT="$PANEL_PORT"
 export XUI_WEB_BASE_PATH="$PANEL_PATH"
 export XUI_SSL_MODE='none'
+export XUI_NONINTERACTIVE=1
 
-curl -fsSL "https://raw.githubusercontent.com/MHSanaei/3x-ui/v${XUI_VERSION}/install.sh" -o /tmp/3x-ui-install.sh
-bash /tmp/3x-ui-install.sh
-rm -f /tmp/3x-ui-install.sh
+XUI_INSTALL=/tmp/3x-ui-install.sh
+XUI_ARCH="$(xui_release_arch)" || { echo '[ОШИБКА] Неподдерживаемая архитектура.'; exit 1; }
+XUI_RELEASE_SHA256="$(xui_release_sha256)" || { echo '[ОШИБКА] Нет закреплённого SHA-256 для этой архитектуры.'; exit 1; }
+XUI_RELEASE="/usr/local/x-ui-linux-${XUI_ARCH}.tar.gz"
+download_git_blob_checked "https://raw.githubusercontent.com/MHSanaei/3x-ui/${XUI_COMMIT}/install.sh" "$XUI_INSTALL_BLOB_SHA" "$XUI_INSTALL"
+bash -n "$XUI_INSTALL"
+sed -i "s#raw.githubusercontent.com/MHSanaei/3x-ui/main/#raw.githubusercontent.com/MHSanaei/3x-ui/${XUI_COMMIT}/#g" "$XUI_INSTALL"
+sed -i 's#^[[:space:]]*curl -fLR --retry 5 --retry-delay 3 --connect-timeout 15 --speed-limit 1 --speed-time 300 -o ${xui_folder}-linux-$(arch).tar.gz .*#        test -s ${xui_folder}-linux-$(arch).tar.gz#' "$XUI_INSTALL"
+
+curl -fL --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 300 \
+  "https://github.com/MHSanaei/3x-ui/releases/download/${XUI_TAG}/x-ui-linux-${XUI_ARCH}.tar.gz" -o "$XUI_RELEASE"
+printf '%s  %s\n' "$XUI_RELEASE_SHA256" "$XUI_RELEASE" | sha256sum -c -
+bash "$XUI_INSTALL" "$XUI_TAG"
+rm -f "$XUI_INSTALL" "$XUI_RELEASE"
 
 [ -s /etc/x-ui/install-result.env ] || { echo '[ОШИБКА] 3x-ui не создал install-result.env.'; exit 1; }
 . /etc/x-ui/install-result.env
@@ -138,7 +193,10 @@ API="http://127.0.0.1:${PANEL_PORT}${PANEL_PATH%/}"
 api_get() { curl -fsS -H "Authorization: Bearer ${API_TOKEN}" "${API}/${1#/}"; }
 api_post() { curl -fsS -H "Authorization: Bearer ${API_TOKEN}" -H 'Content-Type: application/json' -X POST "${API}/${1#/}" -d "${2:-{}}"; }
 
-wait_http "http://127.0.0.1:${PANEL_PORT}${PANEL_PATH}" || true
+/usr/local/x-ui/x-ui setting -listenIP "127.0.0.1" >/dev/null
+systemctl restart x-ui
+sleep 2
+wait_http "http://127.0.0.1:${PANEL_PORT}${PANEL_PATH}" || { echo '[ОШИБКА] Панель не отвечает на loopback.'; exit 1; }
 
 echo '[4/13] Настраиваю Happ subscription'
 ROUTING_JSON="$(jq -cn '{Name:"RU DIRECT",GlobalProxy:"true",DirectSites:["geosite:category-ru"],DirectIp:["geoip:ru","geoip:private","10.0.0.0/8","100.64.0.0/10","127.0.0.0/8","169.254.0.0/16","172.16.0.0/12","192.168.0.0/16"],ProxySites:[],ProxyIp:[],BlockSites:[],BlockIp:[],DomainStrategy:"IPIfNonMatch",FakeDNS:"false"}')"
@@ -178,22 +236,21 @@ printf '%s' "$RESP" | jq -e '.success == true' >/dev/null
 systemctl restart x-ui
 sleep 3
 
-echo '[8/13] Устанавливаю radio-stub-site'
+echo '[8/13] Устанавливаю маскировочный сайт'
 mkdir -p "$WEBROOT"
+rm -f "$WEBROOT/admin.html"
 if [ "$INSTALL_RADIO_STUB" = 'yes' ]; then
-  TMP_SITE="$(mktemp -d)"
-  curl -fsSL 'https://raw.githubusercontent.com/Balbuto/radio-stub-site/main/index.html' -o "$TMP_SITE/index.html"
-  curl -fsSL 'https://raw.githubusercontent.com/Balbuto/radio-stub-site/main/admin.html' -o "$TMP_SITE/admin.html"
-  rm -rf "${WEBROOT}.old"
-  [ -d "$WEBROOT" ] && mv "$WEBROOT" "${WEBROOT}.old" || true
-  mkdir -p "$WEBROOT"
-  cp -a "$TMP_SITE"/. "$WEBROOT"/
-  chmod -R a+rX "$WEBROOT"
-  rm -rf "$TMP_SITE"
+  TMP_SITE="$(mktemp)"
+  download_git_blob_checked "https://raw.githubusercontent.com/Balbuto/radio-stub-site/${RADIO_COMMIT}/index.html" "$RADIO_INDEX_BLOB_SHA" "$TMP_SITE"
+  install -o root -g root -m 0644 "$TMP_SITE" "$WEBROOT/index.html"
+  rm -f "$TMP_SITE"
 else
   cat >"$WEBROOT/index.html" <<'HTML'
-<!doctype html><meta charset="utf-8"><title>Media</title><h1>Media service</h1>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Media</title></head>
+<body><main><h1>Media service</h1><p>Streaming endpoint is online.</p></main></body></html>
 HTML
+  chmod 0644 "$WEBROOT/index.html"
 fi
 
 echo '[9/13] Настраиваю Caddy'
@@ -208,8 +265,11 @@ cat >/etc/caddy/Caddyfile <<CADDY
 
 https://${DOMAIN}:443 {
     tls /etc/caddy/certs/${DOMAIN}/fullchain.pem /etc/caddy/certs/${DOMAIN}/privkey.pem {
-        protocols tls1.2 tls1.2
+        protocols tls1.2 tls1.3
     }
+
+    @panel path ${PANEL_PATH}*
+    reverse_proxy @panel 127.0.0.1:${PANEL_PORT}
 
     @subscription path ${SUB_PATH}*
     reverse_proxy @subscription https://127.0.0.1:${SUB_PORT} {
@@ -237,10 +297,14 @@ caddy validate --config /etc/caddy/Caddyfile
 systemctl enable --now caddy
 systemctl reload caddy
 
-echo '[10/13] Включаю HTTPS на панели 3x-ui'
-/usr/local/x-ui/x-ui setting -webCert "/etc/caddy/certs/${DOMAIN}/fullchain.pem" -webCertKey "/etc/caddy/certs/${DOMAIN}/privkey.pem"
+echo '[10/13] Проверяю приватность панели 3x-ui'
+/usr/local/x-ui/x-ui setting -listenIP "127.0.0.1" >/dev/null
 systemctl restart x-ui
 sleep 3
+ss -ltn | awk -v p=":${PANEL_PORT}" '$4 ~ p {print $4}' | grep -Eq '^(127\.0\.0\.1|\[::1\]):' || {
+  echo '[ОШИБКА] Панель 3x-ui слушает не только loopback.' >&2
+  exit 1
+}
 
 echo '[11/13] Устанавливаю hook продления сертификата'
 install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
@@ -255,7 +319,6 @@ install -o root -g caddy -m 0640 "\$SRC/fullchain.pem" "\$DST/fullchain.pem"
 install -o root -g caddy -m 0640 "\$SRC/privkey.pem" "\$DST/privkey.pem"
 caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
-systemctl restart x-ui
 HOOK
 chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/3xui-happ-node.sh
 
@@ -283,17 +346,22 @@ fi
 echo '[13/13] ГОТОВО'
 echo
 printf 'Сайт:              https://%s/\n' "$DOMAIN"
-printf 'Радио-админка:      https://%s/admin.html\n' "$DOMAIN"
-printf '3x-ui панель:       https://%s:%s%s\n' "$DOMAIN" "$PANEL_PORT" "$PANEL_PATH"
+printf '3x-ui панель:       https://%s%s\n' "$DOMAIN" "$PANEL_PATH"
 printf 'Happ subscription:  %s\n' "$SUB_URL"
 printf 'XHTTP:              %s:443 TCP, path %s\n' "$DOMAIN" "$XHTTP_PATH"
 printf 'Hysteria2:          %s:443 UDP\n' "$DOMAIN"
+install -d -o root -g root -m 0700 "$(dirname "$CREDENTIALS_FILE")"
+umask 077
+{
+  printf 'PANEL_URL=%q\n' "https://${DOMAIN}${PANEL_PATH}"
+  printf 'PANEL_USERNAME=%q\n' "$PANEL_USER"
+  printf 'PANEL_PASSWORD=%q\n' "$PANEL_PASS"
+  printf 'SUBSCRIPTION_URL=%q\n' "$SUB_URL"
+} >"$CREDENTIALS_FILE"
+chmod 0600 "$CREDENTIALS_FILE"
 echo
-echo 'Панельные реквизиты сохраните сейчас:'
-printf 'Username: %s\n' "$PANEL_USER"
-printf 'Password: %s\n' "$PANEL_PASS"
-echo
-echo '[ВАЖНО] TCP/443 работает через Caddy только TLS 1.2; Hysteria2 использует QUIC/TLS 1.3.'
-echo '[ВАЖНО] Панель пока слушает публичный порт. Ограничьте его firewall-ом после проверки.'
+printf 'Панельные реквизиты сохранены в root-only файл: %s (0600)\n' "$CREDENTIALS_FILE"
+echo '[ВАЖНО] TCP/443: Caddy TLS 1.2/1.3; Hysteria2 использует QUIC/TLS 1.3.'
+echo '[ВАЖНО] 3x-ui слушает только 127.0.0.1 и доступен снаружи через Caddy по скрытому PANEL_PATH.'
 
 echo "#################### КОНЕЦ ВЫВОДА: ${TASK} ####################"
