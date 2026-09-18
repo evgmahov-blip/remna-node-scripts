@@ -1,80 +1,69 @@
 # Защита Remna Node
 
-Модуль `protection-manager.sh` встроен в основное меню `install-caddy-node-reality-stream.sh`.
-
-Он использует отдельные цепочки `REMNA_GUARD` / `REMNA_GUARD6` и не выполняет `ufw reset`, не очищает пользовательский `INPUT` и не удаляет чужие firewall-правила.
+Модуль `protection-manager.sh` управляет отдельными цепочками `REMNA_GUARD` / `REMNA_GUARD6`. Он не выполняет `ufw reset`, не очищает пользовательский `INPUT` и не удаляет посторонние firewall-правила.
 
 ## TCP/2222 — только сервер панели
 
-`remnanode` слушает Node API на `*:2222`, но внешний доступ к этому порту должен быть разрешён только серверу Remnawave Panel.
-
-После указания `PANEL_IP` применяется схема:
+`remnanode` слушает Node API на TCP/2222. Модуль требует явный `PANEL_IP` и строит правило:
 
 ```text
 src = PANEL_IP -> tcp/2222 ACCEPT
 all others     -> tcp/2222 DROP
 ```
 
-Для IPv6 действует отдельная цепочка. Если панель использует IPv4, входящий IPv6-доступ к `2222` закрывается полностью.
-
-Если UFW активен, модуль также удаляет старое широкое правило `2222/tcp ALLOW Anywhere`, которое могли создать старые версии installer, и добавляет только разрешение от IP панели.
-
-Модуль никогда не угадывает IP панели. Если `PANEL_IP` не задан или некорректен, `apply` отказывается менять firewall, чтобы не отрезать рабочую панель.
-
-Интерактивно:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
-# [20] Закрыть TCP/2222 только для IP панели
-```
-
-CLI:
+Если `PANEL_IP` пустой или некорректный, применение правил прерывается, чтобы не отрезать панель случайным предположением.
 
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh panel-set 203.0.113.10
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protect-status
 ```
 
-При новой интерактивной установке/repair основной manager сам требует IP панели. Для неинтерактивной установки передайте:
+## TSPU / GOV snapshots
 
-```bash
-PANEL_IP=203.0.113.10 EMAIL=... DOMAIN=... SECRET_KEY=... \
-  sudo -E /opt/remna-node-scripts/install-caddy-node-reality-stream.sh --auto
-```
+Списки больше не скачиваются из изменяемой ветки `main`.
 
-## RKN/TSPU/GOV watcher
-
-Модуль использует идеи `Balbuto/safe-remnanode-setup` / RKN-Watcher:
-
-- TSPU CIDR list;
-- GOV/ASN blacklist;
-- `iptables + ipset`;
-- атомарное обновление через временный ipset и `swap`;
-- сохранение предыдущего рабочего списка при ошибке скачивания;
-- systemd boot restore;
-- ежедневный `Persistent=true` timer;
-- GeoIP allow-страны;
-- ручные allow/deny IP/CIDR;
-- проверка поддержки `ipset/xt_set`;
-- собственные логи и статус.
-
-Источники по умолчанию:
+Текущие snapshots закреплены одновременно на commit SHA и Git blob SHA:
 
 ```text
 TSPU: tread-lightly/CyberOK_Skipa_ips
-GOV : C24Be/AS_Network_List/blacklists_iptables/blacklist-v4.ipset
-Geo : ipdeny aggregated country zones
+      commit a465e13f4cb43c1692eb650430eb857900558c5d
+
+GOV : C24Be/AS_Network_List
+      commit 0e999cd730c4d6ca3d58053407a22f63f2d464e6
 ```
 
-GeoIP по умолчанию **выключен**, чтобы установка не могла неожиданно отрезать администратора или пользователей. TSPU/GOV включены.
+Перед загрузкой в `ipset` файл проходит проверку Git blob SHA и санитизацию CIDR. Ошибка скачивания, несоответствие digest или пустой результат не должны заменять последний рабочий набор.
 
-Защищаемые блок-листами порты по умолчанию:
+Это осознанный trade-off: timer **не получает новые адреса автоматически из чужого mutable source**. Чтобы обновить данные, сначала нужно просмотреть upstream diff, затем изменить commit/blob pins в репозитории и пройти CI/review.
+
+## GeoIP allow-list
+
+GeoIP по умолчанию выключен.
+
+При включении данные берутся из `ipverse/country-ip-blocks` на закреплённом commit:
 
 ```text
-443,18443,5222,5223,8530
+6e3f7978b0391935e306060b11beba774fc7f624
 ```
 
-`2222` обрабатывается отдельным более строгим правилом panel-only.
+Обновление выполняется all-or-nothing: если хотя бы одна запрошенная страна не скачалась или итоговый набор выглядит подозрительно маленьким, существующий `countries.txt` сохраняется и firewall продолжает использовать последний рабочий набор.
+
+GeoIP — allow-list: после ACCEPT для выбранных стран защищаемые порты получают default DROP. Поэтому включайте его только после проверки списка стран и доступа к серверу.
+
+## Порядок правил
+
+```text
+PANEL_IP -> 2222 ACCEPT
+others   -> 2222 DROP
+manual allow
+manual deny
+TSPU DROP (если включён)
+GOV DROP  (если включён)
+GeoIP country ACCEPT + default DROP (если включён)
+RETURN
+```
+
+IPv6 Node API закрывается отдельной цепочкой.
 
 ## Systemd
 
@@ -84,27 +73,28 @@ remna-protection-update.service
 remna-protection-update.timer
 ```
 
-Timer:
+Timer повторно проверяет и загружает **закреплённые** snapshots раз в неделю:
 
 ```text
-OnCalendar=*-*-* 03:00:00
+OnCalendar=Sun *-*-* 03:00:00
 Persistent=true
 RandomizedDelaySec=15m
 ```
+
+Это проверка доступности/целостности закреплённых данных, а не доверие свежему `main`.
 
 ## Проверка
 
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protect-status
+sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protect-selftest
 sudo iptables -S REMNA_GUARD
 sudo ufw status numbered
 ```
 
-Ожидаемый порядок для `2222`:
+Ожидаемый порядок для TCP/2222:
 
 ```text
 -A REMNA_GUARD -s <PANEL_IP> -p tcp --dport 2222 -j ACCEPT
 -A REMNA_GUARD -p tcp --dport 2222 -j DROP
 ```
-
-Основная диагностика manager также показывает состояние защиты Node API в секции `[E] Защита / Node API`.
