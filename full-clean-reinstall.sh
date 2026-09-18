@@ -41,14 +41,14 @@ chmod 0700 "$TMP"
 
 case "$MODE" in
   install|reinstall|clean|menu|'')
-    exec bash "$TMP" "${MODE:-menu}"
+    bash "$TMP" "${MODE:-menu}"
     ;;
   full-reinstall)
-    exec bash "$TMP" reinstall
+    bash "$TMP" reinstall
     ;;
   install-next)
     echo '[WARN] install-next больше не использует закрытый setup-remna-node; запускаю проверяемый public installer.' >&2
-    exec bash "$TMP" install
+    bash "$TMP" install
     ;;
   *)
     echo '[ERROR] Использование: full-clean-reinstall.sh [install|reinstall|clean|menu]' >&2
