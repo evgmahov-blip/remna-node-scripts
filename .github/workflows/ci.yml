@@ -40,9 +40,11 @@ jobs:
 
           # Root-executed code must not depend on these previously mutable or
           # privacy-sensitive endpoints.
-          ! grep -RInE --exclude-dir=.git             'ghostos\.space|GHOST_(LIC|ID|SITE|DL|Q)|stream\.deepbeat\.ru|rustream\.remna\.space|\.2rdp\.ru|setup-remna-node|radio-stub-site/main|CyberOK_Skipa_ips/main|AS_Network_List/main|ipdeny\.com' .
+          mapfile -d '' shell_files < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
 
-          ! grep -RInE --exclude-dir=.git             'protocols[[:space:]]+tls1\.2[[:space:]]+tls1\.2|printf .*Password:|printf .*Username:' .
+          ! grep -nE 'ghostos\.space|GHOST_(LIC|ID|SITE|DL|Q)|stream\.deepbeat\.ru|rustream\.remna\.space|\.2rdp\.ru|setup-remna-node|radio-stub-site/main|CyberOK_Skipa_ips/main|AS_Network_List/main|ipdeny\.com' "${shell_files[@]}"
+
+          ! grep -nE 'protocols[[:space:]]+tls1\.2[[:space:]]+tls1\.2|printf .*Password:|printf .*Username:' "${shell_files[@]}"
 
           # Existing image / installer invariants.
           ! grep -nE             'image:[[:space:]]*remnawave/node:latest|https://get\.docker\.com|telemt/telemt/main/install\.sh|amirotin/telemt_panel/main/install\.sh'             install-caddy-node-reality-stream-core.sh telemt-manager.sh
