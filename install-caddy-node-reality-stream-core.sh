@@ -1389,7 +1389,7 @@ menu() {
   printf '   %b[10]%b ⚡  Включить REALITY        %b— переключить один внешний TCP/443%b\n' "$G" "$N" "$DIM" "$N"
   printf '   %b[11]%b ↩   Отключить REALITY       %b— вернуть публичный Caddy:443%b\n' "$Y" "$N" "$DIM" "$N"
   printf '   %b[12]%b ℹ   Файлы REALITY           %b— пути без вывода ключей%b\n' "$BL" "$N" "$DIM" "$N"
-  printf '   %b[13]%b 🛠   Исправить текущую ноду %b— сайт, права и конфликт Caddy/REALITY%b\n' "$G" "$N" "$DIM" "$N"
+  printf '   %b[13]%b 🛠   Repair Caddy / XHTTP / REALITY %b— сайт, конфиги и конфликт TCP/443%b\n' "$G" "$N" "$DIM" "$N"
   printf '   %b[14]%b 🧹  Снести всё (clean)      %b— удалить ноду и конфиг Caddy%b\n' "$R" "$N" "$DIM" "$N"
   printf '   %b[0]%b  🚪  Выход\n' "$DIM" "$N"
   echo
