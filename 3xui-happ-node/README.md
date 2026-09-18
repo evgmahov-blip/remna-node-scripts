@@ -20,7 +20,7 @@
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/11a11459d91356e3358fad831f86a233982fd49e/3xui-happ-node/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/40b796988351f91130c49944b4d7351da51be0ee/3xui-happ-node/install.sh \
   -o /root/install-3xui-happ-node.sh
 bash -n /root/install-3xui-happ-node.sh
 sudo bash /root/install-3xui-happ-node.sh
@@ -86,7 +86,7 @@ Caddy разрешает TLS 1.2 и TLS 1.3. Hysteria2 использует QUIC
 
 ## Сертификаты
 
-Certbot получает сертификат для `DOMAIN`. Deploy hook копирует сертификат в Caddy cert directory, валидирует Caddyfile и reload-ит Caddy. Поскольку 3x-ui панель работает за Caddy по loopback HTTP, ей не требуется собственная копия публичного TLS key.
+Certbot получает сертификат для `DOMAIN`. 3x-ui использует этот сертификат только на loopback listener, а Caddy подключается к backend по HTTPS с ожидаемым SNI. Deploy hook обновляет копию сертификата, валидирует/reload-ит Caddy и перезапускает x-ui, чтобы backend подхватил новый сертификат.
 
 ## После установки
 
