@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-TASK_NAME="REMNA NODE FULL CLEAN + NEXT V2"
-PINNED_REF="c78f975e93c56d3b36120cd4c6c542a637630070"
-REMOTE="https://raw.githubusercontent.com/evgmahov-blip/setup-remna-node/${PINNED_REF}/production/full-clean-reinstall-v2.sh"
+TASK_NAME="REMNA NODE VERIFIED INSTALLER"
+PINNED_REF="03f275ebf04b44fabfd7b4561903e774e3bcd786"
+EXPECTED_BLOB_SHA="2325432c8f24b928e65b65b8bb5251dcb733f1c6"
+REMOTE="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${PINNED_REF}/install-caddy-node-reality-stream.sh"
 MODE="${1:-menu}"
 TMP="$(mktemp)"
 
@@ -16,18 +17,41 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-command -v curl >/dev/null 2>&1 || { apt-get update -y && apt-get install -y curl ca-certificates; }
+command -v curl >/dev/null 2>&1 || {
+  command -v apt-get >/dev/null 2>&1 || { echo '[ERROR] curl отсутствует и apt-get недоступен.' >&2; exit 1; }
+  apt-get -o DPkg::Lock::Timeout=300 update -y
+  apt-get -o DPkg::Lock::Timeout=300 install -y curl ca-certificates
+}
+
+git_blob_sha(){
+  local file="$1" size
+  command -v sha1sum >/dev/null 2>&1 || return 1
+  size="$(wc -c <"$file" | tr -d '[:space:]')"
+  { printf 'blob %s\000' "$size"; cat "$file"; } | sha1sum | awk '{print $1}'
+}
 
 curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 3 "$REMOTE" -o "$TMP"
+ACTUAL_BLOB_SHA="$(git_blob_sha "$TMP")"
+[ "$ACTUAL_BLOB_SHA" = "$EXPECTED_BLOB_SHA" ] || {
+  echo "[ERROR] Integrity check failed: $ACTUAL_BLOB_SHA != $EXPECTED_BLOB_SHA" >&2
+  exit 1
+}
 bash -n "$TMP"
 chmod 0700 "$TMP"
 
 case "$MODE" in
-  clean|reinstall|full-reinstall|install|install-next|menu|'')
-    bash "$TMP" "$MODE"
+  install|reinstall|clean|menu|'')
+    exec bash "$TMP" "${MODE:-menu}"
+    ;;
+  full-reinstall)
+    exec bash "$TMP" reinstall
+    ;;
+  install-next)
+    echo '[WARN] install-next больше не использует закрытый setup-remna-node; запускаю проверяемый public installer.' >&2
+    exec bash "$TMP" install
     ;;
   *)
-    echo '[ERROR] Использование: full-clean-reinstall.sh [clean|reinstall|install|menu]' >&2
+    echo '[ERROR] Использование: full-clean-reinstall.sh [install|reinstall|clean|menu]' >&2
     exit 2
     ;;
 esac
