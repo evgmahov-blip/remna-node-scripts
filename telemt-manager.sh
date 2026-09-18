@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -Eeo pipefail
+set -Eeuo pipefail
 
 TELEMT_VERSION=3.5.5
 TELEMT_INSTALL_COMMIT=ac71d92ec41dea00a7eafd6b8d350c3486633500
@@ -108,22 +108,20 @@ configure_panel_file(){
   $SUDO install -o telemt-panel -g telemt-panel -m 0600 "$tmp" "$PANEL_CONFIG"; rm -f "$tmp"; $SUDO systemctl restart telemt-panel
   ok "Telemt Panel настроена; backup: $backup"
 }
-install_redirect_service(){
-  command -v iptables >/dev/null 2>&1 || { apt_get update -y; apt_get install -y iptables; }
-  cat <<UNIT | $SUDO tee /etc/systemd/system/telemt-panel-${PANEL_PORT}.service >/dev/null
-[Unit]
-Description=Redirect TCP/${PANEL_PORT} to TCP/443 for Telemt Panel shared TLS
-After=network-online.target
-Wants=network-online.target
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/sh -c '/usr/sbin/iptables -t nat -C PREROUTING -p tcp --dport ${PANEL_PORT} -j REDIRECT --to-ports 443 2>/dev/null || /usr/sbin/iptables -t nat -A PREROUTING -p tcp --dport ${PANEL_PORT} -j REDIRECT --to-ports 443'
-ExecStop=/bin/sh -c '/usr/sbin/iptables -t nat -D PREROUTING -p tcp --dport ${PANEL_PORT} -j REDIRECT --to-ports 443 2>/dev/null || true'
-[Install]
-WantedBy=multi-user.target
-UNIT
-  $SUDO systemctl daemon-reload; $SUDO systemctl enable --now "telemt-panel-${PANEL_PORT}.service"
+remove_legacy_redirect(){
+  $SUDO systemctl disable --now "telemt-panel-${PANEL_PORT}.service" >/dev/null 2>&1 || true
+  $SUDO rm -f "/etc/systemd/system/telemt-panel-${PANEL_PORT}.service"
+  if command -v iptables >/dev/null 2>&1; then
+    while $SUDO iptables -t nat -C PREROUTING -p tcp --dport "$PANEL_PORT" -j REDIRECT --to-ports 443 >/dev/null 2>&1; do
+      $SUDO iptables -t nat -D PREROUTING -p tcp --dport "$PANEL_PORT" -j REDIRECT --to-ports 443 || break
+    done
+  fi
+  if command -v ufw >/dev/null 2>&1 && $SUDO ufw status 2>/dev/null | grep -qi '^Status: active'; then
+    while $SUDO ufw status 2>/dev/null | grep -Eq "^${PANEL_PORT}/tcp[[:space:]]+ALLOW"; do
+      $SUDO ufw --force delete allow "${PANEL_PORT}/tcp" >/dev/null 2>&1 || break
+    done
+  fi
+  $SUDO systemctl daemon-reload
 }
 open_port(){ local p="$1"; if command -v ufw >/dev/null 2>&1 && $SUDO ufw status 2>/dev/null | grep -qi 'Status: active'; then $SUDO ufw allow "${p}/tcp" >/dev/null; fi; }
 
@@ -145,13 +143,18 @@ telemt_install(){
     tmp="$(mktemp)"; download_git_blob_checked "$PANEL_INSTALL_URL" "$PANEL_INSTALL_BLOB_SHA" "$tmp" || die "Telemt Panel installer integrity check failed"
     $SUDO sh "$tmp" install "$PANEL_VERSION"; rm -f "$tmp"; managed_panel=1
   fi
-  configure_panel_file "${unit%.service}" "$api" "$config"; ensure_panel_caddy; install_redirect_service; open_port "$PANEL_PORT"; save_state "$managed_telemt" "$managed_panel" "$unit" "$api" "$config"
-  pdomain="$(panel_domain)"; ok "Telemt-интеграция готова."; [ -z "$pdomain" ] || say "Panel HTTPS: https://${pdomain}:${PANEL_PORT}${PANEL_PATH}/login"
+  configure_panel_file "${unit%.service}" "$api" "$config"
+  ensure_panel_caddy
+  remove_legacy_redirect
+  save_state "$managed_telemt" "$managed_panel" "$unit" "$api" "$config"
+  pdomain="$(panel_domain)"
+  ok "Telemt-интеграция готова; panel backend слушает только 127.0.0.1:8080."
+  [ -z "$pdomain" ] || say "Panel HTTPS: https://${pdomain}${PANEL_PATH}/login"
 }
-telemt_status(){ local pdomain; say "Telemt units:"; list_telemt_units | while read -r u; do printf '  %-18s %s\n' "$u" "$(systemctl is-active "$u" 2>/dev/null || true)"; done; say "Telemt Panel: $(systemctl is-active telemt-panel 2>/dev/null || echo absent)"; say "Порты:"; ss -ltnp 2>/dev/null | grep -E ':5222 |:5223 |:8530 |:8080 |:9091 |:9092 |:9093 |:443 ' || true; say "Redirect ${PANEL_PORT}->443:"; $SUDO iptables -t nat -S PREROUTING 2>/dev/null | grep -- "--dport ${PANEL_PORT}" || echo '  нет'; pdomain="$(panel_domain)"; [ -z "$pdomain" ] || say "URL: https://${pdomain}:${PANEL_PORT}${PANEL_PATH}/login"; }
+telemt_status(){ local pdomain; say "Telemt units:"; list_telemt_units | while read -r u; do printf '  %-18s %s\n' "$u" "$(systemctl is-active "$u" 2>/dev/null || true)"; done; say "Telemt Panel: $(systemctl is-active telemt-panel 2>/dev/null || echo absent)"; say "Порты:"; ss -ltnp 2>/dev/null | grep -E ':5222 |:5223 |:8530 |127\.0\.0\.1:8080 |:9091 |:9092 |:9093 |:443 ' || true; say "Panel exposure: Caddy /telemt -> 127.0.0.1:8080 (без публичного 18443 redirect)"; pdomain="$(panel_domain)"; [ -z "$pdomain" ] || say "URL: https://${pdomain}${PANEL_PATH}/login"; }
 telemt_remove(){
   local yn tmp f; load_state; printf 'Убрать интеграцию Telemt Panel (18443 + /telemt)? [y/N] '; read -r yn <"$TTY" || true; [[ "$yn" =~ ^[Yy]$ ]] || return 0
-  $SUDO systemctl disable --now "telemt-panel-${PANEL_PORT}.service" >/dev/null 2>&1 || true; $SUDO rm -f "/etc/systemd/system/telemt-panel-${PANEL_PORT}.service"; $SUDO iptables -t nat -D PREROUTING -p tcp --dport "$PANEL_PORT" -j REDIRECT --to-ports 443 2>/dev/null || true
+  remove_legacy_redirect
   for f in /etc/caddy/Caddyfile /etc/caddy/Caddyfile.public /etc/caddy/Caddyfile.reality; do remove_caddy_panel_block "$f" || true; done; caddy_reload_or_restart
   warn "Существующие Telemt/Panel не удаляются автоматически."; $SUDO rm -f "$TELEMT_STATE"; $SUDO systemctl daemon-reload; ok "Интеграция удалена."
 }
