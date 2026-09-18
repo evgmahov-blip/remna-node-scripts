@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-REPO_REF=c44060d5d5e2c72619f3f18b47b060ad52668690
+REPO_REF=72a6dbad41ba6e561e390e25aba05321081a94e3
 REPO_RAW="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${REPO_REF}"
 CORE_BLOB_SHA=1060e0039f04a1941bbb5cf80d3251dc16228b28
-TELEMT_BLOB_SHA=bad3d675ba5d2645fe9a2589d391da52a268a622
-PROTECTION_BLOB_SHA=6cc384a04371dc5bbab170e43a8170d5d6bd9786
+PROTECTION_BLOB_SHA=c5f33acd3e56f24637af87456ee8a4f1d5b0e907
 CADDY_GUARD_BLOB_SHA=fc908882069fe50602c2411a46f4a5db77bddb74
 REMNA_NODE_IMAGE="${REMNA_NODE_IMAGE:-remnawave/node:3.4.1}"
 INSTALL_DIR=/opt/remna-node-scripts
 SELF="$INSTALL_DIR/install-caddy-node-reality-stream.sh"
 CORE="$INSTALL_DIR/install-caddy-node-reality-stream-core.sh"
-TELEMT_HELPER="$INSTALL_DIR/telemt-manager.sh"
 PROTECTION_HELPER="$INSTALL_DIR/protection-manager.sh"
 CADDY_GUARD="$INSTALL_DIR/caddy-resilient-start.sh"
 NODE_DIR=/opt/remnanode
@@ -20,7 +18,6 @@ NODE_ENV="$NODE_DIR/.env"
 CADDYFILE=/etc/caddy/Caddyfile
 CADDY_PUBLIC=/etc/caddy/Caddyfile.public
 CADDY_REALITY=/etc/caddy/Caddyfile.reality
-PANEL_CONFIG=/etc/telemt-panel/config.toml
 HANDOFF_SERVICE=/etc/systemd/system/remna-reality-handoff.service
 HANDOFF_TIMER=/etc/systemd/system/remna-reality-handoff.timer
 HANDOFF_COOLDOWN=/run/remna-reality-handoff.cooldown
@@ -75,12 +72,6 @@ ensure_core(){
   if download_checked "$REPO_RAW/install-caddy-node-reality-stream-core.sh" "$CORE_BLOB_SHA" "$CORE"; then return 0; fi
   verified_script "$CORE" "$CORE_BLOB_SHA" && { warn "GitHub недоступен — использую локальный core с ожидаемым blob SHA."; return 0; }
   die "Не удалось получить рабочий core-скрипт."
-}
-
-ensure_telemt_helper(){
-  if download_checked "$REPO_RAW/telemt-manager.sh" "$TELEMT_BLOB_SHA" "$TELEMT_HELPER"; then return 0; fi
-  verified_script "$TELEMT_HELPER" "$TELEMT_BLOB_SHA" && { warn "GitHub недоступен — использую локальный Telemt helper с ожидаемым blob SHA."; return 0; }
-  die "Не удалось получить Telemt helper."
 }
 
 ensure_protection_helper(){
@@ -369,29 +360,6 @@ EOF
   $SUDO systemctl enable --now remna-reality-handoff.timer >/dev/null 2>&1 || true
 }
 
-ensure_telemt_route_file(){
-  local file="$1" tmp
-  [ -f "$PANEL_CONFIG" ] || return 0
-  [ -f "$file" ] || return 0
-  grep -q 'handle /telemt\*' "$file" && return 0
-  tmp="$(mktemp)"
-  awk 'BEGIN{i=0} /^[[:space:]]*handle[[:space:]]*\{[[:space:]]*$/ && !i {print "\thandle /telemt* {"; print "\t\treverse_proxy 127.0.0.1:8080"; print "\t}"; print ""; i=1} {print}' "$file" > "$tmp"
-  if $SUDO caddy validate --config "$tmp" --adapter caddyfile >/dev/null; then
-    $SUDO install -o root -g root -m 0644 "$tmp" "$file"
-  else
-    warn "Не удалось безопасно восстановить /telemt в $file."
-  fi
-  rm -f "$tmp"
-}
-
-ensure_telemt_route(){
-  ensure_telemt_route_file "$CADDYFILE"
-  ensure_telemt_route_file "$CADDY_PUBLIC"
-  ensure_telemt_route_file "$CADDY_REALITY"
-  caddy_prepare_for_owner >/dev/null 2>&1 || true
-  $SUDO systemctl reload caddy >/dev/null 2>&1 || $SUDO systemctl restart caddy >/dev/null 2>&1 || true
-}
-
 xray_status(){ $SUDO docker exec remnanode /command/s6-svstat /run/service/xray 2>/dev/null || true; }
 runtime_config_count(){ $SUDO docker exec remnanode sh -c 'find /run /tmp /var/lib /opt -maxdepth 4 -type f \( -iname "*xray*.json" -o -name config.json \) 2>/dev/null | wc -l' 2>/dev/null || echo '?'; }
 
@@ -559,8 +527,7 @@ selftest_all(){
     failed=1
   fi
 
-  echo '[4/5] Caddy / Telemt routes'
-  ensure_telemt_route || true
+  echo '[4/5] Caddy topology'
   if rw_core_on_443; then
     caddy_local_8443 && ok 'REALITY topology OK: rw-core:443 + Caddy:8443' || { warn 'rw-core на 443, но Caddy не на 8443'; failed=1; }
   elif caddy_public_443; then
@@ -618,10 +585,7 @@ run_core(){
   else
     auto_handoff_once || true
   fi
-  ensure_telemt_route || true
 }
-
-telemt(){ arm_caddy_guard || true; ensure_telemt_helper; "$TELEMT_HELPER" "$@"; }
 
 menu(){
   while true; do
@@ -644,13 +608,10 @@ Remna Node Manager — safe mode
  [12] Отключить REALITY
  [13] Файлы REALITY
  [14] Repair текущей ноды
- [15] Безопасно подключить Telemt + Panel
- [16] Статус Telemt + Panel
- [17] Убрать интеграцию Telemt Panel
- [18] Clean Remnanode/Caddy
- [19] Защита ноды (RKN/TSPU/GOV/GeoIP/Allow/Deny)
- [20] Закрыть TCP/2222 только для IP панели
- [21] SELFTEST + авторемонт всего узла
+ [15] Clean Remnanode/Caddy
+ [16] Защита ноды (RKN/TSPU/GOV/GeoIP/Allow/Deny)
+ [17] Закрыть TCP/2222 только для IP панели
+ [18] SELFTEST + авторемонт всего узла
  [0]  Выход
 ────────────────────────────────────────────────────────────
 MENU
@@ -660,8 +621,8 @@ MENU
       5) printf 'Новый XHTTP-путь: '; read -r p <"$TTY" || true; [ -n "$p" ] && run_core path-set "$p" ;;
       6) run_core stream ;; 7) run_core summary ;; 8) safe_diagnose ;; 9) run_core status ;;
       10) run_core reality-prepare ;; 11) run_core reality-enable ;; 12) run_core reality-disable ;; 13) run_core reality-info ;;
-      14) run_core repair ;; 15) telemt install ;; 16) telemt status ;; 17) telemt remove ;; 18) run_core clean ;;
-      19) protection menu ;; 20) protection panel-set ;; 21) selftest_all ;;
+      14) run_core repair ;; 15) run_core clean ;;
+      16) protection menu ;; 17) protection panel-set ;; 18) selftest_all ;;
       0|'') exit 0 ;; *) warn "Неизвестный пункт: $c" ;;
     esac
     printf '\nEnter — вернуться в меню... '; read -r _ <"$TTY" || true
@@ -675,7 +636,6 @@ main(){
     diagnose|diag) safe_diagnose ;;
     selftest|self-test|check-all|repair-all) selftest_all ;;
     handoff-check) set +e; auto_handoff_once; exit 0 ;;
-    telemt-install) telemt install ;; telemt-status) telemt status ;; telemt-remove|telemt-uninstall) telemt remove ;;
     protect|protection) protection menu ;; protect-install) protection install ;; protect-status) protection status ;; protect-selftest) protection selftest ;;
     panel-set) shift; protection panel-set "${1:-}" ;;
     *) run_core "$@" ;;
