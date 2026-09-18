@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-REPO_REF=0cab8cb668e611aee1c834b94186f01298d5fbf8
+REPO_REF=c44060d5d5e2c72619f3f18b47b060ad52668690
 REPO_RAW="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${REPO_REF}"
-CORE_BLOB_SHA=f41d93ee53ec91523c8ea2e0a4f51bfcd09e31c7
-TELEMT_BLOB_SHA=a3ec2b9d89f0f4a0e54562933760bbb1883dd7e8
-PROTECTION_BLOB_SHA=c468ab617d46cb91f6525d60669643bcb9be8607
+CORE_BLOB_SHA=1060e0039f04a1941bbb5cf80d3251dc16228b28
+TELEMT_BLOB_SHA=bad3d675ba5d2645fe9a2589d391da52a268a622
+PROTECTION_BLOB_SHA=6cc384a04371dc5bbab170e43a8170d5d6bd9786
 CADDY_GUARD_BLOB_SHA=fc908882069fe50602c2411a46f4a5db77bddb74
 REMNA_NODE_IMAGE="${REMNA_NODE_IMAGE:-remnawave/node:3.4.1}"
 INSTALL_DIR=/opt/remna-node-scripts
@@ -25,12 +25,6 @@ HANDOFF_SERVICE=/etc/systemd/system/remna-reality-handoff.service
 HANDOFF_TIMER=/etc/systemd/system/remna-reality-handoff.timer
 HANDOFF_COOLDOWN=/run/remna-reality-handoff.cooldown
 HANDOFF_COOLDOWN_SECONDS=${HANDOFF_COOLDOWN_SECONDS:-300}
-STREAM_SOURCES=(
-  "https://rustream.remna.space"
-  "https://est.remna.2rdp.ru"
-  "https://nl.remna.2rdp.ru"
-)
-
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
 TTY=/dev/tty; { [ -r "$TTY" ] && [ -w "$TTY" ]; } || TTY=/dev/stdin
 say(){ printf '%s\n' "$*"; }
@@ -106,28 +100,6 @@ arm_caddy_guard(){
   ensure_caddy_guard_helper
   CADDYFILE="$CADDYFILE" CADDY_PUBLIC="$CADDY_PUBLIC" CADDY_REALITY="$CADDY_REALITY" \
     $SUDO "$CADDY_GUARD" install-dropin
-}
-
-choose_stream_source(){
-  local src tmp
-  [ -n "${STREAM_SITE_URL:-}" ] && { printf '%s\n' "$STREAM_SITE_URL"; return 0; }
-  tmp="$(mktemp)"
-  for src in "${STREAM_SOURCES[@]}"; do
-    if curl -fsSL --connect-timeout 5 --max-time 15 --range 0-131071 "$src/" -o "$tmp" 2>/dev/null && grep -Eqi '<html|<!doctype|<head|<body' "$tmp"; then
-      rm -f "$tmp"
-      printf '%s\n' "$src"
-      return 0
-    fi
-  done
-  rm -f "$tmp"
-  return 1
-}
-
-prepare_stream_source(){
-  local chosen
-  chosen="$(choose_stream_source)" || die "Все источники стрим-сайта недоступны: ${STREAM_SOURCES[*]}. Существующий сайт не трогаю."
-  export STREAM_SITE_URL="$chosen"
-  ok "Источник стрим-сайта: $STREAM_SITE_URL"
 }
 
 secret_env_len(){
@@ -623,7 +595,8 @@ run_core(){
       arm_caddy_guard
       ;;
   esac
-  case "$cmd" in install|--auto|auto|front-only|front|reinstall|stream|site|decoy|set-decoy) prepare_stream_source ;; esac
+  # Core uses a built-in static decoy by default. External site content is
+  # accepted only when the operator explicitly supplies a pinned SHA-256.
   bash "$CORE" "$@"
   case "$cmd" in
     install|--auto|auto|reinstall|repair|fix)
