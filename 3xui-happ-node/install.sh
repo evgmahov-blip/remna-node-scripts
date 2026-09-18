@@ -27,8 +27,8 @@ RADIO_INDEX_BLOB_SHA=794845d7ac21dc76a96250fe0da9b5f71037507f
 WEBROOT="${WEBROOT:-/var/www/mstream}"
 CREDENTIALS_FILE="${CREDENTIALS_FILE:-/root/3xui-happ-node.credentials}"
 
-rand_alnum() { tr -dc 'a-z0-9' </dev/urandom | head -c "${1:-16}"; }
-rand_pass() { tr -dc 'A-Za-z0-9_!@#%+=' </dev/urandom | head -c "${1:-24}"; }
+rand_alnum() { ( set +o pipefail; tr -dc 'a-z0-9' </dev/urandom | head -c "${1:-16}" ); }
+rand_pass() { ( set +o pipefail; tr -dc 'A-Za-z0-9_!@#%+=' </dev/urandom | head -c "${1:-24}" ); }
 
 git_blob_sha() {
   local file="$1" size
