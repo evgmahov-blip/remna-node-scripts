@@ -64,7 +64,7 @@ Docker и Caddy при необходимости устанавливаются
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/42d7d662c1f11b4705c8bfba3c74839ce98d669a/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/7c9ab91eb62bb96c0dd35d089806a5afe21968c0/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -145,12 +145,19 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 [11] Включить REALITY
 [12] Отключить REALITY
 [13] Файлы REALITY
-[14] Repair текущей ноды
+[14] Repair Caddy / XHTTP / REALITY
 [15] Clean Remnanode/Caddy
 [16] Защита ноды
 [17] Закрыть TCP/2222 только для IP панели
-[18] SELFTEST + авторемонт
+[18] Полный self-test инфраструктуры
 ```
+
+Пункты 14 и 18 решают разные задачи:
+
+| Действие | Для чего |
+|---|---|
+| **14 — Repair Caddy / XHTTP / REALITY** | Ремонт рабочего тракта: сайт, Caddy, XHTTP/REALITY-конфиги, TCP/443 и handoff |
+| **18 — Полный self-test инфраструктуры** | Проверка/авторемонт compose, SECRET_KEY, NET_ADMIN, firewall, 2222, ipset, systemd и topology guard |
 
 ---
 
@@ -162,7 +169,9 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh diagnose
 ```
 
-### Полный self-test + авторемонт
+### Полный self-test инфраструктуры
+
+Проверяет и при необходимости восстанавливает инфраструктурные инварианты узла: compose, SECRET_KEY, NET_ADMIN, firewall/ipset, защиту TCP/2222, systemd restore/timer, Caddy topology guard и REALITY handoff watcher. В конце запускает общую диагностику.
 
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh selftest
@@ -194,7 +203,9 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-enable
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-disable
 ```
 
-### Repair существующей установки
+### Repair Caddy / XHTTP / REALITY
+
+Чинит именно рабочий тракт трафика: Caddy, маскировочный сайт и права, XHTTP/REALITY JSON, конфликт за TCP/443 и переключение Caddy между публичным :443 и локальным 127.0.0.1:8443. Это не тот же механизм, что полный инфраструктурный self-test.
 
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh repair
@@ -234,7 +245,7 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protect-instal
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/42d7d662c1f11b4705c8bfba3c74839ce98d669a/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/7c9ab91eb62bb96c0dd35d089806a5afe21968c0/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
