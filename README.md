@@ -1,78 +1,75 @@
 # Remna Node Scripts
 
-Набор скриптов для безопасной установки и переустановки Remnawave Node.
+Набор скриптов для установки, обслуживания и защиты Remnawave Node.
 
-Основной сценарий сейчас — новый NEXT installer с XHTTP / RAW / REALITY, опциональным Hysteria2, маскировочным сайтом и RKN SAFE scanner guard.
-
-> Для новых установок используй только ссылки ниже. Старый Caddy-manager оставлен в репозитории для совместимости и обслуживания старых нод.
+Главный принцип этой версии: код, который выполняется от root, не должен незаметно меняться вслед за веткой `main` или сторонним сайтом. Launcher-цепочка закреплена на commit SHA и дополнительно проверяет ожидаемый Git blob SHA перед передачей управления следующему скрипту.
 
 ## Быстрая установка
 
-### Чистая новая нода
+### Новая нода
 
-Скрипт запускает установку без предварительной очистки существующего stack:
-
-```bash
-sudo bash -c 'tmp=$(mktemp); curl -fsSL https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/install.sh -o "$tmp" && bash -n "$tmp" && bash "$tmp"'
-```
-
-Файл: [install.sh](./install.sh)
-
-## Clean install / полная переустановка
-
-Для старой ноды или если нужно гарантированно убрать прежний Remnanode / Caddy / Hysteria / RKN stack и поставить заново:
+Используйте immutable snapshot, а не `main`:
 
 ```bash
-sudo bash -c 'tmp=$(mktemp); curl -fsSL https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/clean-install.sh -o "$tmp" && bash -n "$tmp" && bash "$tmp"'
+sudo bash -c 'tmp=$(mktemp); trap '\''rm -f "$tmp"'\'' EXIT; curl -fsSL --proto "=https" --tlsv1.2 https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/7b443a2c385b904e3a66d9a37b2fb3c4bb533413/install.sh -o "$tmp" && bash -n "$tmp" && bash "$tmp"'
 ```
 
-Файл: [clean-install.sh](./clean-install.sh)
+### Clean install / полная переустановка
 
-Перед очисткой выполняются precheck и backup. SSH, default route, DNS, hostname, Docker как пакет и чужие контейнеры глобально не сбрасываются.
+```bash
+sudo bash -c 'tmp=$(mktemp); trap '\''rm -f "$tmp"'\'' EXIT; curl -fsSL --proto "=https" --tlsv1.2 https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/7b443a2c385b904e3a66d9a37b2fb3c4bb533413/clean-install.sh -o "$tmp" && bash -n "$tmp" && bash "$tmp"'
+```
+
+Перед очисткой manager сохраняет предусмотренные им backup-файлы и не делает глобальный reset firewall/Docker. SSH, default route, DNS, hostname и чужие Docker-сервисы не должны удаляться.
+
+## Как устроена цепочка доверия
+
+`bash -n` проверяет только синтаксис Bash. Он **не является проверкой безопасности или подлинности**.
+
+Подлинность исполняемых helper-скриптов обеспечивается отдельно:
+
+1. верхний URL указывает на неизменяемый commit SHA;
+2. `install.sh` / `clean-install.sh` скачивают закреплённый `full-clean-reinstall.sh`;
+3. перед запуском вычисляется Git blob SHA и сравнивается с ожидаемым;
+4. `full-clean-reinstall.sh` таким же образом проверяет публичный manager;
+5. manager загружает core / protection / Caddy guard только из закреплённого commit и сверяет Git blob SHA.
+
+Закрытый `setup-remna-node` в production-цепочке больше не используется.
+
+## Что устанавливается
+
+Основной manager поддерживает:
+
+- Remnawave Node;
+- XHTTP и REALITY;
+- Caddy frontend;
+- локальный маскировочный сайт;
+- firewall-защиту Node API и дополнительные TSPU/GOV/GeoIP списки;
+- диагностику, repair и self-test.
+
+Маскировочный сайт по умолчанию встроен в core и не загружает чужой JavaScript. Если нужен внешний HTML или архив, оператор должен явно передать HTTPS-источник и `STREAM_SITE_SHA256`.
 
 ## Универсальный launcher
 
 [full-clean-reinstall.sh](./full-clean-reinstall.sh)
 
-Поддерживает режимы:
-
 ```bash
-# только установка
 sudo bash full-clean-reinstall.sh install
-
-# clean + установка
 sudo bash full-clean-reinstall.sh reinstall
-
-# только очистка
 sudo bash full-clean-reinstall.sh clean
-
-# интерактивное меню
 sudo bash full-clean-reinstall.sh
 ```
 
-## Что устанавливается
+## Безопасность
 
-- Remnawave Node;
-- REALITY;
-- XHTTP / RAW profiles;
-- опциональный Hysteria2;
-- маскировочный сайт STREAM / RADIO;
-- RKN SAFE scanner protection;
-- boot restore и автоматическое обновление RKN guard;
-- генерация Remnawave Config Profile / Host;
-- диагностика и post-install verification.
+- Скрипты рассчитаны на Debian / Ubuntu и root/`sudo`.
+- GHOST OS license-check, удалённый kill-switch и скрытый watermark удалены.
+- Сторонний `deepbeat` reverse proxy удалён.
+- TSPU/GOV snapshots закреплены на commit + Git blob SHA.
+- GeoIP загружается из закреплённого commit и обновляется fail-closed: неполный набор не заменяет рабочий.
+- Секреты Remnawave не должны печататься в stdout.
+- Не публикуйте `SECRET_KEY`, REALITY private key, сертификаты, токены и файлы credentials.
 
-## Важно
+## Manager
 
-- Скрипты предназначены для Debian / Ubuntu и запускаются от root или через `sudo`.
-- Перед выполнением скачанный файл проверяется `bash -n`.
-- Production installer внутри launcher закрепляется на конкретные commit SHA, а не запускается вслепую из `latest`.
-- Не публикуй `SECRET_KEY`, REALITY private key, сертификаты, токены и другие секреты.
-
-## Старый installer
-
-Старый Caddy-based manager сохранён только для уже существующих legacy-нод:
-
-[install-caddy-node-reality-stream.sh](./install-caddy-node-reality-stream.sh)
-
-Для новых нод используй `install.sh` или `clean-install.sh`.
+[install-caddy-node-reality-stream.sh](./install-caddy-node-reality-stream.sh) является публичным проверяемым manager для launcher-цепочки. Старые установленные копии могут отличаться от текущего snapshot — перед обновлением сравнивайте версию/commit.

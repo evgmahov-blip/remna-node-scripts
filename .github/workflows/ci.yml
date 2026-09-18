@@ -10,30 +10,92 @@ jobs:
   shell:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
       - name: Install shellcheck
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
-      - name: bash -n
+
+      - name: bash -n all shell scripts
+        shell: bash
         run: |
-          set -e
-          for f in *.sh; do
+          set -Eeuo pipefail
+          while IFS= read -r -d '' f; do
             echo "checking $f"
             bash -n "$f"
-          done
+          done < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
+
       - name: shellcheck errors
+        shell: bash
         run: |
-          shellcheck -S error *.sh
+          set -Eeuo pipefail
+          mapfile -d '' files < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
+          shellcheck -S error "${files[@]}"
+
       - name: supply-chain guard
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          # Root-executed code must not depend on these previously mutable or
+          # privacy-sensitive endpoints.
+          mapfile -d '' shell_files < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
+
+          ! grep -nE 'ghostos\.space|GHOST_(LIC|ID|SITE|DL|Q)|stream\.deepbeat\.ru|rustream\.remna\.space|\.2rdp\.ru|setup-remna-node|radio-stub-site/main|CyberOK_Skipa_ips/main|AS_Network_List/main|ipdeny\.com|telemt|3x-ui|3xui' "${shell_files[@]}"
+
+          ! grep -nE 'protocols[[:space:]]+tls1\.2[[:space:]]+tls1\.2|printf .*Password:|printf .*Username:' "${shell_files[@]}"
+
+          # Existing image / installer invariants.
+          ! grep -nE 'image:[[:space:]]*remnawave/node:latest|https://get\.docker\.com' install-caddy-node-reality-stream-core.sh
+
+          # Firewall data sources must be immutable snapshots.
+          grep -Fq 'TSPU_COMMIT=a465e13f4cb43c1692eb650430eb857900558c5d' protection-manager.sh
+          grep -Fq 'GOV_COMMIT=0e999cd730c4d6ca3d58053407a22f63f2d464e6' protection-manager.sh
+          grep -Fq 'GEOIP_COMMIT=6e3f7978b0391935e306060b11beba774fc7f624' protection-manager.sh
+
+      - name: invisible-character guard
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          forbidden = {
+              "\u200b": "ZERO WIDTH SPACE",
+              "\u200c": "ZERO WIDTH NON-JOINER",
+              "\u200d": "ZERO WIDTH JOINER",
+              "\u2060": "WORD JOINER",
+              "\ufeff": "ZERO WIDTH NO-BREAK SPACE/BOM",
+          }
+
+          bad = []
+          for path in Path(".").rglob("*"):
+              if not path.is_file() or ".git" in path.parts:
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              for char, name in forbidden.items():
+                  if char in text:
+                      bad.append(f"{path}: {name}")
+
+          if bad:
+              raise SystemExit("Invisible control characters found:\n" + "\n".join(bad))
+          PY
+
+      - name: strict-mode guards
         run: |
           set -e
-          ! grep -nE 'image:[[:space:]]*remnawave/node:latest|https://get\.docker\.com|telemt/telemt/main/install\.sh|amirotin/telemt_panel/main/install\.sh' install-caddy-node-reality-stream-core.sh telemt-manager.sh
-          ! grep -nE '^REPO_RAW=.*remna-node-scripts/main' install-caddy-node-reality-stream.sh
+          for f in             install.sh             clean-install.sh             full-clean-reinstall.sh             install-caddy-node-reality-stream-core.sh             protection-manager.sh
+          do
+            grep -Fq 'set -Eeuo pipefail' "$f"
+          done
+
       - name: Caddy pre-start privilege guard
         run: grep -Fq 'ExecStartPre=+$SELF prepare' caddy-resilient-start.sh
+
       - name: apt lock wait guard
         run: |
+          grep -Fq 'DPkg::Lock::Timeout=' full-clean-reinstall.sh
           grep -Fq 'DPkg::Lock::Timeout=' install-caddy-node-reality-stream-core.sh
           grep -Fq 'DPkg::Lock::Timeout=' protection-manager.sh
-          grep -Fq 'DPkg::Lock::Timeout=' telemt-manager.sh

@@ -18,8 +18,14 @@ SET_GOV=REMNA_GOV
 SET_ALLOW=REMNA_ALLOW
 SET_DENY=REMNA_DENY
 SET_COUNTRY=REMNA_COUNTRY_ALLOW
-TSPU_URL=https://raw.githubusercontent.com/tread-lightly/CyberOK_Skipa_ips/main/lists/skipa_cidr.txt
-GOV_URL=https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists_iptables/blacklist-v4.ipset
+TSPU_COMMIT=a465e13f4cb43c1692eb650430eb857900558c5d
+TSPU_BLOB_SHA=e7509cb2a8576fc659f23731d5974353f46860dc
+TSPU_URL="https://raw.githubusercontent.com/tread-lightly/CyberOK_Skipa_ips/${TSPU_COMMIT}/lists/skipa_cidr.txt"
+GOV_COMMIT=0e999cd730c4d6ca3d58053407a22f63f2d464e6
+GOV_BLOB_SHA=2b179cc00d7e805e1c49e975e18229ec811c82af
+GOV_URL="https://raw.githubusercontent.com/C24Be/AS_Network_List/${GOV_COMMIT}/blacklists_iptables/blacklist-v4.ipset"
+GEOIP_COMMIT=6e3f7978b0391935e306060b11beba774fc7f624
+GEOIP_BASE="https://raw.githubusercontent.com/ipverse/country-ip-blocks/${GEOIP_COMMIT}/country"
 
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO=sudo; fi
 APT_LOCK_TIMEOUT=${APT_LOCK_TIMEOUT:-300}
@@ -63,6 +69,20 @@ raise SystemExit(0 if ok else 1)
 PY
 }
 
+git_blob_sha(){
+  local file="$1" size
+  command -v sha1sum >/dev/null 2>&1 || return 1
+  size="$(wc -c <"$file" | tr -d '[:space:]')"
+  { printf 'blob %s\000' "$size"; cat "$file"; } | sha1sum | awk '{print $1}'
+}
+download_git_blob_checked(){
+  local url="$1" expected="$2" dst="$3" actual
+  rm -f "$dst"
+  curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 2 "$url" -o "$dst" || { rm -f "$dst"; return 1; }
+  actual="$(git_blob_sha "$dst")" || { rm -f "$dst"; return 1; }
+  [ "$actual" = "$expected" ] || { warn "Integrity check failed: git blob $actual != $expected ($url)"; rm -f "$dst"; return 1; }
+}
+
 write_defaults(){
   ensure_dirs
   if [ ! -f "$CONF" ]; then
@@ -71,7 +91,7 @@ PANEL_IP=
 ENABLE_TSPU=1
 ENABLE_GOV=1
 ENABLE_GEOIP=0
-FILTER_PORTS=443,18443,5222,5223,8530
+FILTER_PORTS=443
 GEO_COUNTRIES=
 EOF
     $SUDO chmod 0600 "$CONF"
@@ -86,7 +106,7 @@ load_conf(){
   ENABLE_TSPU=1
   ENABLE_GOV=1
   ENABLE_GEOIP=0
-  FILTER_PORTS=443,18443,5222,5223,8530
+  FILTER_PORTS=443
   GEO_COUNTRIES=
   local key value
   while IFS='=' read -r key value; do
@@ -175,36 +195,48 @@ update_blocklists(){
   [ -n "$PANEL_IP" ] && valid_ip "$PANEL_IP" || die "PANEL_IP не задан/некорректен. Сначала: protection-manager.sh panel-set <IP>."
   local raw san good=0
   raw=$(mktemp); san=$(mktemp)
-  if curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 "$TSPU_URL" -o "$raw"; then
+  if download_git_blob_checked "$TSPU_URL" "$TSPU_BLOB_SHA" "$raw"; then
     sanitize_cidrs "$raw" "$san" plain
     if [ -s "$san" ]; then $SUDO install -m 0600 "$san" "$DATA/tspu.txt"; atomic_load_set "$SET_TSPU" "$DATA/tspu.txt" && good=$((good+1)); fi
-  else warn "TSPU list: скачать не удалось, оставляю старый набор."; fi
-  if curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 "$GOV_URL" -o "$raw"; then
+  else warn "TSPU snapshot: скачать/проверить не удалось, оставляю старый набор."; fi
+  if download_git_blob_checked "$GOV_URL" "$GOV_BLOB_SHA" "$raw"; then
     sanitize_cidrs "$raw" "$san" gov
     if [ -s "$san" ]; then $SUDO install -m 0600 "$san" "$DATA/gov.txt"; atomic_load_set "$SET_GOV" "$DATA/gov.txt" && good=$((good+1)); fi
-  else warn "GOV list: скачать не удалось, оставляю старый набор."; fi
+  else warn "GOV snapshot: скачать/проверить не удалось, оставляю старый набор."; fi
   rm -f "$raw" "$san"
   apply_rules
   printf '[%s] updated sources=%s\n' "$(date '+%F %T')" "$good" | $SUDO tee -a "$UPDATE_LOG" >/dev/null
-  ok "Блок-листы обновлены атомарно."
+  ok "Закреплённые blocklist snapshots проверены и загружены атомарно."
 }
 
 build_geo_country_file(){
   load_conf
-  local out tmp code
+  local out tmp san code failed=0 count
   out=$(mktemp); : > "$out"
   IFS=',' read -ra cc <<< "$GEO_COUNTRIES"
   for code in "${cc[@]}"; do
     code=$(printf '%s' "$code" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
     [ -n "$code" ] || continue
     tmp=$(mktemp)
-    if curl -fsSL --connect-timeout 10 --max-time 30 "https://www.ipdeny.com/ipblocks/data/aggregated/${code}-aggregated.zone" -o "$tmp"; then cat "$tmp" >> "$out"; fi
+    if curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 30 --retry 2 "${GEOIP_BASE}/${code}/ipv4-aggregated.txt" -o "$tmp"; then
+      cat "$tmp" >> "$out"
+    else
+      warn "GeoIP ${code}: pinned snapshot недоступен; существующий allow-set не изменяю."
+      failed=1
+    fi
     rm -f "$tmp"
   done
-  if [ -s "$out" ]; then
-    local san; san=$(mktemp); sanitize_cidrs "$out" "$san" plain; $SUDO install -m 0600 "$san" "$DATA/countries.txt"; rm -f "$san"
+  [ "$failed" -eq 0 ] || { rm -f "$out"; return 1; }
+  san=$(mktemp)
+  sanitize_cidrs "$out" "$san" plain
+  count=$(grep -cve '^[[:space:]]*$' "$san" 2>/dev/null || true)
+  if [ "$count" -lt 10 ]; then
+    rm -f "$out" "$san"
+    warn "GeoIP snapshot слишком мал (${count} CIDR); существующий allow-set не изменяю."
+    return 1
   fi
-  rm -f "$out"
+  $SUDO install -m 0600 "$san" "$DATA/countries.txt"
+  rm -f "$out" "$san"
 }
 
 remove_jump_all(){
@@ -336,7 +368,7 @@ EOF
 Description=Daily Remna protection update
 
 [Timer]
-OnCalendar=*-*-* 03:00:00
+OnCalendar=Sun *-*-* 03:00:00
 Persistent=true
 RandomizedDelaySec=15m
 Unit=remna-protection-update.service
