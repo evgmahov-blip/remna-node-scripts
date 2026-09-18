@@ -1,20 +1,4 @@
 #!/usr/bin/env bash
-GHOST_LIC='3b260369'
-GHOST_ID='cfac14d415274f93'
-GHOST_SCRIPT_ID='caddy-node'
-GHOST_SITE='https://info.ghostos.space'
-GHOST_DL='https://sh.ghostos.space'
-GHOST_Q='?lic=cfac14d415274f93'
-export GHOST_LIC GHOST_ID GHOST_SCRIPT_ID GHOST_SITE GHOST_DL GHOST_Q
-# GHOST OS · license 3b260369 · id cfac14d415274f93 · caddy-node · 2026-08-06T13:55:42.583Z · ip 139.100.235.157 · (c) GHOST OS — do not remove
-#‍​​‌‌​​‌‌​‌‌​​​‌​​​‌‌​​‌​​​‌‌​‌‌​​​‌‌​​​​​​‌‌​​‌‌​​‌‌​‌‌​​​‌‌‌​​‌‍ 
-GHOST_V="$(curl -fsS --max-time 6 "$GHOST_SITE/api/script/verify?lic=${GHOST_ID}&s=${GHOST_SCRIPT_ID}" 2>/dev/null || true)"
-if printf "%s" "$GHOST_V" | grep -q '"allow":false'; then
-  echo "[GHOST OS] Скрипт не привязан к лицензии или ключ отозван."
-  echo "[GHOST OS] Персональная команда установки — в кабинете: $GHOST_SITE/pages/profile"
-  echo "[GHOST OS] Поддержка: @Kto_berserk"
-  exit 1
-fi
 # ============================================================================
 #  version: r9
 #  install-caddy-node-reality-stream.sh — Caddy + стрим-сайт для основной
@@ -42,14 +26,13 @@ fi
 #    menu               показать меню (по умолчанию)
 #    -h | --help        эта справка
 #
-#  Одна команда из публичного GitHub:
-#    bash -c 'apt-get update -y && apt-get install -y curl ca-certificates && install -d -m 755 /opt/remna-node-scripts && curl -fsSL https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/main/install-caddy-node-reality-stream.sh -o /opt/remna-node-scripts/install-caddy-node-reality-stream.sh && chmod 700 /opt/remna-node-scripts/install-caddy-node-reality-stream.sh && exec /opt/remna-node-scripts/install-caddy-node-reality-stream.sh install'
+#  Запускается через проверяемый launcher install-caddy-node-reality-stream.sh.
 #
 #  Неинтерактивно:
 #    EMAIL=you@mail.com DOMAIN=node.example.net SECRET_KEY=... \
-#      STREAM_SITE_URL=https://rustream.remna.space/ bash $0 --auto
+#      REMNA_NONINTERACTIVE=1 bash $0 --auto
 # ============================================================================
-set -Eeo pipefail
+set -Eeuo pipefail
 
 # ── Порты (фиксированные для метода) ─────────────────────────────────────────
 BACKEND_PORT=7443       # основной XHTTP-инбаунд (127.0.0.1:7443)
@@ -71,9 +54,9 @@ CADDY_GUARD=$SCRIPT_INSTALL_DIR/caddy-resilient-start.sh
 PROFILE_WATCH_SERVICE=remna-profile-wait.service  # legacy: удаляется при обновлении/сносе
 PROFILE_WATCH_UNIT=/etc/systemd/system/$PROFILE_WATCH_SERVICE
 WEBROOT=/var/www/mstream
-STREAM_SITE_URL="${STREAM_SITE_URL:-https://rustream.remna.space}"
+STREAM_SITE_URL="${STREAM_SITE_URL:-}"
 STREAM_SITE_ARCHIVE="${STREAM_SITE_ARCHIVE:-}"
-STREAM_HEALTH_UPSTREAM="${STREAM_HEALTH_UPSTREAM:-https://stream.deepbeat.ru:8443/health}"
+STREAM_SITE_SHA256="${STREAM_SITE_SHA256:-}"
 REMNA_NODE_IMAGE="${REMNA_NODE_IMAGE:-remnawave/node:3.4.1}"
 DOCKER_INSTALL_COMMIT=42dcae692436f34526524ed46d3b32885c9355f5
 DOCKER_INSTALL_BLOB_SHA=c67c0e799b42c0435949a3f83785749480d5f14d
@@ -96,7 +79,7 @@ line() { printf '%b────────────────────�
 banner() {
   echo
   printf '  %b%b────────────────────────────────────────────────────────────%b\n' "$B" "$C" "$N"
-  printf '  %b%b🌐 INFO GHOST OS%b  %b·%b  %bCDN XHTTP + REALITY%b  %b·%b  %bSTREAM%b\n' \
+  printf '  %b%b🌐 REMNA NODE%b  %b·%b  %bCDN XHTTP + REALITY%b  %b·%b  %bSTREAM%b\n' \
     "$B" "$C" "$N" "$DIM" "$N" "$B" "$N" "$DIM" "$N" "$M" "$N"
   printf '  %bОсновной: XHTTP/CDN · второй: RAW/REALITY/Vision · один внешний TCP/443%b\n' "$DIM" "$N"
   printf '  %b%b────────────────────────────────────────────────────────────%b\n' "$B" "$C" "$N"
@@ -154,13 +137,13 @@ download_git_blob_checked() {
 install_prerequisites() {
   export DEBIAN_FRONTEND=noninteractive
   local missing=0 cmd
-  for cmd in curl wget openssl ss shuf tar awk sed grep; do
+  for cmd in curl openssl ss shuf tar awk sed grep sha256sum; do
     command -v "$cmd" >/dev/null 2>&1 || missing=1
   done
   [ "$missing" -eq 0 ] && [ -s /etc/ssl/certs/ca-certificates.crt ] && return 0
   log "Устанавливаю базовые зависимости..."
   apt_get update -y
-  apt_get install -y curl wget ca-certificates openssl iproute2 coreutils tar gawk sed grep
+  apt_get install -y curl ca-certificates openssl iproute2 coreutils tar gawk sed grep
 }
 
 # ── Ввод: env в приоритете; интерактив читаем с /dev/tty (работает и под curl|bash)
@@ -353,18 +336,6 @@ __DOMAIN__ {
     respond 404
   }
 
-  handle /api/deepbeat-health* {
-    rewrite * /health
-    reverse_proxy https://stream.deepbeat.ru:8443 {
-      header_up Host stream.deepbeat.ru
-      transport http {
-        tls_server_name stream.deepbeat.ru
-        dial_timeout 7s
-        response_header_timeout 15s
-      }
-    }
-  }
-
   @tunnel {
     path __PATH__*
     query auth=*
@@ -443,18 +414,6 @@ __DOMAIN__ {
     respond 404
   }
 
-  handle /api/deepbeat-health* {
-    rewrite * /health
-    reverse_proxy https://stream.deepbeat.ru:8443 {
-      header_up Host stream.deepbeat.ru
-      transport http {
-        tls_server_name stream.deepbeat.ru
-        dial_timeout 7s
-        response_header_timeout 15s
-      }
-    }
-  }
-
   @tunnel {
     path __PATH__*
     query auth=*
@@ -495,61 +454,113 @@ fix_site_permissions() {
   $SUDO find "$WEBROOT" -type f -exec chmod 644 {} +
 }
 
-# ── Стрим-сайт: локальный архив или копирование с рабочего сайта ─────────────
+# ── Маскировочный сайт: встроенный или явно закреплённый оператором ───────────
+sha256_file() {
+  sha256sum "$1" | awk '{print $1}'
+}
+
+verify_sha256() {
+  local file="$1" expected="$2" actual
+  [ -n "$expected" ] || return 1
+  actual="$(sha256_file "$file")"
+  [ "$actual" = "$expected" ] || {
+    warn "SHA-256 не совпал: $actual != $expected"
+    return 1
+  }
+}
+
+install_builtin_stream_site() {
+  local tmp
+  tmp="$(mktemp)"
+  cat >"$tmp" <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Media Stream</title>
+  <style>
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0d1117;color:#e6edf3;font:16px system-ui,-apple-system,Segoe UI,sans-serif}
+    main{max-width:42rem;padding:3rem;text-align:center}
+    h1{font-size:2rem;margin:0 0 1rem}p{color:#9da7b3;line-height:1.6}
+    .dot{display:inline-block;width:.65rem;height:.65rem;border-radius:50%;background:#3fb950;margin-right:.5rem}
+  </style>
+</head>
+<body><main><h1><span class="dot"></span>Media service</h1><p>Streaming endpoint is online.</p></main></body>
+</html>
+HTML
+  $SUDO find "$WEBROOT" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  $SUDO install -o root -g root -m 0644 "$tmp" "$WEBROOT/index.html"
+  rm -f "$tmp"
+  fix_site_permissions
+  ok "Установлена встроенная статическая заглушка без внешних JS/CSS → $WEBROOT"
+}
+
 install_stream_site() {
   $SUDO mkdir -p "$WEBROOT"
 
   if [ -n "$STREAM_SITE_ARCHIVE" ]; then
-    local archive="$STREAM_SITE_ARCHIVE" tmpa="" tmpd
+    local archive="$STREAM_SITE_ARCHIVE" tmpa="" tmpd idx
     tmpd="$(mktemp -d)"
-    if printf '%s' "$archive" | grep -qE '^https?://'; then
+    if printf '%s' "$archive" | grep -qE '^https://'; then
+      [ -n "$STREAM_SITE_SHA256" ] || die "Для удалённого STREAM_SITE_ARCHIVE обязателен STREAM_SITE_SHA256."
       tmpa="$(mktemp)"
-      curl -fsSL --max-time 60 "$archive" -o "$tmpa" || die "Не удалось скачать STREAM_SITE_ARCHIVE."
+      curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 2 "$archive" -o "$tmpa" ||
+        die "Не удалось скачать STREAM_SITE_ARCHIVE."
+      verify_sha256 "$tmpa" "$STREAM_SITE_SHA256" || die "Проверка STREAM_SITE_ARCHIVE не пройдена."
       archive="$tmpa"
+    elif [ -n "$STREAM_SITE_SHA256" ]; then
+      verify_sha256 "$archive" "$STREAM_SITE_SHA256" || die "Проверка локального STREAM_SITE_ARCHIVE не пройдена."
     fi
-    [ -f "$archive" ] || die "Архив стрим-сайта не найден: $archive"
-    tar -xf "$archive" -C "$tmpd" || die "Не удалось распаковать архив стрим-сайта."
-    local idx; idx="$(find "$tmpd" -type f -name index.html -print -quit)"
+    [ -f "$archive" ] || die "Архив маскировочного сайта не найден: $archive"
+    if tar -tf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+      die "Архив содержит небезопасные абсолютные/parent paths."
+    fi
+    tar --no-same-owner --no-same-permissions -xf "$archive" -C "$tmpd" || die "Не удалось распаковать архив маскировочного сайта."
+    if find "$tmpd" -type l -print -quit | grep -q .; then
+      rm -rf "$tmpd"; [ -z "$tmpa" ] || rm -f "$tmpa"
+      die "Архив содержит symlink; такие архивы запрещены."
+    fi
+    idx="$(find "$tmpd" -type f -name index.html -print -quit)"
     [ -n "$idx" ] || die "В архиве нет index.html."
     $SUDO find "$WEBROOT" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
     $SUDO cp -a "$(dirname "$idx")"/. "$WEBROOT"/
     rm -rf "$tmpd"; [ -z "$tmpa" ] || rm -f "$tmpa"
     fix_site_permissions
-    ok "Стрим-сайт установлен из архива → $WEBROOT"
+    ok "Маскировочный сайт установлен из проверенного архива → $WEBROOT"
     return 0
   fi
 
   if [ -s "$WEBROOT/index.html" ] && [ "${FORCE_STREAM_REFRESH:-0}" != 1 ]; then
     fix_site_permissions
-    ok "Стрим-сайт уже существует → $WEBROOT (не перезаписываю)"
+    ok "Маскировочный сайт уже существует → $WEBROOT (не перезаписываю)"
     return 0
   fi
 
-  local tmpd idx
-  tmpd="$(mktemp -d)"
-  if command -v wget >/dev/null 2>&1; then
-    wget -q --timeout=20 --tries=2 --page-requisites --convert-links \
-      --adjust-extension --no-host-directories --directory-prefix="$tmpd" \
-      "$STREAM_SITE_URL" || true
-  else
-    curl -fsSL --max-time 30 "$STREAM_SITE_URL" -o "$tmpd/index.html" || true
+  if [ -n "$STREAM_SITE_URL" ]; then
+    local tmp
+    [ -n "$STREAM_SITE_SHA256" ] || die "Для удалённого STREAM_SITE_URL обязателен STREAM_SITE_SHA256; без хеша удалённый HTML не исполняется."
+    printf '%s' "$STREAM_SITE_URL" | grep -qE '^https://' || die "STREAM_SITE_URL должен использовать https://"
+    tmp="$(mktemp)"
+    curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 30 --retry 2 "$STREAM_SITE_URL" -o "$tmp" ||
+      die "Не удалось скачать STREAM_SITE_URL."
+    verify_sha256 "$tmp" "$STREAM_SITE_SHA256" || { rm -f "$tmp"; die "Проверка STREAM_SITE_URL не пройдена."; }
+    grep -Eqi '<html|<!doctype|<head|<body' "$tmp" || { rm -f "$tmp"; die "STREAM_SITE_URL не похож на HTML."; }
+    $SUDO find "$WEBROOT" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    $SUDO install -o root -g root -m 0644 "$tmp" "$WEBROOT/index.html"
+    rm -f "$tmp"
+    fix_site_permissions
+    ok "Маскировочный HTML установлен из HTTPS-источника с закреплённым SHA-256 → $WEBROOT"
+    return 0
   fi
-  idx="$(find "$tmpd" -type f -name 'index.html*' -print -quit)"
-  if [ -z "$idx" ] || [ ! -s "$idx" ]; then
-    rm -rf "$tmpd"
-    die "Не удалось получить стрим-сайт с $STREAM_SITE_URL. Передай STREAM_SITE_ARCHIVE=/путь/site.tar.gz"
-  fi
-  $SUDO find "$WEBROOT" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-  $SUDO cp -a "$(dirname "$idx")"/. "$WEBROOT"/
-  [ -f "$WEBROOT/index.html" ] || $SUDO mv "$WEBROOT/$(basename "$idx")" "$WEBROOT/index.html"
-  rm -rf "$tmpd"
-  fix_site_permissions
-  ok "Стрим-сайт скопирован с $STREAM_SITE_URL → $WEBROOT"
+
+  install_builtin_stream_site
 }
 
 # Совместимость с исходным run_install/cmd_decoy.
 install_decoy() { install_stream_site; }
-install_decoy_builtin() { die "Случайные заглушки в этом форке отключены."; }
+install_decoy_builtin() { install_builtin_stream_site; }
 
 # ── Валидация + запуск Caddy ─────────────────────────────────────────────────
 caddy_prepare_for_owner() {
@@ -724,7 +735,7 @@ resolve_for_summary() {
 
 # ── ИТОГ: «что и куда вставлять» (CDN-ресурс + хост + инбаунд Remnawave) ─────
 summary() {
-  local ip4; ip4="$(curl -fsS4 --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  local ip4; ip4="$(getent ahostsv4 "${DOMAIN:-}" 2>/dev/null | awk 'NR==1{print $1}' || true)"; [ -n "$ip4" ] || ip4="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
   echo; line
   printf '%b%b  📋 ЧТО И КУДА ВСТАВЛЯТЬ%b   %b(домен ноды: %s · путь: %s)%b\n' "$B" "$G" "$N" "$DIM" "${DOMAIN:-—}" "${TUNNEL_PATH:-—}" "$N"
   line
@@ -846,7 +857,7 @@ run_install() {
   say "  нода  : ${C}$([ -n "$SECRET_KEY" ] && echo 'ставим здесь (Remnanode по SECRET_KEY)' || echo 'НЕ ставим — только фронт Caddy')${N}"
   say "  сайт     : ${C}STREAM → ${WEBROOT}${N}"
   echo
-  if [ -z "${GHOST_NONINTERACTIVE:-}" ]; then
+  if [ -z "${REMNA_NONINTERACTIVE:-}" ]; then
     printf 'Продолжить установку? [Y/n] '; read -r yn <"$TTY" || true
     case "${yn:-Y}" in [Nn]*) die "Отменено." ;; esac
   fi
@@ -895,7 +906,7 @@ clean_node() {
 run_reinstall() {
   banner
   warn "Переустановка снесёт локальную ноду и конфиг Caddy, затем поставит заново с НОВЫМ путём."
-  if [ -z "${GHOST_NONINTERACTIVE:-}" ]; then
+  if [ -z "${REMNA_NONINTERACTIVE:-}" ]; then
     printf 'Продолжить? [y/N] '; read -r yn <"$TTY" || true
     case "${yn:-N}" in [Yy]*) : ;; *) die "Отменено." ;; esac
   fi
@@ -1035,7 +1046,7 @@ cmd_diagnose() {
   line; printf '%b  [D] Итог%b\n' "$B" "$N"; line
   if [ "$fail" -eq 0 ]; then say "  ${G}Локальный узел здоров.${N} Если клиент не работает — сверь путь во всех местах и настройку CDN-ресурса (блок C)."
   else say "  ${Y}Проблем на узле: ${fail}.${N} Чини по подсказкам (фикс) сверху вниз и запусти диагностику снова."; fi
-  say "  ${C}📖 info.ghostos.space → гайд «Beeline CDN + XHTTP»${N}"
+  say "  ${DIM}Сводка не обращается к внешним guide/license сервисам.${N}"
 }
 
 # ── Обновить стрим-сайт ──────────────────────────────────────────────────────
