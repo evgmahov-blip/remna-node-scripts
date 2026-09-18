@@ -21,4 +21,4 @@ ACTUAL_BLOB_SHA="$(git_blob_sha "$TMP")"
   exit 1
 }
 bash -n "$TMP"
-exec bash "$TMP" reinstall
+bash "$TMP" reinstall
