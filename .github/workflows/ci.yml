@@ -139,17 +139,43 @@ jobs:
           grep -Fq "MENU_BACK_RC=20" protection-manager.sh
           grep -Fq "menu_action run_core repair" install-caddy-node-reality-stream.sh
           grep -Fq "menu_action protection menu" install-caddy-node-reality-stream.sh
-          grep -Fq "[13] Профили для копипасты (XHTTP / REALITY / оба)" install-caddy-node-reality-stream.sh
+          grep -Fq "[13] Профиль для копипасты (XHTTP + REALITY :443)" install-caddy-node-reality-stream.sh
           grep -Fq "13) menu_action run_core config-profile" install-caddy-node-reality-stream.sh
-          grep -Fq "Config Profiles для копипасты в Remnawave" install-caddy-node-reality-stream-core.sh
-          grep -Fq "[1] XHTTP — готовый Config Profile" install-caddy-node-reality-stream-core.sh
-          grep -Fq "[2] REALITY — готовый Config Profile" install-caddy-node-reality-stream-core.sh
-          grep -Fq "[3] XHTTP + REALITY — общий Config Profile" install-caddy-node-reality-stream-core.sh
-          grep -Fq 'print_profile_json "XHTTP CONFIG PROFILE" "$XHTTP_INBOUND"' install-caddy-node-reality-stream-core.sh
-          grep -Fq 'print_profile_json "REALITY CONFIG PROFILE" "$REALITY_INBOUND"' install-caddy-node-reality-stream-core.sh
+          grep -Fq "[19] РКН защита (TSPU/GOV)" install-caddy-node-reality-stream.sh
+          grep -Fq "19) menu_action protection rkn" install-caddy-node-reality-stream.sh
+          grep -Fq "rkn_menu(){" protection-manager.sh
           grep -Fq 'cat "$PROFILE_INBOUNDS"' install-caddy-node-reality-stream-core.sh
           grep -Fq "curl -ksS --noproxy '*'" install-caddy-node-reality-stream-core.sh
           grep -Fq "site_probe_diagnostics" install-caddy-node-reality-stream-core.sh
+
+      - name: Single-port XHTTP Reality profile guards
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -d '' shell_files < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
+          ! grep -nF '7443' "${shell_files[@]}"
+          ! grep -nF 'BACKEND_PORT' "${shell_files[@]}"
+          ! grep -nF 'XHTTP_INBOUND' "${shell_files[@]}"
+          ! grep -nF 'REALITY_INBOUND' "${shell_files[@]}"
+          ! grep -nF '"mode": "packet-up"' install-caddy-node-reality-stream-core.sh
+
+          grep -Fq 'REALITY_SOCKET_TARGET=/dev/shm/nginx.sock' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"port": 443' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"listen": "0.0.0.0"' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"network": "xhttp"' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"security": "reality"' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"mode": "auto"' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"cMaxReuseTimes": 12' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"seqKey": "visitor_id"' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"sessionIDKey": "auth_session"' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"xPaddingBytes": "270-1096"' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"xPaddingHeader": "X-Request-Token"' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"xPaddingPlacement": "queryInHeader"' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"xver": 1' install-caddy-node-reality-stream-core.sh
+          grep -Fq '"target": "$REALITY_SOCKET_TARGET"' install-caddy-node-reality-stream-core.sh
+          grep -Fq 'accept-proxy mode 660' install-caddy-node-reality-stream-core.sh
+          grep -Fq '${REALITY_SOCKET_DIR}:/dev/shm' install-caddy-node-reality-stream-core.sh
+          grep -Fq 'remna-reality-fallback.service' install-caddy-node-reality-stream-core.sh
 
       - name: Caddy pre-start privilege guard
         run: grep -Fq 'ExecStartPre=+$SELF prepare' caddy-resilient-start.sh
