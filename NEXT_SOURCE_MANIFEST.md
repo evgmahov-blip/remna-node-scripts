@@ -19,3 +19,24 @@ b783e94f2ef3764b2e397cba9eb96aeab88d7da11da017a2c867054f9546a84a  next-installer
 dbbd1110aec2e6dd32aee204b6d0174d7fe511e1b97118570cbbea553946bd4a  next-installer/xhttp-signature-manager.sh
 
 The bundle is the recovered NEXT source of truth. The old Caddy manager remains in this repository only for legacy-node compatibility and MUST NOT be used by install.sh / clean-install.sh / full-clean-reinstall.sh.
+
+
+## Hysteria2 compatibility overlay
+
+The recovered archive above remains byte-for-byte unchanged.
+
+A corrected transport manager is stored as:
+
+`next-installer/remnawave-transport-manager.sh`
+
+Pinned overlay:
+- source commit: `5d022cef3efd046844445c06a1d1ba387359c2c8`
+- Git blob SHA: `dbb3a99a9c2a1f442c9e0e19fbebf3ec9d6d871f`
+
+The overlay keeps the recovered NEXT transport logic but fixes the Hysteria2 profile shape to match current Remnawave/Xray behavior:
+- server `settings.clients: []`, which Remnawave populates with per-user `auth`;
+- `streamSettings.finalmask.quicParams.congestion = brutal`;
+- Hysteria transport version 2, TLS, ALPN `h3`;
+- a local shape guard rejects a generated Hysteria profile if these fields drift.
+
+The original recovered transport SHA256 remains listed above for provenance; the overlay is intentionally a maintained derivative.

@@ -25,7 +25,7 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/262726dab7ee5762f751f624456d8a1830f61464/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/4cc22efdafeee9dc37d5adf6df38a4fc63f64fd9/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -35,7 +35,7 @@ Safe reinstall:
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/c08d8d873965af4e3e88cfb38d08a1b03afc8c80/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/30cfc346a3e158eeeb45ad208fd2b56e85d2e3a1/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -98,36 +98,58 @@ JSON XHTTP/REALITY содержит private key — не публикуйте е
 
 ### Hysteria2: совместимость с рабочим Xray/Remnawave профилем
 
-Recovered snapshot генерировал Hysteria2 близко к правильному варианту, но не полностью совпадал с рабочим клиентским профилем Remnawave/Xray.
-
-На runtime перед установкой transport-manager автоматически применяется compatibility patch:
-
-- server inbound использует `settings.clients: []` — именно этот массив Remnawave заполняет per-user `auth`;
-- `network: hysteria`, `security: tls`, `version: 2`, UDP/443 и ALPN `h3`;
-- добавляется `finalmask.quicParams.congestion = brutal`;
-- в подсказку Host явно выводится `streamOverrides.finalMask = {"quicParams":{"congestion":"brutal"}}`;
-- Hysteria `auth` не хардкодится в Config Profile: Remnawave получает его из UUID пользователя и генерирует клиентский `hysteriaSettings.auth`.
-
-Рабочая пара выглядит так:
+Эталонный recovered bundle оставлен **байт-в-байт неизменным**. Исправленный transport-manager хранится отдельно в репозитории как immutable overlay:
 
 ```text
-SERVER CONFIG PROFILE
-  protocol=hysteria
-  settings.clients=[]
-  network=hysteria
-  security=tls
-  alpn=h3
-  finalmask.quicParams.congestion=brutal
-
-REMNAWAVE HOST / CLIENT
-  address=<node domain>
-  port=443
-  hysteriaSettings.version=2
-  hysteriaSettings.auth=<UUID пользователя>
-  tlsSettings.serverName=<node domain>
-  tlsSettings.alpn=[h3]
-  finalmask.quicParams.congestion=brutal
+next-installer/remnawave-transport-manager.sh
 ```
+
+NEXT launcher проверяет overlay по commit SHA + Git blob SHA и только после этого ставит его поверх recovered transport-manager.
+
+Исправленный Hysteria2 server profile:
+
+- `protocol: hysteria`;
+- `settings.version: 2`;
+- `settings.clients: []` — Remnawave сам добавляет каждому пользователю `auth = UUID`;
+- `network: hysteria`;
+- `security: tls`;
+- ALPN `h3`;
+- `finalmask.quicParams.congestion: brutal`;
+- `hysteriaSettings.version: 2`;
+- `hysteriaSettings.auth` на сервере **не хардкодится**;
+- перед сохранением профиль проходит отдельный shape-check и затем штатный `rw-core/Xray run -test`.
+
+Ключевая часть рабочего клиентского outbound, который должен получить пользователь из Remnawave:
+
+```json
+{
+  "protocol": "hysteria",
+  "settings": {
+    "address": "<node-domain>",
+    "port": 443,
+    "version": 2
+  },
+  "streamSettings": {
+    "finalmask": {
+      "quicParams": {
+        "congestion": "brutal"
+      }
+    },
+    "hysteriaSettings": {
+      "auth": "<UUID-пользователя>",
+      "version": 2
+    },
+    "network": "hysteria",
+    "security": "tls",
+    "tlsSettings": {
+      "alpn": ["h3"],
+      "serverName": "<node-domain>"
+    }
+  }
+}
+```
+
+Поля DNS, SOCKS/HTTP local inbounds, metrics, routing и mux в полном клиентском JSON относятся к шаблону клиента и **не являются частью server Config Profile**.
 
 `masquerade` остаётся серверной настройкой и не обязан присутствовать в клиентском JSON.
 
