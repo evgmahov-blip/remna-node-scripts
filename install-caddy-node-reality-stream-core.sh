@@ -76,6 +76,14 @@ ok()   { printf '%b✓%b %s\n'  "$G"  "$N" "$*"; }
 warn() { printf '%b!%b %s\n'  "$Y"  "$N" "$*"; }
 die()  { printf '%b✗ %s%b\n'  "$R"  "$*" "$N" >&2; exit 1; }
 line() { printf '%b────────────────────────────────────────────────────────────%b\n' "$DIM" "$N"; }
+MENU_BACK_RC=20
+is_menu_back() {
+  case "${1:-}" in 0|q|Q|back|BACK|Back|назад|Назад|НАЗАД) return 0 ;; *) return 1 ;; esac
+}
+back_to_menu() {
+  warn "Операция отменена — возвращаюсь в меню."
+  exit "$MENU_BACK_RC"
+}
 
 banner() {
   echo
@@ -187,8 +195,9 @@ choose_tunnel_path() {
     return 0
   fi
   if [ "$INTERACTIVE" = 1 ]; then
-    printf 'XHTTP-путь (Enter = сгенерировать случайный): '
+    printf 'XHTTP-путь (Enter = сгенерировать случайный, 0 = назад): '
     read -r entered <"$TTY" || true
+    is_menu_back "$entered" && back_to_menu
   fi
   if [ -n "$entered" ]; then
     TUNNEL_PATH="$(normalize_path "$entered")"
@@ -215,22 +224,36 @@ current_path() {
 # ── Сбор параметров (спрашиваем только незаданное через env) ─────────────────
 collect_params() {
   local need_node="${1:-ask}"   # ask|node|front
-  [ -n "$EMAIL" ] || { [ "$INTERACTIVE" = 1 ] || die "EMAIL не задан. Передай через env: EMAIL=you@mail.com bash $0 --auto"; printf 'Email (для Let'\''s Encrypt): '; read -r EMAIL <"$TTY" || true; }
+  if [ -z "$EMAIL" ]; then
+    [ "$INTERACTIVE" = 1 ] || die "EMAIL не задан. Передай через env: EMAIL=you@mail.com bash $0 --auto"
+    printf 'Email (для Let'\''s Encrypt, 0 = назад): '
+    read -r EMAIL <"$TTY" || true
+    is_menu_back "$EMAIL" && back_to_menu
+  fi
   while ! printf '%s' "$EMAIL" | grep -q '@'; do
     [ "$INTERACTIVE" = 1 ] || die "EMAIL некорректен/не задан (env: EMAIL=...)."
-    printf '  Некорректный email, повтори: '; read -r EMAIL <"$TTY" || true
+    printf '  Некорректный email. Повтори (0 = назад): '
+    read -r EMAIL <"$TTY" || true
+    is_menu_back "$EMAIL" && back_to_menu
   done
-  [ -n "$DOMAIN" ] || { [ "$INTERACTIVE" = 1 ] || die "DOMAIN не задан. Передай через env: DOMAIN=node.example.net bash $0 --auto"; printf 'Домен ноды (например finka.example.ru): '; read -r DOMAIN <"$TTY" || true; }
+
+  if [ -z "$DOMAIN" ]; then
+    [ "$INTERACTIVE" = 1 ] || die "DOMAIN не задан. Передай через env: DOMAIN=node.example.net bash $0 --auto"
+    printf 'Домен ноды (например finka.example.ru, 0 = назад): '
+    read -r DOMAIN <"$TTY" || true
+    is_menu_back "$DOMAIN" && back_to_menu
+  fi
   DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%/}"
   DOMAIN="$(printf '%s' "$DOMAIN" | tr -d '[:space:]')"
   [ -n "$DOMAIN" ] || die "Домен пустой."
 
   if [ "$need_node" != "front" ] && [ -z "$SECRET_KEY" ]; then
-    printf 'Поставить ноду здесь же? Вставь SECRET_KEY из панели Remnawave (Enter = только фронт).\n'
+    printf 'Поставить ноду здесь же? Вставь SECRET_KEY из панели Remnawave (Enter = только фронт, 0 = назад).\n'
     printf '%b  ввод СКРЫТ — символы не отображаются, это нормально. Вставляй ТОЛЬКО значение ключа,%b\n' "$DIM" "$N"
     printf '%b  без «SECRET_KEY=» и без кавычек.%b\n' "$DIM" "$N"
     printf 'SECRET_KEY: '
     read -rs SECRET_KEY <"$TTY" || true; echo
+    is_menu_back "$SECRET_KEY" && back_to_menu
   fi
   sanitize_key
   if [ -n "$SECRET_KEY" ]; then
@@ -609,10 +632,35 @@ start_caddy() {
 }
 
 site_code() {
-  local port="$1" url
+  local port="$1" url code
   if [ "$port" = 443 ]; then url="https://${DOMAIN}/"; else url="https://${DOMAIN}:${port}/"; fi
-  curl -ksS --max-time 12 --resolve "${DOMAIN}:${port}:127.0.0.1" \
-    -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true
+
+  # This is a LOCAL health check. Never send it through HTTP(S)_PROXY.
+  code="$(curl -ksS --noproxy '*' --connect-timeout 3 --max-time 8 \
+    --resolve "${DOMAIN}:${port}:127.0.0.1" \
+    -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)"
+  if [ -n "$code" ] && [ "$code" != 000 ]; then
+    printf '%s' "$code"
+    return 0
+  fi
+
+  # Public Caddy may be IPv6-only on some hosts; try loopback v6 as fallback.
+  if [ "$port" = 443 ]; then
+    code="$(curl -gksS --noproxy '*' --connect-timeout 3 --max-time 8 \
+      --resolve "${DOMAIN}:${port}:[::1]" \
+      -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)"
+  fi
+  printf '%s' "${code:-000}"
+}
+
+site_probe_diagnostics() {
+  local port="$1"
+  warn "Локальная HTTPS-проверка не прошла. Диагностика без изменения конфигурации:"
+  printf '  caddy service : %s\n' "$($SUDO systemctl is-active caddy 2>/dev/null || echo unknown)"
+  printf '  listeners     :\n'
+  ss -lntp 2>/dev/null | grep -E ":${port}[[:space:]]|127\.0\.0\.1:${CADDY_LOCAL_PORT}[[:space:]]|127\.0\.0\.1:${BACKEND_PORT}[[:space:]]" | sed 's/^/    /' || echo '    (нет ожидаемых listener)'
+  printf '  caddy journal :\n'
+  $SUDO journalctl -u caddy -n 20 --no-pager 2>/dev/null | tail -20 | sed 's/^/    /' || true
 }
 
 check_site_port() {
@@ -632,6 +680,7 @@ check_site_port() {
     sleep 3
   done
   warn "Стрим-сайт не прошёл проверку на порту ${port}: HTTP ${code:-нет ответа}."
+  site_probe_diagnostics "$port"
   return 1
 }
 
@@ -846,7 +895,8 @@ run_install() {
     if [ -n "$_cur" ]; then
       warn "Найдена прошлая установка. Текущий туннель-путь: ${G}${_cur}${N}"
       warn "Новый путь рассинхронизирует ноду с CDN Rewrite и хостом панели — трафик встанет, пока не обновишь их."
-      printf 'Оставить ТЕКУЩИЙ путь? [Y/n]  (n = сгенерировать новый) '; read -r _keep <"$TTY" || true
+      printf 'Оставить ТЕКУЩИЙ путь? [Y/n/0]  (n = новый, 0 = назад) '; read -r _keep <"$TTY" || true
+      is_menu_back "$_keep" && back_to_menu
       case "${_keep:-Y}" in [Nn]*) : ;; *) TUNNEL_PATH="$_cur" ;; esac
     fi
   fi
@@ -859,8 +909,8 @@ run_install() {
   say "  сайт     : ${C}STREAM → ${WEBROOT}${N}"
   echo
   if [ -z "${REMNA_NONINTERACTIVE:-}" ]; then
-    printf 'Продолжить установку? [Y/n] '; read -r yn <"$TTY" || true
-    case "${yn:-Y}" in [Nn]*) die "Отменено." ;; esac
+    printf 'Продолжить установку? [Y/n/0]  (n/0 = назад в меню) '; read -r yn <"$TTY" || true
+    case "${yn:-Y}" in [Nn]|0|q|Q|back|BACK|Back|назад|Назад|НАЗАД) back_to_menu ;; esac
   fi
   install_caddy
   write_caddyfile
@@ -908,8 +958,8 @@ run_reinstall() {
   banner
   warn "Переустановка снесёт локальную ноду и конфиг Caddy, затем поставит заново с НОВЫМ путём."
   if [ -z "${REMNA_NONINTERACTIVE:-}" ]; then
-    printf 'Продолжить? [y/N] '; read -r yn <"$TTY" || true
-    case "${yn:-N}" in [Yy]*) : ;; *) die "Отменено." ;; esac
+    printf 'Продолжить? [y/N/0]  (N/0 = назад в меню) '; read -r yn <"$TTY" || true
+    case "${yn:-N}" in [Yy]*) : ;; *) back_to_menu ;; esac
   fi
   clean_node
   TUNNEL_PATH=""        # форсируем генерацию нового пути
@@ -936,8 +986,9 @@ cmd_path_set() {
   resolve_existing
   local requested="${1:-}" old backup_dir f tmp
   if [ -z "$requested" ] && [ "$INTERACTIVE" = 1 ]; then
-    printf 'Новый XHTTP-путь: '
+    printf 'Новый XHTTP-путь (0 = назад): '
     read -r requested <"$TTY" || true
+    is_menu_back "$requested" && back_to_menu
   fi
   [ -n "$requested" ] || die "Укажи путь: $0 path-set /new/path.php"
   requested="$(normalize_path "$requested")"
