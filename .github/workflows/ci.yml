@@ -199,7 +199,7 @@ jobs:
           set -Eeuo pipefail
           grep -Fq 'ПОКАЗАТЬ ГОТОВЫЙ ПРОФИЛЬ / ПРОФИЛИ ДЛЯ КОПИПАСТЫ? [Y/n]:' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next current-profile' full-clean-reinstall.sh
-          grep -Fq '[13] СЕТЬ / BBR TUNE / BBR3' full-clean-reinstall.sh
+          grep -Fq '[13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)' full-clean-reinstall.sh
           grep -Fq 'https://github.com/Balbuto/safe-remnanode-setup' full-clean-reinstall.sh
           grep -Fq 'https://github.com/ivan-nginx/bbr3' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next network' full-clean-reinstall.sh
