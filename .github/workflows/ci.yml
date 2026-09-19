@@ -139,6 +139,10 @@ jobs:
           grep -Fq "MENU_BACK_RC=20" protection-manager.sh
           grep -Fq "menu_action run_core repair" install-caddy-node-reality-stream.sh
           grep -Fq "menu_action protection menu" install-caddy-node-reality-stream.sh
+          grep -Fq "[13] Config Profile JSON (XHTTP + REALITY)" install-caddy-node-reality-stream.sh
+          grep -Fq "13) menu_action run_core config-profile" install-caddy-node-reality-stream.sh
+          grep -Fq "config-profile|profile-json|profile) cmd_config_profile" install-caddy-node-reality-stream-core.sh
+          grep -Fq 'cat "$PROFILE_INBOUNDS"' install-caddy-node-reality-stream-core.sh
           grep -Fq "curl -ksS --noproxy '*'" install-caddy-node-reality-stream-core.sh
           grep -Fq "site_probe_diagnostics" install-caddy-node-reality-stream-core.sh
 
