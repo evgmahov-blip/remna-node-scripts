@@ -29,7 +29,14 @@ ok(){ printf '✓ %s\n' "$*"; }
 warn(){ printf '! %s\n' "$*" >&2; }
 die(){ printf '✗ %s\n' "$*" >&2; exit 1; }
 MENU_BACK_RC=20
+IN_MANAGER_MENU=0
 is_menu_back(){ case "${1:-}" in 0|q|Q|back|BACK|Back|назад|Назад|НАЗАД) return 0 ;; *) return 1 ;; esac; }
+back_to_manager_menu(){
+  if [ "$IN_MANAGER_MENU" -eq 1 ]; then
+    return 0
+  fi
+  menu
+}
 
 ensure_self(){
   local current
@@ -574,6 +581,7 @@ run_core(){
   local core_rc=0 protection_rc=0
   bash "$CORE" "$@" || core_rc=$?
   if [ "$core_rc" -eq "$MENU_BACK_RC" ]; then
+    back_to_manager_menu
     return 0
   fi
   [ "$core_rc" -eq 0 ] || return "$core_rc"
@@ -587,6 +595,7 @@ run_core(){
       fi
       if [ "$protection_rc" -eq "$MENU_BACK_RC" ]; then
         warn "Настройка TCP/2222 отложена — возвращаюсь в меню."
+        back_to_manager_menu
         return 0
       elif [ "$protection_rc" -ne 0 ]; then
         warn "TCP/2222 пока не ограничен: задай IP панели в разделе защиты."
@@ -609,6 +618,7 @@ run_core(){
 }
 
 menu(){
+  IN_MANAGER_MENU=1
   while true; do
     cat <<'MENU'
 
@@ -670,7 +680,12 @@ main(){
     selftest|self-test|check-all|repair-all) selftest_all ;;
     handoff-check) set +e; auto_handoff_once; exit 0 ;;
     protect|protection) protection menu ;; protect-install) protection install ;; protect-status) protection status ;; protect-selftest) protection selftest ;;
-    panel-set) shift; protection panel-set "${1:-}" ;;
+    panel-set)
+      shift
+      rc=0
+      protection panel-set "${1:-}" || rc=$?
+      if [ "$rc" -eq "$MENU_BACK_RC" ]; then back_to_manager_menu; elif [ "$rc" -ne 0 ]; then return "$rc"; fi
+      ;;
     *) run_core "$@" ;;
   esac
 }
