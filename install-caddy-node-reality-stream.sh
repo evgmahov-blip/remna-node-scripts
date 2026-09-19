@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-REPO_REF=99b9d86885113cb0cec2f15eee0341ea1747fb06
+REPO_REF=67b0ffd85f30acca5377cfa3bd44b4bb24c29803
 REPO_RAW="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${REPO_REF}"
-CORE_BLOB_SHA=643c64d9046f30ef1ee0d1ab044f8ed94e9b09e1
+CORE_BLOB_SHA=752f2daa55003726114510b1765cb5830cb07575
 PROTECTION_BLOB_SHA=550d5e1d6342005355657d129c5c99122fa769d7
-CADDY_GUARD_BLOB_SHA=6c173ace5421cd9572426e28ff51793221a5db15
+CADDY_GUARD_BLOB_SHA=e5a6c6f03682bbe0551184dfdb35c3f22ca1c62e
 REMNA_NODE_IMAGE="${REMNA_NODE_IMAGE:-remnawave/node:3.4.1}"
 INSTALL_DIR=/opt/remna-node-scripts
 SELF="$INSTALL_DIR/install-caddy-node-reality-stream.sh"
@@ -16,8 +16,8 @@ NODE_DIR=/opt/remnanode
 NODE_COMPOSE="$NODE_DIR/docker-compose.yml"
 NODE_ENV="$NODE_DIR/.env"
 REALITY_SOCKET_DIR=/dev/shm/remna-reality
+REALITY_SOCKET_HOST=$REALITY_SOCKET_DIR/nginx.sock
 REALITY_SOCKET_TARGET=/dev/shm/nginx.sock
-FALLBACK_CONTAINER=remna-reality-fallback
 CADDYFILE=/etc/caddy/Caddyfile
 CADDY_PUBLIC=/etc/caddy/Caddyfile.public
 CADDY_REALITY=/etc/caddy/Caddyfile.reality
