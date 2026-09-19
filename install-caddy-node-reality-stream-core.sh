@@ -739,12 +739,14 @@ reality_front_ready() {
 
 final_topology_ready() {
   reality_front_ready &&
-  listener_is "$BACKEND_PORT" 'rw-core' '127\.0\.0\.1:7443' &&
-  listener_is "$NODE_PORT" 'rw-node'
+  listener_is "$NODE_PORT" 'rw-node' &&
+  [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] &&
+  $SUDO docker exec remnanode test -S "$REALITY_SOCKET_TARGET" >/dev/null 2>&1
 }
 
 show_topology() {
-  ss -lntp 2>/dev/null | grep -E ":(${NODE_PORT}|${REALITY_PORT}|${BACKEND_PORT}|${CADDY_LOCAL_PORT})[[:space:]]" || true
+  ss -lntp 2>/dev/null | grep -E ":(${NODE_PORT}|${REALITY_PORT}|${CADDY_LOCAL_PORT})[[:space:]]" || true
+  printf '  self-steal socket: %s\n' "$([ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && echo ready || echo missing)"
 }
 
 node_has_443_conflict() {
@@ -768,33 +770,23 @@ wait_for_rw_core_443() {
   return 1
 }
 
-warn_if_xhttp_missing() {
-  listener_is "$BACKEND_PORT" 'rw-core' '127\.0\.0\.1:7443' && return 0
-  warn "REALITY держит :443, но XHTTP 127.0.0.1:${BACKEND_PORT} отсутствует — Caddy оставлен живым, профиль нужно дополнить XHTTP inbound."
-}
-
-# ── Проверка бэкенда 7443 + честный вердикт (нода жива / упала / только фронт)
 verify_backend() {
-  printf '\n%bБэкенд ноды 127.0.0.1:%s:%b ' "$B" "$BACKEND_PORT" "$N"
-  if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -q "127.0.0.1:${BACKEND_PORT}"; then
-    printf '%b✓ слушает%b — XHTTP-инбаунд Xray поднят.\n' "$G" "$N"
+  printf '\n%bПрофиль XHTTP+REALITY :443:%b ' "$B" "$N"
+  if rw_core_on_443; then
+    printf '%b✓ rw-core слушает 0.0.0.0:443%b\n' "$G" "$N"
+    [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && ok "Self-steal socket готов: $REALITY_SOCKET_TARGET"
   elif [ -n "$SECRET_KEY" ] && $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^remnanode$'; then
-    printf '%bконтейнер поднят, инбаунд ещё не слушает%b\n' "$Y" "$N"
-    warn "Это НОРМАЛЬНО до шага в панели. В Remnawave назначь ноде Config Profile с инбаундом"
-    warn "VLESS+XHTTP на 127.0.0.1:${BACKEND_PORT} (путь = ${TUNNEL_PATH}, sessionIDKey/sessionKey=auth)."
-    warn "Если нода серая — проверь, что порт ${NODE_PORT} открыт для сервера панели (mTLS)."
-    say  "  Проверка: ${DIM}docker logs -f remnanode${N} ; ${DIM}ss -lntp | grep ${BACKEND_PORT}${N}"
+    printf '%bконтейнер поднят, профиль ещё не применён%b\n' "$Y" "$N"
+    warn "Назначь ноде Config Profile из $PROFILE_INBOUNDS: один inbound VLESS XHTTP+REALITY на :443."
+    warn "Если нода серая — проверь TCP/${NODE_PORT} только от IP панели."
   elif [ -n "$SECRET_KEY" ]; then
     printf '%b✗ контейнер ноды не работает%b\n' "$R" "$N"
-    warn "SECRET_KEY ввёден, но Remnanode упал — 7443 не встанет. Частая причина: неверный/обрезанный ключ."
-    say  "  Смотри: ${DIM}docker logs --tail 40 remnanode${N} ; затем ${DIM}cd $NODE_DIR && docker compose up -d${N}"
+    say "  Смотри: ${DIM}docker logs --tail 40 remnanode${N}"
   else
-    printf '%b✗ никто не слушает%b\n' "$R" "$N"
-    warn "Выбран ТОЛЬКО фронт (SECRET_KEY не введён) — Caddy будет отдавать 502, пока нет ноды."
-    say  "  Подними ноду: ${DIM}bash $0 install${N} (с SECRET_KEY), затем назначь Config Profile в панели."
+    printf '%b✗ нода не установлена%b\n' "$R" "$N"
+    warn "Выбран только фронт Caddy. Для профиля :443 нужен Remnanode."
   fi
 }
-
 # ── Домен/путь для standalone-сводки: из env, иначе из существующего Caddyfile
 resolve_for_summary() {
   if [ -z "$DOMAIN" ] && [ -f "$CADDYFILE" ]; then
