@@ -1390,6 +1390,32 @@ cmd_reality_info() {
   ss -lntp 2>/dev/null | grep -E ":443 |127.0.0.1:${BACKEND_PORT}|127.0.0.1:${CADDY_LOCAL_PORT}" | sed 's/^/  /' || true
 }
 
+cmd_config_profile() {
+  banner
+  resolve_existing
+  if [ ! -s "$PROFILE_INBOUNDS" ]; then
+    warn "Готовый Config Profile ещё не создан."
+    say "  Сначала выбери «Подготовить REALITY» или выполни:"
+    say "  ${C}${MANAGER_PATH} reality-prepare${N}"
+    return 1
+  fi
+
+  echo
+  line
+  printf '%b%b  CONFIG PROFILE JSON — XHTTP + REALITY%b\n' "$B" "$G" "$N"
+  line
+  warn "Ниже полный JSON для вставки в Remnawave Config Profile."
+  warn "Он содержит REALITY privateKey. Не публикуй этот вывод и не отправляй его в issue/чаты."
+  echo
+  cat "$PROFILE_INBOUNDS"
+  echo
+  line
+  printf '  %-24s %s\n' 'Готовый профиль:' "$PROFILE_INBOUNDS"
+  printf '  %-24s %s\n' 'XHTTP отдельно:' "$XHTTP_INBOUND"
+  printf '  %-24s %s\n' 'REALITY отдельно:' "$REALITY_INBOUND"
+  line
+}
+
 cmd_repair() {
   banner
   install_prerequisites
@@ -1440,7 +1466,7 @@ menu() {
   printf '   %b[9]%b  🔐  Подготовить REALITY     %b— XHTTP+REALITY JSON + Caddy:8443%b\n' "$C" "$N" "$DIM" "$N"
   printf '   %b[10]%b ⚡  Включить REALITY        %b— переключить один внешний TCP/443%b\n' "$G" "$N" "$DIM" "$N"
   printf '   %b[11]%b ↩   Отключить REALITY       %b— вернуть публичный Caddy:443%b\n' "$Y" "$N" "$DIM" "$N"
-  printf '   %b[12]%b ℹ   Файлы REALITY           %b— пути без вывода ключей%b\n' "$BL" "$N" "$DIM" "$N"
+  printf '   %b[12]%b 📋  Config Profile JSON      %b— готовый XHTTP + REALITY для Remnawave%b\n' "$BL" "$N" "$DIM" "$N"
   printf '   %b[13]%b 🛠   Repair Caddy / XHTTP / REALITY %b— сайт, конфиги и конфликт TCP/443%b\n' "$G" "$N" "$DIM" "$N"
   printf '   %b[14]%b 🧹  Снести всё (clean)      %b— удалить ноду и конфиг Caddy%b\n' "$R" "$N" "$DIM" "$N"
   printf '   %b[0]%b  🚪  Выход\n' "$DIM" "$N"
@@ -1458,7 +1484,7 @@ menu() {
     9) cmd_reality_prepare ;;
     10) cmd_reality_enable ;;
     11) cmd_reality_disable ;;
-    12) cmd_reality_info ;;
+    12) cmd_config_profile ;;
     13) cmd_repair ;;
     14) clean_node ;;
     0|"") exit 0 ;;
@@ -1485,6 +1511,7 @@ main() {
     reality-enable)         cmd_reality_enable ;;
     reality-disable)        cmd_reality_disable ;;
     reality-info)           cmd_reality_info ;;
+    config-profile|profile-json|profile) cmd_config_profile ;;
     clean|uninstall)       clean_node ;;
     menu|"")               menu ;;
     -h|--help|help)        sed -n '18,43p' "$0" | sed 's/^# \{0,1\}//' ;;
