@@ -191,6 +191,25 @@ jobs:
           ! grep -Fq 'Для продолжения введи MIGRATE' full-clean-reinstall.sh
           ! grep -Fq 'read -r answer < "$TTY"' <(sed -n '/run_existing_node_v2(){/,/^}/p' full-clean-reinstall.sh)
 
+      - name: Friendly menu, profiles and network guard
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'ПОКАЗАТЬ ГОТОВЫЙ ПРОФИЛЬ / ПРОФИЛИ ДЛЯ КОПИПАСТЫ? [Y/n]:' full-clean-reinstall.sh
+          grep -Fq 'sudo remnanode-next current-profile' full-clean-reinstall.sh
+          grep -Fq '[13] СЕТЬ / BBR TUNE / BBR3' full-clean-reinstall.sh
+          grep -Fq 'https://github.com/Balbuto/safe-remnanode-setup' full-clean-reinstall.sh
+          grep -Fq 'https://github.com/ivan-nginx/bbr3' full-clean-reinstall.sh
+          grep -Fq 'sudo remnanode-next network' full-clean-reinstall.sh
+
+          n=next-installer/network-tuning-manager.sh
+          test "$(git rev-parse HEAD:$n)" = "e42fae983026ce3b054f76ef58d611254d0a6717"
+          test "$(git rev-parse a8c3f5ccd32e0b528715eabf575495f2a8aa0f8e:$n)" = "e42fae983026ce3b054f76ef58d611254d0a6717"
+          grep -Fq 'sudo remnanode-next bbr-tune' "$n"
+          grep -Fq 'sudo remnanode-next bbr3' "$n"
+          grep -Fq 'BBR3 — КАСТОМНОЕ ЯДРО, НУЖЕН REBOOT' "$n"
+          grep -Fq 'BBR TUNE — SAFE/HIGHLOAD, БЕЗ ЗАМЕНЫ ЯДРА' "$n"
+
       - name: NEXT launcher pin chain
         shell: bash
         run: |
@@ -203,7 +222,7 @@ jobs:
           grep -Fq 'HYSTERIA_OVERLAY_BLOB_SHA="dbb3a99a9c2a1f442c9e0e19fbebf3ec9d6d871f"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
-          grep -Fq 'REMNANODE NEXT — main' full-clean-reinstall.sh
+          grep -Fq 'REMNANODE NEXT — MAIN' full-clean-reinstall.sh
           grep -Fq 'Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)' full-clean-reinstall.sh
           grep -Fq 'SAFE scanner guard' full-clean-reinstall.sh
           ! grep -Fq 'patch_hysteria_compat(){' full-clean-reinstall.sh
