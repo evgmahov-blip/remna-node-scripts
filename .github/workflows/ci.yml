@@ -139,9 +139,14 @@ jobs:
           grep -Fq "MENU_BACK_RC=20" protection-manager.sh
           grep -Fq "menu_action run_core repair" install-caddy-node-reality-stream.sh
           grep -Fq "menu_action protection menu" install-caddy-node-reality-stream.sh
-          grep -Fq "[13] Config Profile JSON (XHTTP + REALITY)" install-caddy-node-reality-stream.sh
+          grep -Fq "[13] Профили для копипасты (XHTTP / REALITY / оба)" install-caddy-node-reality-stream.sh
           grep -Fq "13) menu_action run_core config-profile" install-caddy-node-reality-stream.sh
-          grep -Fq "config-profile|profile-json|profile) cmd_config_profile" install-caddy-node-reality-stream-core.sh
+          grep -Fq "Config Profiles для копипасты в Remnawave" install-caddy-node-reality-stream-core.sh
+          grep -Fq "[1] XHTTP — готовый Config Profile" install-caddy-node-reality-stream-core.sh
+          grep -Fq "[2] REALITY — готовый Config Profile" install-caddy-node-reality-stream-core.sh
+          grep -Fq "[3] XHTTP + REALITY — общий Config Profile" install-caddy-node-reality-stream-core.sh
+          grep -Fq 'print_profile_json "XHTTP CONFIG PROFILE" "$XHTTP_INBOUND"' install-caddy-node-reality-stream-core.sh
+          grep -Fq 'print_profile_json "REALITY CONFIG PROFILE" "$REALITY_INBOUND"' install-caddy-node-reality-stream-core.sh
           grep -Fq 'cat "$PROFILE_INBOUNDS"' install-caddy-node-reality-stream-core.sh
           grep -Fq "curl -ksS --noproxy '*'" install-caddy-node-reality-stream-core.sh
           grep -Fq "site_probe_diagnostics" install-caddy-node-reality-stream-core.sh
