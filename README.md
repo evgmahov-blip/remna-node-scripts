@@ -25,7 +25,7 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/4af29bfbff76013a991903294d4982adc5b09c86/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/262726dab7ee5762f751f624456d8a1830f61464/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -35,7 +35,7 @@ Safe reinstall:
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/740bd31057f51125d43ab1da41fb844536a78ec8/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/c08d8d873965af4e3e88cfb38d08a1b03afc8c80/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -205,7 +205,7 @@ next-installer/next-runtime-guards.sh
 next-installer/xhttp-signature-manager.sh
 ```
 
-Runtime-specific `docker-compose.yml`, `nginx.conf`, домен, сертификаты и секреты с рабочей ноды в bundle намеренно не включены.
+В recovered bundle байт-в-байт сохранены также `docker-compose.yml` и `nginx.conf` с рабочей ноды как эталон архитектуры. Installer их из bundle **не устанавливает**: для runtime используются штатные NEXT-функции. `.env`, сертификаты и приватные ключи в bundle отсутствуют.
 
 ### Известный хвост recovered snapshot
 
