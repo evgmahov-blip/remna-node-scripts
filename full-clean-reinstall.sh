@@ -423,11 +423,8 @@ run_reinstall(){
 
 run_existing_node_v2(){
   warn 'NEXT V2 — установка на существующую/legacy ноду.'
-  warn 'Сначала recovery backup и адресная очистка старых Remnanode/Caddy/Hysteria/RKN хвостов, затем свежий NEXT.'
+  warn 'Запуск этого режима уже означает согласие на recovery backup, очистку старых Remnanode/Caddy/Hysteria/RKN хвостов и свежую установку NEXT.'
   warn 'SSH, hostname, DNS, default route, Docker как пакет и чужие контейнеры не затрагиваются.'
-  printf 'Для продолжения введи MIGRATE (0 = назад): '
-  local answer; read -r answer < "$TTY" || true
-  [[ "$answer" == MIGRATE ]] || { say 'Отменено.'; return 0; }
 
   sync_next_sources
   [[ -x "$V2_CLEANER" ]] || die "Не найден $V2_CLEANER"
