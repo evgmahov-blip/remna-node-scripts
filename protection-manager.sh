@@ -504,6 +504,64 @@ uninstall(){
   ok "Правила защиты удалены. Конфиг $BASE сохранён."
 }
 
+rkn_enable(){
+  need_root; write_defaults; install_deps
+  set_conf ENABLE_TSPU 1
+  set_conf ENABLE_GOV 1
+  write_units
+  if ! update_blocklists; then
+    warn "Свежие RKN/TSPU/GOV списки получить не удалось; сохраняю предыдущие наборы."
+    apply_rules
+  fi
+  apply_rules
+  ok "RKN-защита включена: TSPU + GOV применяются к FILTER_PORTS."
+}
+
+rkn_disable(){
+  need_root; load_conf
+  set_conf ENABLE_TSPU 0
+  set_conf ENABLE_GOV 0
+  apply_rules
+  ok "RKN/TSPU/GOV фильтрация выключена. Защита TCP/2222 и остальные правила не удалены."
+}
+
+rkn_status(){
+  load_conf
+  echo '=== RKN / TSPU / GOV ==='
+  printf 'TSPU         : %s (%s entries)\n' "$ENABLE_TSPU" "$($SUDO ipset list "$SET_TSPU" 2>/dev/null | awk -F': ' '/Number of entries/{print $2}' || echo 0)"
+  printf 'GOV          : %s (%s entries)\n' "$ENABLE_GOV" "$($SUDO ipset list "$SET_GOV" 2>/dev/null | awk -F': ' '/Number of entries/{print $2}' || echo 0)"
+  printf 'Filter ports : %s\n' "$FILTER_PORTS"
+  systemctl is-active remna-protection-update.timer 2>/dev/null | sed 's/^/Update timer : /' || true
+}
+
+rkn_menu(){
+  while true; do
+    cat <<'EOF'
+
+────────────────────────────────────────────────────────────
+РКН защита — TSPU / GOV
+────────────────────────────────────────────────────────────
+ [1] Включить / установить RKN-защиту
+ [2] Обновить TSPU/GOV списки сейчас
+ [3] Статус RKN-защиты
+ [4] Выключить TSPU/GOV фильтрацию
+ [0] Назад
+────────────────────────────────────────────────────────────
+EOF
+    printf 'Выбор: '
+    local c rc=0
+    read -r c < "$TTY" || true
+    case "$c" in
+      1) rkn_enable || { rc=$?; warn "RKN-защита завершилась с кодом $rc."; } ;;
+      2) update_blocklists || warn "Не удалось обновить blocklists; предыдущие наборы сохранены." ;;
+      3) rkn_status ;;
+      4) rkn_disable ;;
+      0|'') return 0 ;;
+      *) warn "Неизвестный пункт: $c" ;;
+    esac
+  done
+}
+
 menu(){
   while true; do
     cat <<'EOF'
@@ -594,6 +652,10 @@ EOF
 main(){
   case "${1:-menu}" in
     menu|'') menu ;;
+    rkn|rkn-menu) rkn_menu ;;
+    rkn-enable) rkn_enable ;;
+    rkn-disable) rkn_disable ;;
+    rkn-status) rkn_status ;;
     install) install_all ;;
     update) update_blocklists ;;
     apply) apply_rules ;;
@@ -605,7 +667,7 @@ main(){
     allow-add) shift; add_ip_file allow.txt "$1" ;;
     deny-add) shift; add_ip_file deny.txt "$1" ;;
     uninstall) uninstall ;;
-    *) die "Команда: menu|install|update|apply|status|selftest|panel-set|ensure-panel|check-node-api|uninstall" ;;
+    *) die "Команда: menu|rkn|rkn-enable|rkn-disable|rkn-status|install|update|apply|status|selftest|panel-set|ensure-panel|check-node-api|uninstall" ;;
   esac
 }
 main "$@"
