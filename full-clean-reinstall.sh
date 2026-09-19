@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 
 TASK_NAME="REMNA NODE VERIFIED INSTALLER"
-PINNED_REF="f0c0832afa3ae7371d5203c59fd814536a291b5f"
-EXPECTED_BLOB_SHA="f7c73f2a1f7ba1bf511cd9e6e8ca79edf1462859"
+PINNED_REF="a58689c6f01de4e3a5f9b56f455fa22ec6e38ae9"
+EXPECTED_BLOB_SHA="688f81277e906c9c4f508ff86409d980e2a6442b"
 REMOTE="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${PINNED_REF}/install-caddy-node-reality-stream.sh"
 MODE="${1:-menu}"
 TMP="$(mktemp)"
