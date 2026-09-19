@@ -27,7 +27,7 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/f08d953d59e0b0ffdc629e475790f81b805b8f07/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/ee7b70dcc24f41d4628565b6288af649310841e8/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -37,7 +37,7 @@ sudo bash /tmp/remna-install.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/faadb3e777aba2ffcd6b345e47a0263151a0df15/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/58a712eb9de30df12378b931f2bc2246df699c17/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -214,6 +214,29 @@ RKN WATCHER — SAFE SCANNER MODE
 ```
 
 SAFE guard защищает TCP/80, TCP/443 и UDP/443 от известных scanner IP. При активации используется rollback и last-good проверка, чтобы не заменить рабочий набор повреждённым.
+
+## VLESS/XHTTP client: `vnext should have one and only one member`
+
+Эта ошибка относится **не к server Config Profile**, а к уже сгенерированному Remnawave клиентскому outbound.
+
+NEXT Config Profile содержит server inbound с `settings.clients: []` и сам по себе не содержит `vnext`. Актуальный Remnawave Xray JSON generator для обычного VLESS Host создаёт один endpoint в `settings.vnext`. После этого Remnawave применяет Host → Mapper.
+
+Поэтому для XHTTP/RAW Host, создаваемого из NEXT profile:
+
+- **Xray JSON Template override: DEFAULT / пусто**;
+- **Mapper: пусто**;
+- не должно быть mapper-операций, которые меняют `settings.vnext` или `settings.vnext.*`;
+- итоговый VLESS outbound должен иметь **ровно один** элемент `settings.vnext`.
+
+Если Xray пишет:
+
+```text
+VLESS settings: "vnext" should have one and only one member
+```
+
+сначала очистите Mapper именно у проблемного Host в Remnawave и заново обновите подписку/клиентский JSON.
+
+Генерируемый `host-xhttp.txt` и вывод transport manager теперь явно содержат этот guard.
 
 ## СЕТЬ / BBR TUNE / BBR3
 
