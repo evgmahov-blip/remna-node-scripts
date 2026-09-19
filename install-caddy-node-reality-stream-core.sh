@@ -1143,148 +1143,98 @@ REALITY_PRIVATE_KEY=$private
 REALITY_PUBLIC_KEY=$public
 REALITY_SHORT_ID=$short
 REALITY_SERVER_NAME=$DOMAIN
-REALITY_TARGET=127.0.0.1:$CADDY_LOCAL_PORT
+REALITY_TARGET=$REALITY_SOCKET_TARGET
 EOF
   chmod 600 "$REALITY_ENV"
   unset private public raw
   ok "Ключи REALITY сохранены с правами 600 → $REALITY_ENV"
 }
 
-write_reality_inbound() {
+write_profile_inbound() {
   # shellcheck disable=SC1090
   . "$REALITY_ENV"
+  local first tag
+  first="${DOMAIN%%.*}"
+  if [[ "$first" =~ ^([A-Za-z]{2})([0-9]+)$ ]]; then
+    tag="${BASH_REMATCH[1]^^}-node${BASH_REMATCH[2]}-xHTTP"
+  else
+    tag="$(printf '%s' "$first" | sed -E 's/[^A-Za-z0-9_-]+/-/g')-xHTTP"
+  fi
+
   umask 077
-  cat > "$REALITY_INBOUND" <<EOF
+  cat > "$PROFILE_INBOUND" <<EOF
 {
-  "tag": "Bee-Direct-Reality",
+  "tag": "$tag",
+  "port": 443,
   "listen": "0.0.0.0",
-  "port": $REALITY_PORT,
   "protocol": "vless",
   "settings": {
     "clients": [],
     "decryption": "none"
   },
   "streamSettings": {
-    "network": "raw",
-    "security": "reality",
-    "realitySettings": {
-      "show": false,
-      "target": "127.0.0.1:$CADDY_LOCAL_PORT",
-      "xver": 0,
-      "serverNames": ["$DOMAIN"],
-      "privateKey": "$REALITY_PRIVATE_KEY",
-      "shortIds": ["$REALITY_SHORT_ID"]
-    }
-  },
-  "sniffing": {
-    "enabled": true,
-    "destOverride": ["http", "tls", "quic"],
-    "metadataOnly": false,
-    "routeOnly": true
-  }
-}
-EOF
-  chmod 600 "$REALITY_INBOUND"
-  ok "Inbound JSON для Config Profile → $REALITY_INBOUND"
-}
-
-write_xhttp_inbound() {
-  local slug tag cookie
-  slug="${DOMAIN%%.*}"
-  slug="$(printf '%s' "$slug" | sed -E 's/[^A-Za-z0-9_-]+/-/g')"
-  tag="Bee-CDN-${slug^}"
-  cookie="$(openssl rand -hex 16)"
-  umask 077
-  cat > "$XHTTP_INBOUND" <<EOF
-{
-  "tag": "$tag",
-  "port": $BACKEND_PORT,
-  "listen": "127.0.0.1",
-  "protocol": "vless",
-  "settings": {"clients": [], "decryption": "none"},
-  "sniffing": {
-    "enabled": true,
-    "routeOnly": true,
-    "destOverride": ["http", "tls", "quic"]
-  },
-  "streamSettings": {
     "network": "xhttp",
-    "security": "none",
+    "security": "reality",
     "xhttpSettings": {
-      "mode": "packet-up",
+      "mode": "auto",
       "path": "$TUNNEL_PATH",
       "extra": {
-        "mode": "packet-up",
-        "path": "$TUNNEL_PATH",
-        "xmux": {"maxConcurrency": "1"},
-        "seqKey": "chunk_id",
-        "headers": {
-          "Accept": "*/*",
-          "Cookie": "session_id=$cookie",
-          "Origin": "https://$DOMAIN/",
-          "Referer": "https://$DOMAIN/",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:151.0) Gecko/20100101 Firefox/151.0",
-          "Sec-Fetch-Dest": "empty",
-          "Sec-Fetch-Mode": "cors",
-          "Sec-Fetch-Site": "same-origin",
-          "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
+        "xmux": {
+          "cMaxReuseTimes": 12,
+          "maxConcurrency": 1
         },
-        "sessionKey": "auth",
-        "sessionIDKey": "auth",
-        "seqPlacement": "query",
-        "sessionPlacement": "query",
-        "sessionIDPlacement": "query",
+        "seqKey": "visitor_id",
+        "xPaddingKey": "_r",
+        "seqPlacement": "cookie",
+        "sessionIDKey": "auth_session",
+        "xPaddingBytes": "270-1096",
         "sessionIDTable": "Base62",
-        "sessionIDLength": "16-32",
-        "uplinkHTTPMethod": "POST",
-        "downloadHTTPMethod": "GET",
-        "uplinkDataPlacement": "body",
-        "xPaddingBytes": "50-150",
-        "xPaddingHeader": "X-Api-Key",
+        "xPaddingHeader": "X-Request-Token",
         "xPaddingMethod": "tokenish",
+        "sessionIDLength": "16-32",
         "xPaddingObfsMode": true,
-        "xPaddingPlacement": "header",
-        "noSSEHeader": true,
-        "noGRPCHeader": true,
-        "scMaxBufferedPosts": 100,
-        "scMaxEachPostBytes": 3000000,
-        "scMinPostsIntervalMs": "5-10",
-        "serverMaxHeaderBytes": 32768
-      },
-      "noSSEHeader": true,
-      "noGRPCHeader": true,
-      "scMaxBufferedPosts": 100,
-      "scMaxEachPostBytes": 3000000,
-      "scMaxConcurrentPosts": 10,
-      "scMinPostsIntervalMs": 5,
-      "serverMaxHeaderBytes": 32768
+        "xPaddingPlacement": "queryInHeader",
+        "sessionIDPlacement": "cookie"
+      }
+    },
+    "realitySettings": {
+      "show": false,
+      "xver": 1,
+      "target": "$REALITY_SOCKET_TARGET",
+      "shortIds": [
+        "$REALITY_SHORT_ID"
+      ],
+      "privateKey": "$REALITY_PRIVATE_KEY",
+      "serverNames": [
+        "$DOMAIN"
+      ],
+      "minClientVer": "1"
     }
   }
 }
 EOF
-  chmod 600 "$XHTTP_INBOUND"
-  ok "XHTTP inbound JSON → $XHTTP_INBOUND"
+  chmod 600 "$PROFILE_INBOUND"
+  ok "XHTTP+REALITY inbound :443 → $PROFILE_INBOUND"
 }
 
 write_profile_bundle() {
   umask 077
   {
     printf '{\n  "inbounds": [\n'
-    sed 's/^/    /' "$XHTTP_INBOUND"
-    printf '    ,\n'
-    sed 's/^/    /' "$REALITY_INBOUND"
+    sed 's/^/    /' "$PROFILE_INBOUND"
     printf '  ]\n}\n'
   } > "$PROFILE_INBOUNDS"
   chmod 600 "$PROFILE_INBOUNDS"
-  ok "Оба inbound одним файлом → $PROFILE_INBOUNDS"
+  ok "Готовый Config Profile → $PROFILE_INBOUNDS"
 }
 
 prepare_profile_files() {
   generate_reality_material
   write_caddyfile_reality
-  write_reality_inbound
-  write_xhttp_inbound
+  install_reality_socket_proxy
+  write_profile_inbound
   write_profile_bundle
+  rm -f "$REALITY_DIR/reality-inbound.json" "$REALITY_DIR/xhttp-inbound.json"
 }
 
 cmd_reality_prepare() {
@@ -1295,15 +1245,13 @@ cmd_reality_prepare() {
   [ -s "$CADDY_PUBLIC" ] || $SUDO cp -a "$CADDYFILE" "$CADDY_PUBLIC"
   prepare_profile_files
   echo; line
-  say "${B}Подготовлено без переключения портов.${N}"
-  say "  Готовый XHTTP inbound : ${C}${XHTTP_INBOUND}${N}"
-  say "  Готовый REALITY inbound: ${C}${REALITY_INBOUND}${N}"
-  say "  Оба объекта вместе     : ${C}${PROFILE_INBOUNDS}${N}"
-  say "  В JSON уже стоят правильные DOMAIN, Origin, Referer, target=127.0.0.1:${CADDY_LOCAL_PORT} и выбранный XHTTP-путь."
-  say "  Если Caddy ещё публично слушает :443, выполни после сохранения профиля: ${C}${MANAGER_PATH} reality-enable${N}"
+  say "${B}Подготовлен единый XHTTP+REALITY inbound на 0.0.0.0:443.${N}"
+  say "  Готовый Config Profile : ${C}${PROFILE_INBOUNDS}${N}"
+  say "  REALITY target         : ${C}${REALITY_SOCKET_TARGET}${N}"
+  say "  XHTTP path             : ${G}${TUNNEL_PATH}${N}"
+  say "  После назначения профиля в панели: ${C}${MANAGER_PATH} reality-enable${N}"
   line
 }
-
 reality_enable_impl() {
   resolve_existing
   [ -s "$CADDY_REALITY" ] || prepare_profile_files
