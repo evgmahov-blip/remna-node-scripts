@@ -202,6 +202,14 @@ jobs:
           set -Eeuo pipefail
           grep -Fq 'ПОКАЗАТЬ ГОТОВЫЙ ПРОФИЛЬ / ПРОФИЛИ ДЛЯ КОПИПАСТЫ? [Y/n]:' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next current-profile' full-clean-reinstall.sh
+          grep -Fq 'Профили + HOST SETTINGS для копипасты в Remnawave' full-clean-reinstall.sh
+          grep -Fq '[3] Hysteria2 + TLS' full-clean-reinstall.sh
+          grep -Fq '→ JSON Config Profile + HOST HYSTERIA2' full-clean-reinstall.sh
+          grep -Fq '[4] XHTTP + Hysteria2' full-clean-reinstall.sh
+          grep -Fq '→ JSON Config Profile + HOST XHTTP + HOST HYSTERIA2' full-clean-reinstall.sh
+          grep -Fq '[5] ТОЛЬКО HOST XHTTP' full-clean-reinstall.sh
+          grep -Fq '[6] ТОЛЬКО HOST HYSTERIA2' full-clean-reinstall.sh
+          grep -Fq 'host-hysteria2|host-hysteria)' full-clean-reinstall.sh
           grep -Fq '[13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)' full-clean-reinstall.sh
           grep -Fq 'https://github.com/Balbuto/safe-remnanode-setup' full-clean-reinstall.sh
           grep -Fq 'https://github.com/ivan-nginx/bbr3' full-clean-reinstall.sh
@@ -276,6 +284,9 @@ jobs:
           grep -Fq 'vnext should have one and only one member' README.md
           grep -Fq 'Mapper: пусто' README.md
           grep -Fq 'ровно один' README.md
+          grep -Fq 'ТОЛЬКО HOST HYSTERIA2' README.md
+          grep -Fq 'sudo remnanode-next host-hysteria2' README.md
+          grep -Fq 'Final Mask JSON:' README.md
 
       - name: Legacy safety guard
         shell: bash

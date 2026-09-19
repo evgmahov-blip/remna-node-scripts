@@ -199,41 +199,111 @@ transport_menu(){
 
 copy_profile_menu(){
   sync_next_sources
-  local choice file=""
+  local choice file="" host1="" host2=""
+
+  print_host_settings(){
+    local label="$1" host="$2"
+    [[ -s "$host" ]] || { warn "Host settings ещё не созданы: $host"; return 1; }
+    echo
+    echo "================ $label — КОПИРУЙ В REMNAWAVE HOST ================"
+    cat "$host"
+    echo "================ КОНЕЦ $label ======================================"
+  }
+
   while true; do
     cat <<'MENU'
 
 ────────────────────────────────────────────────────────────
-Config Profile — копипаста в Remnawave
+REMNAWAVE — CONFIG PROFILE + HOST SETTINGS
 ────────────────────────────────────────────────────────────
  [1] XHTTP + REALITY         (TCP/443)
+     → JSON Config Profile + HOST XHTTP
+
  [2] RAW + REALITY           (TCP/443)
+     → JSON Config Profile + HOST RAW
+
  [3] Hysteria2 + TLS         (UDP/443)
+     → JSON Config Profile + HOST HYSTERIA2
+
  [4] XHTTP + Hysteria2       (TCP/443 + UDP/443)
+     → JSON Config Profile + HOST XHTTP + HOST HYSTERIA2
+
+ [5] ТОЛЬКО HOST XHTTP
+ [6] ТОЛЬКО HOST HYSTERIA2
+ [7] ТОЛЬКО HOST RAW
+
  [0] Назад
 ────────────────────────────────────────────────────────────
 MENU
     printf 'Выбор: '; read -r choice < "$TTY" || true
+    file=""; host1=""; host2=""
+
     case "$choice" in
-      1) file="$APP_DIR/remnawave-profiles/xhttp-reality.json" ;;
-      2) file="$APP_DIR/remnawave-profiles/raw-reality.json" ;;
-      3) file="$APP_DIR/remnawave-profiles/hysteria2-tls.json" ;;
-      4) file="$APP_DIR/remnawave-profiles/xhttp-hysteria2.json" ;;
+      1)
+        file="$APP_DIR/remnawave-profiles/xhttp-reality.json"
+        host1="$APP_DIR/remnawave-profiles/host-xhttp.txt"
+        ;;
+      2)
+        file="$APP_DIR/remnawave-profiles/raw-reality.json"
+        host1="$APP_DIR/remnawave-profiles/host-raw.txt"
+        ;;
+      3)
+        file="$APP_DIR/remnawave-profiles/hysteria2-tls.json"
+        host1="$APP_DIR/remnawave-profiles/host-hysteria2.txt"
+        ;;
+      4)
+        file="$APP_DIR/remnawave-profiles/xhttp-hysteria2.json"
+        host1="$APP_DIR/remnawave-profiles/host-xhttp.txt"
+        host2="$APP_DIR/remnawave-profiles/host-hysteria2.txt"
+        ;;
+      5)
+        print_host_settings "HOST XHTTP" "$APP_DIR/remnawave-profiles/host-xhttp.txt" || true
+        pause
+        continue
+        ;;
+      6)
+        print_host_settings "HOST HYSTERIA2" "$APP_DIR/remnawave-profiles/host-hysteria2.txt" || true
+        pause
+        continue
+        ;;
+      7)
+        print_host_settings "HOST RAW" "$APP_DIR/remnawave-profiles/host-raw.txt" || true
+        pause
+        continue
+        ;;
       0|'') return 0 ;;
       *) warn 'Неверный пункт.'; continue ;;
     esac
+
     if [[ ! -s "$file" ]]; then
       warn "Профиль ещё не создан: $file"
       warn 'Сначала открой пункт «Транспорт / профили».'
       pause
       continue
     fi
+
     echo
-    echo '================ КОПИРУЙ JSON НИЖЕ ================'
+    echo '================ CONFIG PROFILE — КОПИРУЙ JSON ======================'
     warn 'JSON может содержать REALITY privateKey. Не публикуй его.'
     cat "$file"
     echo
-    echo '================ КОНЕЦ JSON ========================'
+    echo '================ КОНЕЦ CONFIG PROFILE ==============================='
+
+    if [[ -n "$host1" ]]; then
+      case "$host1" in
+        *host-xhttp.txt) print_host_settings "HOST XHTTP" "$host1" || true ;;
+        *host-hysteria2.txt) print_host_settings "HOST HYSTERIA2" "$host1" || true ;;
+        *host-raw.txt) print_host_settings "HOST RAW" "$host1" || true ;;
+      esac
+    fi
+    if [[ -n "$host2" ]]; then
+      case "$host2" in
+        *host-xhttp.txt) print_host_settings "HOST XHTTP" "$host2" || true ;;
+        *host-hysteria2.txt) print_host_settings "HOST HYSTERIA2" "$host2" || true ;;
+        *host-raw.txt) print_host_settings "HOST RAW" "$host2" || true ;;
+      esac
+    fi
+
     pause
   done
 }
@@ -552,7 +622,7 @@ CLI:  sudo remnanode-next
 ────────────────────────────────────────────────────────────
  [1]  Установка / продолжить настройку NEXT
  [2]  Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)
- [3]  Профили для копипасты в Remnawave
+ [3]  Профили + HOST SETTINGS для копипасты в Remnawave
  [4]  SelfSteal / маскировочный сайт
  [5]  XHTTP signature
  [6]  РКН защита — SAFE scanner guard (DEFAULT)
@@ -601,7 +671,10 @@ main(){
     migrate-existing|install-v2|legacy-to-next) run_existing_node_v2 ;;
     clean) safe_clean ;;
     transport) sync_next_sources; shift; "$TRANSPORT" "$@"; post_transport ;;
-    profile|profiles) copy_profile_menu ;;
+    profile|profiles|hosts) copy_profile_menu ;;
+    host-xhttp) sync_next_sources; cat "$APP_DIR/remnawave-profiles/host-xhttp.txt" ;;
+    host-hysteria2|host-hysteria) sync_next_sources; cat "$APP_DIR/remnawave-profiles/host-hysteria2.txt" ;;
+    host-raw) sync_next_sources; cat "$APP_DIR/remnawave-profiles/host-raw.txt" ;;
     selfsteal) sync_next_sources; shift; "$SELFSTEAL" "${1:-choose}" "${2:-}" ;;
     rkn) sync_next_sources; shift; "$RKN" "${1:-menu}" ;;
     signature) sync_next_sources; shift; "$SIGNATURE" "${1:-apply}" ;;
@@ -613,7 +686,7 @@ main(){
     bbr-tune) sync_next_sources; "$NETWORK" tune ;;
     bbr3) sync_next_sources; "$NETWORK" bbr3 ;;
     sync-source) sync_next_sources ;;
-    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|sync-source]' ;;
+    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|sync-source]' ;;
   esac
 }
 

@@ -27,7 +27,7 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/ee7b70dcc24f41d4628565b6288af649310841e8/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/cca781a6377e437b0a41aef9e3b5cb9ed6d18a3a/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -37,7 +37,7 @@ sudo bash /tmp/remna-install.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/58a712eb9de30df12378b931f2bc2246df699c17/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/fa45a65c478e81b73e8e12788f5bc09c77892e25/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -64,7 +64,7 @@ CLI:  sudo remnanode-next
 
  [1]  Установка / продолжить настройку NEXT
  [2]  Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)
- [3]  Профили для копипасты в Remnawave
+ [3]  Профили + HOST SETTINGS для копипасты в Remnawave
  [4]  SelfSteal / маскировочный сайт
  [5]  XHTTP signature
  [6]  РКН защита — SAFE scanner guard (DEFAULT)
@@ -105,9 +105,49 @@ RKN снова находится непосредственно в основн
 /opt/remnanode/remnawave-profiles/xhttp-hysteria2.json
 ```
 
-Пункт 3 основного меню печатает выбранный **полный JSON прямо в терминал для копипасты в Remnawave**.
+Пункт 3 основного меню теперь показывает **и Config Profile, и настройки Host**:
 
-После завершения установки NEXT теперь дополнительно спрашивает:
+```text
+[1] XHTTP + REALITY
+    → JSON Config Profile + HOST XHTTP
+
+[2] RAW + REALITY
+    → JSON Config Profile + HOST RAW
+
+[3] Hysteria2 + TLS
+    → JSON Config Profile + HOST HYSTERIA2
+
+[4] XHTTP + Hysteria2
+    → JSON Config Profile + HOST XHTTP + HOST HYSTERIA2
+
+[5] ТОЛЬКО HOST XHTTP
+[6] ТОЛЬКО HOST HYSTERIA2
+[7] ТОЛЬКО HOST RAW
+```
+
+Для Hysteria2 в Host выводятся как минимум:
+
+```text
+Address: <node-domain>
+Port: 443
+Transport: Hysteria2 / UDP
+Security Layer: DEFAULT
+SNI: <node-domain>
+Take SNI from address: ON
+ALPN: h3
+Auth: автоматически = UUID пользователя Remnawave
+Final Mask JSON: {"quicParams":{"debug":false,"congestion":"brutal"}}
+```
+
+Быстрые команды без меню:
+
+```bash
+sudo remnanode-next host-xhttp
+sudo remnanode-next host-hysteria2
+sudo remnanode-next host-raw
+```
+
+После завершения установки NEXT дополнительно спрашивает:
 
 ```text
 ПОКАЗАТЬ ГОТОВЫЙ ПРОФИЛЬ / ПРОФИЛИ ДЛЯ КОПИПАСТЫ? [Y/n]:
