@@ -10,6 +10,9 @@ SOURCE_URL="https://raw.githubusercontent.com/${REPO}/${SOURCE_REF}/vendor/remna
 HYSTERIA_OVERLAY_REF="5d022cef3efd046844445c06a1d1ba387359c2c8"
 HYSTERIA_OVERLAY_BLOB_SHA="dbb3a99a9c2a1f442c9e0e19fbebf3ec9d6d871f"
 HYSTERIA_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${HYSTERIA_OVERLAY_REF}/next-installer/remnawave-transport-manager.sh"
+V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"
+V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
+V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next-installer/existing-node-v2-cleanup.sh"
 
 APP_DIR="/opt/remnanode"
 NEXT_DIR="$APP_DIR/next-installer"
@@ -21,6 +24,7 @@ SELFSTEAL="$NEXT_DIR/selfsteal-site-manager.sh"
 RKN="$NEXT_DIR/rkn-watcher-manager.sh"
 GUARDS="$NEXT_DIR/next-runtime-guards.sh"
 SIGNATURE="$NEXT_DIR/xhttp-signature-manager.sh"
+V2_CLEANER="$NEXT_DIR/existing-node-v2-cleanup.sh"
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
 
@@ -109,6 +113,15 @@ FILES
   verify_source_file "$tmp/next-installer/rkn-watcher-manager.sh" "$EXPECTED_RKN"
   verify_source_file "$tmp/next-installer/selfsteal-site-manager.sh" "$EXPECTED_SELFSTEAL"
   verify_source_file "$tmp/next-installer/xhttp-signature-manager.sh" "$EXPECTED_SIGNATURE"
+
+  local v2cleanup
+  v2cleanup="$tmp/next-installer/existing-node-v2-cleanup.sh"
+  curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 3 \
+    "$V2_CLEANUP_URL" -o "$v2cleanup" || die 'Не удалось скачать NEXT V2 cleanup module.'
+  [[ "$(git_blob_sha "$v2cleanup")" == "$V2_CLEANUP_BLOB_SHA" ]] || die 'NEXT V2 cleanup module не прошёл Git blob SHA.'
+  bash -n "$v2cleanup" || die 'NEXT V2 cleanup module не прошёл bash -n.'
+  grep -Fq 'V2 POSTCHECK PASS' "$v2cleanup" || die 'NEXT V2 cleanup module: postcheck guard отсутствует.'
+  grep -Fq 'global UFW reset НЕ выполнялся' "$v2cleanup" || die 'NEXT V2 cleanup module: firewall safety marker отсутствует.'
 
   install -d -m 0700 "$NEXT_DIR" /usr/local/libexec
   install -m 0700 "$tmp/next-installer/"*.sh "$NEXT_DIR/"
@@ -408,6 +421,20 @@ run_reinstall(){
   run_install
 }
 
+run_existing_node_v2(){
+  warn 'NEXT V2 — установка на существующую/legacy ноду.'
+  warn 'Сначала recovery backup и адресная очистка старых Remnanode/Caddy/Hysteria/RKN хвостов, затем свежий NEXT.'
+  warn 'SSH, hostname, DNS, default route, Docker как пакет и чужие контейнеры не затрагиваются.'
+  printf 'Для продолжения введи MIGRATE (0 = назад): '
+  local answer; read -r answer < "$TTY" || true
+  [[ "$answer" == MIGRATE ]] || { say 'Отменено.'; return 0; }
+
+  sync_next_sources
+  [[ -x "$V2_CLEANER" ]] || die "Не найден $V2_CLEANER"
+  V2_ASSUME_YES=1 "$V2_CLEANER"
+  run_install
+}
+
 main_menu(){
   sync_next_sources
   local c
@@ -425,8 +452,9 @@ REMNANODE NEXT — main
  [7]  Runtime repair / guards
  [8]  Базовое управление Remnanode
  [9]  Статус
- [10] Safe clean текущей ноды
- [11] Safe reinstall
+ [10] Safe clean текущей NEXT-ноды
+ [11] Safe reinstall текущей NEXT-ноды
+ [12] NEXT V2 — существующая/legacy нода → очистка хвостов → NEXT
  [0]  Выход
 ────────────────────────────────────────────────────────────
 MENU
@@ -443,6 +471,7 @@ MENU
       9) show_status; pause ;;
       10) safe_clean; pause ;;
       11) run_reinstall; pause ;;
+      12) run_existing_node_v2; pause ;;
       0|'') return 0 ;;
       *) warn 'Неверный пункт.' ;;
     esac
@@ -455,6 +484,7 @@ main(){
     menu|'') main_menu ;;
     install|install-next) run_install ;;
     reinstall|full-reinstall) run_reinstall ;;
+    migrate-existing|install-v2|legacy-to-next) run_existing_node_v2 ;;
     clean) safe_clean ;;
     transport) sync_next_sources; shift; "$TRANSPORT" "$@"; post_transport ;;
     profile|profiles) copy_profile_menu ;;
@@ -464,7 +494,7 @@ main(){
     runtime) sync_next_sources; shift; "$GUARDS" "$@" ;;
     status) show_status ;;
     sync-source) sync_next_sources ;;
-    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|clean|transport|profiles|selfsteal|rkn|signature|runtime|status|sync-source]' ;;
+    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|selfsteal|rkn|signature|runtime|status|sync-source]' ;;
   esac
 }
 

@@ -159,6 +159,36 @@ jobs:
           grep -Fq 'restore-hysteria' "$guards"
           grep -Fq 'sync-rkn-watch' "$guards"
 
+      - name: Existing-node NEXT V2 migration guard
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          v2=next-installer/existing-node-v2-cleanup.sh
+          test "$(git rev-parse HEAD:$v2)" = "755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
+          test "$(git rev-parse 551a80ca1802d3087c53edf12652f104cd1c721d:$v2)" = "755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
+
+          grep -Fq 'TASK_NAME="REMNA NODE EXISTING-NODE V2 CLEANUP"' "$v2"
+          grep -Fq 'V2 preflight PASS' "$v2"
+          grep -Fq 'remna-node-v2-backups' "$v2"
+          grep -Fq 'remna-reality-handoff.timer' "$v2"
+          grep -Fq 'REMNA_GUARD' "$v2"
+          grep -Fq 'REMNA_RKN_SCANNERS' "$v2"
+          grep -Fq 'TSPUIPS' "$v2"
+          grep -Fq '/etc/hysteria2' "$v2"
+          grep -Fq 'docker rm -f remnanode remnawave-nginx' "$v2"
+          grep -Fq 'V2 POSTCHECK PASS' "$v2"
+          grep -Fq 'global UFW reset НЕ выполнялся' "$v2"
+          ! grep -Fq 'ufw --force reset' "$v2"
+
+          grep -Fq 'V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"' full-clean-reinstall.sh
+          grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
+          grep -Fq 'run_existing_node_v2(){' full-clean-reinstall.sh
+          grep -Fq 'NEXT V2 — существующая/legacy нода' full-clean-reinstall.sh
+          grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
+          grep -Fq 'exec bash "$TMP" migrate-existing' clean-install.sh
+          grep -Fq 'exec bash "$TMP" install' install.sh
+
       - name: NEXT launcher pin chain
         shell: bash
         run: |
@@ -169,6 +199,8 @@ jobs:
           grep -Fq 'SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"' full-clean-reinstall.sh
           grep -Fq 'HYSTERIA_OVERLAY_REF="5d022cef3efd046844445c06a1d1ba387359c2c8"' full-clean-reinstall.sh
           grep -Fq 'HYSTERIA_OVERLAY_BLOB_SHA="dbb3a99a9c2a1f442c9e0e19fbebf3ec9d6d871f"' full-clean-reinstall.sh
+          grep -Fq 'V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"' full-clean-reinstall.sh
+          grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
           grep -Fq 'REMNANODE NEXT — main' full-clean-reinstall.sh
           grep -Fq 'Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)' full-clean-reinstall.sh
           grep -Fq 'SAFE scanner guard' full-clean-reinstall.sh
@@ -177,8 +209,10 @@ jobs:
 
           source_ref="$(sed -n 's/^SOURCE_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           overlay_ref="$(sed -n 's/^HYSTERIA_OVERLAY_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          v2_ref="$(sed -n 's/^V2_CLEANUP_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
           test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "dbb3a99a9c2a1f442c9e0e19fbebf3ec9d6d871f"
+          test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
 
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
@@ -198,6 +232,9 @@ jobs:
           grep -Fq 'finalmask.quicParams.congestion: brutal' README.md
           grep -Fq 'Они **не являются main installer**' README.md
           grep -Fq 'Installer их из bundle **не устанавливает**' README.md
+          grep -Fq 'NEXT V2 migration' README.md
+          grep -Fq 'существующая/legacy нода' README.md
+          grep -Fq '/root/remna-node-v2-backups/' README.md
 
       - name: Legacy safety guard
         shell: bash
@@ -208,6 +245,7 @@ jobs:
           grep -Fq 'remnanode-next-backup-' full-clean-reinstall.sh
           grep -Fq 'docker rm -f remnanode remnawave-nginx' full-clean-reinstall.sh
           ! grep -Fq 'ufw --force reset' full-clean-reinstall.sh
+          ! grep -Fq 'ufw --force reset' next-installer/existing-node-v2-cleanup.sh
 
       - name: Supply-chain and secret guards
         shell: bash

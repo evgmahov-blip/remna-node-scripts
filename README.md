@@ -17,7 +17,8 @@ NEXT восстановлен из source snapshot реально работаю
 - RKN SAFE scanner guard с rollback и self-heal;
 - runtime repair для Hysteria cert mount / RKN;
 - маскировочный SelfSteal-сайт;
-- безопасный backup / clean / reinstall без глобального `ufw reset`.
+- безопасный backup / clean / reinstall без глобального `ufw reset`;
+- **NEXT V2 для существующей/legacy-ноды**: recovery backup → адресная зачистка старых Remnanode/Caddy/Hysteria/RKN хвостов → свежая установка NEXT.
 
 ## Быстрая установка
 
@@ -25,21 +26,23 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/4cc22efdafeee9dc37d5adf6df38a4fc63f64fd9/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/62cb7619e021788cb07a3fd66ca9007dddf34cd2/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
 ```
 
-Safe reinstall:
+Существующая/старая нода — **NEXT V2 migration**:
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/30cfc346a3e158eeeb45ad208fd2b56e85d2e3a1/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/b8d1a42b9f4bd047c278acb735459cda15d0ff39/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
 ```
+
+`clean-install.sh` теперь снова означает старый сценарий **V2 для существующей ноды**, а не обычный reinstall текущего NEXT: он делает preflight, recovery backup, вычищает известные legacy-хвосты и только после успешного postcheck запускает свежую установку.
 
 Обе команды используют immutable commit SHA. Следующий launcher проверяется по Git blob SHA; recovered NEXT source bundle — по immutable commit + Git blob SHA, а каждый входящий в него скрипт дополнительно проверяется по SHA256.
 
@@ -65,8 +68,9 @@ REMNANODE NEXT — main
  [7]  Runtime repair / guards
  [8]  Базовое управление Remnanode
  [9]  Статус
- [10] Safe clean текущей ноды
- [11] Safe reinstall
+ [10] Safe clean текущей NEXT-ноды
+ [11] Safe reinstall текущей NEXT-ноды
+ [12] NEXT V2 — существующая/legacy нода → очистка хвостов → NEXT
  [0]  Выход
 ```
 
@@ -190,9 +194,34 @@ RKN WATCHER — SAFE SCANNER MODE
 
 SAFE guard защищает TCP/80, TCP/443 и UDP/443 от известных scanner IP. При активации используется rollback и last-good проверка, чтобы не заменить рабочий набор повреждённым.
 
+## Два сценария очистки / переустановки
+
+### Текущий NEXT → текущий NEXT
+
+Пункты 10/11 предназначены для уже установленной актуальной NEXT-ноды. Они делают backup текущего NEXT state и удаляют только управляемый NEXT stack.
+
+### Существующая/legacy нода → NEXT V2
+
+Пункт 12 и `clean-install.sh` восстанавливают потерянный сценарий старого `REMNA NODE FULL CLEAN + NEXT V2`.
+
+Перед установкой V2:
+
+1. проверяет активный SSH/sshd и default route;
+2. создаёт recovery bundle в `/root/remna-node-v2-backups/`;
+3. адресно удаляет старые Remna/RKN systemd units;
+4. адресно удаляет старые `REMNA_GUARD`, `REMNA_RKN_SCANNERS`, `TSPUIPS` и известные Remna ipset;
+5. удаляет только контейнеры `remnanode` / `remnawave-nginx` и `/opt/remnanode`;
+6. убирает legacy Caddy node-конфиги/topology guard и `/var/www/mstream`, но сохраняет пакет Caddy и его ACME cache;
+7. убирает standalone `/etc/hysteria`, `/etc/hysteria2`, `/opt/remna-hysteria`;
+8. убирает старые Caddy/protection/RKN helper-файлы из `/opt/remna-node-scripts`;
+9. делает postcheck: SSH/сеть должны остаться живы, старые node listeners/chains не должны остаться;
+10. только после PASS запускает свежую установку NEXT.
+
+V2 **не делает глобальный `ufw reset`**, не удаляет Docker как пакет, не меняет SSH, hostname, DNS/default route и не удаляет чужие Docker-контейнеры.
+
 ## Safe clean / reinstall
 
-Top-level NEXT manager **не вызывает legacy uninstall**, потому что старый uninstall умеет делать глобальный `ufw reset`.
+Top-level NEXT manager **не вызывает legacy uninstall** для обычного NEXT clean/reinstall, потому что старый uninstall умеет делать глобальный `ufw reset`.
 
 Перед clean/reinstall сохраняются важные настройки, профили, сертификаты и секреты в root-only backup:
 
