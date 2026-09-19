@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-REPO_REF=dfe25a2e769c5d622c3901c1c4855eb21361f816
+REPO_REF=19752f6e52c2c4f9d76442139282bc02b25e9cb0
 REPO_RAW="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${REPO_REF}"
-CORE_BLOB_SHA=38608286f53110f2adcb2c729dddb443adb47424
-PROTECTION_BLOB_SHA=c5f33acd3e56f24637af87456ee8a4f1d5b0e907
+CORE_BLOB_SHA=0e70f9cf0e26f56e5badae1e9bf70747a6def9ba
+PROTECTION_BLOB_SHA=623b4c44a34e49bcae48db66765a89ef646f1da4
 CADDY_GUARD_BLOB_SHA=fc908882069fe50602c2411a46f4a5db77bddb74
 REMNA_NODE_IMAGE="${REMNA_NODE_IMAGE:-remnawave/node:3.4.1}"
 INSTALL_DIR=/opt/remna-node-scripts
@@ -28,6 +28,8 @@ say(){ printf '%s\n' "$*"; }
 ok(){ printf '✓ %s\n' "$*"; }
 warn(){ printf '! %s\n' "$*" >&2; }
 die(){ printf '✗ %s\n' "$*" >&2; exit 1; }
+MENU_BACK_RC=20
+is_menu_back(){ case "${1:-}" in 0|q|Q|back|BACK|Back|назад|Назад|НАЗАД) return 0 ;; *) return 1 ;; esac; }
 
 ensure_self(){
   local current
@@ -384,7 +386,12 @@ wait_for_xray_runtime(){
   return 1
 }
 
-protection(){ ensure_protection_helper; "$PROTECTION_HELPER" "$@"; }
+protection(){
+  ensure_protection_helper
+  local rc=0
+  "$PROTECTION_HELPER" "$@" || rc=$?
+  return "$rc"
+}
 
 protection_node_api_readonly(){
   command -v iptables >/dev/null 2>&1 || return 1
@@ -416,9 +423,9 @@ safe_diagnose(){
   caddy_state="$($SUDO systemctl is-active caddy 2>/dev/null || true)"
   domain="$(awk '/^[A-Za-z0-9.-]+[[:space:]]*\{/{gsub(/[[:space:]]*\{.*/,"",$0); print $1; exit}' "$CADDYFILE" 2>/dev/null || true)"
   if caddy_public_443 && [ -n "$domain" ]; then
-    webcode="$(curl -ksS --max-time 8 --resolve "${domain}:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://${domain}/" 2>/dev/null || true)"
+    webcode="$(curl -ksS --noproxy '*' --max-time 8 --resolve "${domain}:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://${domain}/" 2>/dev/null || true)"
   elif rw_core_on_443 && [ -n "$domain" ]; then
-    webcode="$(curl -ksS --max-time 8 --resolve "${domain}:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://${domain}/" 2>/dev/null || true)"
+    webcode="$(curl -ksS --noproxy '*' --max-time 8 --resolve "${domain}:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://${domain}/" 2>/dev/null || true)"
   fi
   envlen="$(secret_env_len)"
   if [ "$envlen" -gt 0 ] && grep -qE '^[[:space:]]*env_file:' "$NODE_COMPOSE" 2>/dev/null; then secret_storage='✓ .env/env_file (0600)'; else secret_storage='✗ отсутствует/пуст'; fi
@@ -564,12 +571,26 @@ run_core(){
   esac
   # Core uses a built-in static decoy by default. External site content is
   # accepted only when the operator explicitly supplies a pinned SHA-256.
-  bash "$CORE" "$@"
+  local core_rc=0 protection_rc=0
+  bash "$CORE" "$@" || core_rc=$?
+  if [ "$core_rc" -eq "$MENU_BACK_RC" ]; then
+    return 0
+  fi
+  [ "$core_rc" -eq 0 ] || return "$core_rc"
   case "$cmd" in
     install|--auto|auto|reinstall|repair|fix)
       ensure_node_compose
-      if [ -n "${PANEL_IP:-}" ]; then PANEL_IP_ENV="$PANEL_IP" protection ensure-panel || warn "Не удалось ограничить TCP/2222 IP панели.";
-      else protection ensure-panel || warn "TCP/2222 пока не ограничен: задай IP панели в разделе защиты."; fi
+      if [ -n "${PANEL_IP:-}" ]; then
+        PANEL_IP_ENV="$PANEL_IP" protection ensure-panel || protection_rc=$?
+      else
+        protection ensure-panel || protection_rc=$?
+      fi
+      if [ "$protection_rc" -eq "$MENU_BACK_RC" ]; then
+        warn "Настройка TCP/2222 отложена — возвращаюсь в меню."
+        return 0
+      elif [ "$protection_rc" -ne 0 ]; then
+        warn "TCP/2222 пока не ограничен: задай IP панели в разделе защиты."
+      fi
       wait_needed=1
       ;;
   esac
@@ -618,11 +639,23 @@ MENU
     printf 'Выбор: '; local c p; read -r c <"$TTY" || true
     case "$c" in
       1) run_core install ;; 2) run_core reinstall ;; 3) run_core front-only ;; 4) run_core path ;;
-      5) printf 'Новый XHTTP-путь: '; read -r p <"$TTY" || true; [ -n "$p" ] && run_core path-set "$p" ;;
+      5) printf 'Новый XHTTP-путь (0 = назад): '; read -r p <"$TTY" || true; is_menu_back "$p" || { [ -n "$p" ] && run_core path-set "$p"; } ;;
       6) run_core stream ;; 7) run_core summary ;; 8) safe_diagnose ;; 9) run_core status ;;
       10) run_core reality-prepare ;; 11) run_core reality-enable ;; 12) run_core reality-disable ;; 13) run_core reality-info ;;
-      14) run_core repair ;; 15) run_core clean ;;
-      16) protection menu ;; 17) protection panel-set ;; 18) selftest_all ;;
+      14) run_core repair ;;
+      15)
+        printf 'Снести локальный Remnanode/Caddy? Введите YES (0 = назад): '
+        read -r p <"$TTY" || true
+        is_menu_back "$p" || { [ "$p" = YES ] && run_core clean || warn "Clean отменён."; }
+        ;;
+      16) protection menu ;;
+      17)
+        protection panel-set || {
+          rc=$?
+          [ "$rc" -eq "$MENU_BACK_RC" ] || warn "Не удалось изменить PANEL_IP."
+        }
+        ;;
+      18) selftest_all ;;
       0|'') exit 0 ;; *) warn "Неизвестный пункт: $c" ;;
     esac
     printf '\nEnter — вернуться в меню... '; read -r _ <"$TTY" || true
