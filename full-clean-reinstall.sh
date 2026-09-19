@@ -38,11 +38,11 @@ apt_get(){ DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 "$@
 
 ensure_bootstrap_deps(){
   local missing=0
-  for c in curl tar sha256sum sed awk diff; do command -v "$c" >/dev/null 2>&1 || missing=1; done
+  for c in curl tar sha256sum sed awk diff python3; do command -v "$c" >/dev/null 2>&1 || missing=1; done
   if (( missing )); then
-    command -v apt-get >/dev/null 2>&1 || die 'Не хватает curl/tar/coreutils и apt-get недоступен.'
+    command -v apt-get >/dev/null 2>&1 || die 'Не хватает bootstrap-зависимостей и apt-get недоступен.'
     apt_get update -y
-    apt_get install -y curl ca-certificates tar gzip coreutils diffutils
+    apt_get install -y curl ca-certificates tar gzip coreutils diffutils python3
   fi
 }
 
@@ -52,6 +52,68 @@ verify_source_file(){
   got="$(sha256sum "$file" | awk '{print $1}')"
   [[ "$got" == "$expected" ]] || die "SHA256 mismatch: $(basename "$file"): $got != $expected"
   bash -n "$file" || die "bash -n failed: $(basename "$file")"
+}
+
+patch_hysteria_compat(){
+  local file="$1"
+  python3 - "$file" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding='utf-8')
+
+replacements = [
+    (
+        'HYSTERIA_CERT_MOUNT_ACTION="${HYSTERIA_CERT_MOUNT_ACTION:-}"',
+        'HYSTERIA_CERT_MOUNT_ACTION="${HYSTERIA_CERT_MOUNT_ACTION:-}"\nHYSTERIA_CONGESTION="${HYSTERIA_CONGESTION:-brutal}"',
+        'HYSTERIA_CONGESTION'
+    ),
+    (
+        '"settings": {"version": 2, "users": []},',
+        '"settings": {"version": 2, "clients": []},',
+        'Remnawave clients array'
+    ),
+    (
+        '''        "network": "hysteria",
+        "security": "tls",
+        "hysteriaSettings": {''',
+        '''        "network": "hysteria",
+        "security": "tls",
+        "finalmask": {
+          "quicParams": {
+            "debug": false,
+            "congestion": "$HYSTERIA_CONGESTION"
+          }
+        },
+        "hysteriaSettings": {''',
+        'Hysteria finalmask'
+    ),
+    (
+        '''ALPN: h3
+Masquerade: встроенная копия текущего SelfSteal index.html''',
+        '''ALPN: h3
+Auth: автоматически = UUID пользователя Remnawave (backend добавляет settings.clients[].auth)
+Final Mask / streamOverrides.finalMask: {"quicParams":{"congestion":"$HYSTERIA_CONGESTION"}}
+Masquerade: встроенная копия текущего SelfSteal index.html''',
+        'Hysteria Host finalMask hint'
+    ),
+]
+
+for old, new, label in replacements:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f'[ERROR] hysteria compat patch: {label}: expected 1 match, got {count}')
+    text = text.replace(old, new, 1)
+
+path.write_text(text, encoding='utf-8')
+PY
+
+  bash -n "$file" || die 'Hysteria compatibility patch сломал syntax transport-manager.'
+  grep -Fq '"settings": {"version": 2, "clients": []}' "$file" || die 'Hysteria patch: clients[] не применён.'
+  grep -Fq '"congestion": "$HYSTERIA_CONGESTION"' "$file" || die 'Hysteria patch: finalmask не применён.'
+  grep -Fq 'streamOverrides.finalMask' "$file" || die 'Hysteria patch: Host finalMask hint отсутствует.'
+  ok 'Hysteria2 profile приведён к рабочему Remnawave/Xray формату: clients[] + finalmask brutal.'
 }
 
 sync_next_sources(){
@@ -82,6 +144,7 @@ FILES
   verify_source_file "$tmp/next-installer/setup_node-legacy.sh" "$EXPECTED_SETUP"
   verify_source_file "$tmp/next-installer/next-runtime-guards.sh" "$EXPECTED_GUARDS"
   verify_source_file "$tmp/next-installer/remnawave-transport-manager.sh" "$EXPECTED_TRANSPORT"
+  patch_hysteria_compat "$tmp/next-installer/remnawave-transport-manager.sh"
   verify_source_file "$tmp/next-installer/rkn-watcher-manager.sh" "$EXPECTED_RKN"
   verify_source_file "$tmp/next-installer/selfsteal-site-manager.sh" "$EXPECTED_SELFSTEAL"
   verify_source_file "$tmp/next-installer/xhttp-signature-manager.sh" "$EXPECTED_SIGNATURE"
