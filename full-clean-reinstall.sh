@@ -4,8 +4,8 @@ IFS=$'\n\t'
 
 TASK_NAME="REMNA NODE NEXT"
 REPO="evgmahov-blip/remna-node-scripts"
-SOURCE_REF="d0113fb15d1c332e12b13ce547d31d7711dec337"
-SOURCE_BLOB_SHA="43f83602f43f450c0c7e6df15f97b908e39037c8"
+SOURCE_REF="721269e2c48e31b7cac86e04bc14c46b33e31e72"
+SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"
 SOURCE_URL="https://raw.githubusercontent.com/${REPO}/${SOURCE_REF}/vendor/remna-next-source.tar.gz"
 
 APP_DIR="/opt/remnanode"
@@ -135,12 +135,14 @@ sync_next_sources(){
   listing="$tmp/listing.txt"
   tar -tzf "$bundle" | sed '/\/$/d' | LC_ALL=C sort > "$listing"
   cat > "$tmp/expected.txt" <<'FILES'
+docker-compose.yml
 next-installer/next-runtime-guards.sh
 next-installer/remnawave-transport-manager.sh
 next-installer/rkn-watcher-manager.sh
 next-installer/selfsteal-site-manager.sh
 next-installer/setup_node-legacy.sh
 next-installer/xhttp-signature-manager.sh
+nginx.conf
 FILES
   if ! diff -u "$tmp/expected.txt" "$listing"; then
     die 'Состав NEXT source bundle отличается от ожидаемого.'
