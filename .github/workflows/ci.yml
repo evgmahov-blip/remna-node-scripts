@@ -91,6 +91,14 @@ jobs:
             grep -Fq 'set -Eeuo pipefail' "$f"
           done
 
+      - name: Core must not overwrite manager
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'MANAGER_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream.sh' install-caddy-node-reality-stream-core.sh
+          grep -Fq 'CORE_SELF_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream-core.sh' install-caddy-node-reality-stream-core.sh
+          ! grep -Fq 'install -o root -g root -m 0700 "$current" "$MANAGER_PATH"' install-caddy-node-reality-stream-core.sh
+
       - name: Caddy pre-start privilege guard
         run: grep -Fq 'ExecStartPre=+$SELF prepare' caddy-resilient-start.sh
 
