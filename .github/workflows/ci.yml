@@ -39,7 +39,8 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          test "$(sha256sum vendor/remna-next-source.tar.gz | awk '{print $1}')" = "af02c8733bc03d6b17d93f28fc54d751127a472aec3811a0b725b7a2697f04c9"
+          test "$(git rev-parse HEAD:vendor/remna-next-source.tar.gz)" = "43f83602f43f450c0c7e6df15f97b908e39037c8"
+          test "$(git rev-parse d0113fb15d1c332e12b13ce547d31d7711dec337:vendor/remna-next-source.tar.gz)" = "43f83602f43f450c0c7e6df15f97b908e39037c8"
 
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
@@ -117,7 +118,7 @@ jobs:
 
           grep -Fq 'TASK_NAME="REMNA NODE NEXT"' full-clean-reinstall.sh
           grep -Fq 'SOURCE_REF="d0113fb15d1c332e12b13ce547d31d7711dec337"' full-clean-reinstall.sh
-          grep -Fq 'SOURCE_SHA256="af02c8733bc03d6b17d93f28fc54d751127a472aec3811a0b725b7a2697f04c9"' full-clean-reinstall.sh
+          grep -Fq 'SOURCE_BLOB_SHA="43f83602f43f450c0c7e6df15f97b908e39037c8"' full-clean-reinstall.sh
           grep -Fq 'REMNANODE NEXT — main' full-clean-reinstall.sh
           grep -Fq 'Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)' full-clean-reinstall.sh
           grep -Fq 'РКН защита — SAFE scanner guard' full-clean-reinstall.sh
