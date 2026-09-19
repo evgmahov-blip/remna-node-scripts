@@ -5,7 +5,7 @@ IFS=$'\n\t'
 TASK_NAME="REMNA NODE NEXT"
 REPO="evgmahov-blip/remna-node-scripts"
 SOURCE_REF="d0113fb15d1c332e12b13ce547d31d7711dec337"
-SOURCE_SHA256="af02c8733bc03d6b17d93f28fc54d751127a472aec3811a0b725b7a2697f04c9"
+SOURCE_BLOB_SHA="43f83602f43f450c0c7e6df15f97b908e39037c8"
 SOURCE_URL="https://raw.githubusercontent.com/${REPO}/${SOURCE_REF}/vendor/remna-next-source.tar.gz"
 
 APP_DIR="/opt/remnanode"
@@ -35,6 +35,12 @@ die(){ printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 pause(){ printf 'Enter — продолжить... '; read -r _ < "$TTY" || true; }
 need_root(){ [[ ${EUID:-$(id -u)} -eq 0 ]] || die 'Запусти от root.'; }
 apt_get(){ DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 "$@"; }
+
+git_blob_sha(){
+  local file="$1" size
+  size="$(wc -c <"$file" | tr -d '[:space:]')"
+  { printf 'blob %s\000' "$size"; cat "$file"; } | sha1sum | awk '{print $1}'
+}
 
 ensure_bootstrap_deps(){
   local missing=0
@@ -124,7 +130,7 @@ sync_next_sources(){
 
   curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 90 --retry 3 \
     "$SOURCE_URL" -o "$bundle" || die 'Не удалось скачать закреплённый NEXT source bundle.'
-  [[ "$(sha256sum "$bundle" | awk '{print $1}')" == "$SOURCE_SHA256" ]] || die 'NEXT source bundle не прошёл SHA256.'
+  [[ "$(git_blob_sha "$bundle")" == "$SOURCE_BLOB_SHA" ]] || die 'NEXT source bundle не прошёл Git blob SHA.'
 
   listing="$tmp/listing.txt"
   tar -tzf "$bundle" | sed '/\/$/d' | LC_ALL=C sort > "$listing"
