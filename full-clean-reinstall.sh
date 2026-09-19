@@ -7,6 +7,9 @@ REPO="evgmahov-blip/remna-node-scripts"
 SOURCE_REF="721269e2c48e31b7cac86e04bc14c46b33e31e72"
 SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"
 SOURCE_URL="https://raw.githubusercontent.com/${REPO}/${SOURCE_REF}/vendor/remna-next-source.tar.gz"
+HYSTERIA_OVERLAY_REF="5d022cef3efd046844445c06a1d1ba387359c2c8"
+HYSTERIA_OVERLAY_BLOB_SHA="dbb3a99a9c2a1f442c9e0e19fbebf3ec9d6d871f"
+HYSTERIA_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${HYSTERIA_OVERLAY_REF}/next-installer/remnawave-transport-manager.sh"
 
 APP_DIR="/opt/remnanode"
 NEXT_DIR="$APP_DIR/next-installer"
@@ -60,68 +63,6 @@ verify_source_file(){
   bash -n "$file" || die "bash -n failed: $(basename "$file")"
 }
 
-patch_hysteria_compat(){
-  local file="$1"
-  python3 - "$file" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding='utf-8')
-
-replacements = [
-    (
-        'HYSTERIA_CERT_MOUNT_ACTION="${HYSTERIA_CERT_MOUNT_ACTION:-}"',
-        'HYSTERIA_CERT_MOUNT_ACTION="${HYSTERIA_CERT_MOUNT_ACTION:-}"\nHYSTERIA_CONGESTION="${HYSTERIA_CONGESTION:-brutal}"',
-        'HYSTERIA_CONGESTION'
-    ),
-    (
-        '"settings": {"version": 2, "users": []},',
-        '"settings": {"version": 2, "clients": []},',
-        'Remnawave clients array'
-    ),
-    (
-        '''        "network": "hysteria",
-        "security": "tls",
-        "hysteriaSettings": {''',
-        '''        "network": "hysteria",
-        "security": "tls",
-        "finalmask": {
-          "quicParams": {
-            "debug": false,
-            "congestion": "$HYSTERIA_CONGESTION"
-          }
-        },
-        "hysteriaSettings": {''',
-        'Hysteria finalmask'
-    ),
-    (
-        '''ALPN: h3
-Masquerade: встроенная копия текущего SelfSteal index.html''',
-        '''ALPN: h3
-Auth: автоматически = UUID пользователя Remnawave (backend добавляет settings.clients[].auth)
-Final Mask / streamOverrides.finalMask: {"quicParams":{"congestion":"$HYSTERIA_CONGESTION"}}
-Masquerade: встроенная копия текущего SelfSteal index.html''',
-        'Hysteria Host finalMask hint'
-    ),
-]
-
-for old, new, label in replacements:
-    count = text.count(old)
-    if count != 1:
-        raise SystemExit(f'[ERROR] hysteria compat patch: {label}: expected 1 match, got {count}')
-    text = text.replace(old, new, 1)
-
-path.write_text(text, encoding='utf-8')
-PY
-
-  bash -n "$file" || die 'Hysteria compatibility patch сломал syntax transport-manager.'
-  grep -Fq '"settings": {"version": 2, "clients": []}' "$file" || die 'Hysteria patch: clients[] не применён.'
-  grep -Fq '"congestion": "$HYSTERIA_CONGESTION"' "$file" || die 'Hysteria patch: finalmask не применён.'
-  grep -Fq 'streamOverrides.finalMask' "$file" || die 'Hysteria patch: Host finalMask hint отсутствует.'
-  ok 'Hysteria2 profile приведён к рабочему Remnawave/Xray формату: clients[] + finalmask brutal.'
-}
-
 sync_next_sources(){
   ensure_bootstrap_deps
   local tmp bundle listing
@@ -152,7 +93,19 @@ FILES
   verify_source_file "$tmp/next-installer/setup_node-legacy.sh" "$EXPECTED_SETUP"
   verify_source_file "$tmp/next-installer/next-runtime-guards.sh" "$EXPECTED_GUARDS"
   verify_source_file "$tmp/next-installer/remnawave-transport-manager.sh" "$EXPECTED_TRANSPORT"
-  patch_hysteria_compat "$tmp/next-installer/remnawave-transport-manager.sh"
+
+  local overlay
+  overlay="$tmp/remnawave-transport-manager.fixed.sh"
+  curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 3 \
+    "$HYSTERIA_OVERLAY_URL" -o "$overlay" || die 'Не удалось скачать Hysteria2 transport overlay.'
+  [[ "$(git_blob_sha "$overlay")" == "$HYSTERIA_OVERLAY_BLOB_SHA" ]] || die 'Hysteria2 transport overlay не прошёл Git blob SHA.'
+  bash -n "$overlay" || die 'Hysteria2 transport overlay не прошёл bash -n.'
+  install -m 0700 "$overlay" "$tmp/next-installer/remnawave-transport-manager.sh"
+  grep -Fq '"settings": {"version": 2, "clients": []}' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: clients[] отсутствует.'
+  grep -Fq '"congestion": "$HYSTERIA_CONGESTION"' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: finalmask congestion отсутствует.'
+  grep -Fq 'verify_hysteria_profile_shape' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: profile guard отсутствует.'
+  ok 'Hysteria2 transport overlay применён: Remnawave clients[] + finalmask brutal + profile guard.'
+
   verify_source_file "$tmp/next-installer/rkn-watcher-manager.sh" "$EXPECTED_RKN"
   verify_source_file "$tmp/next-installer/selfsteal-site-manager.sh" "$EXPECTED_SELFSTEAL"
   verify_source_file "$tmp/next-installer/xhttp-signature-manager.sh" "$EXPECTED_SIGNATURE"
