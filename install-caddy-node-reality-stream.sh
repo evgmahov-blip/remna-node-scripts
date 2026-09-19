@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-REPO_REF=3f1f372f7f454c65259f27237d02a54f68bf821c
+REPO_REF=2a1b129df90e9f9ba672b28d6209f29688318496
 REPO_RAW="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${REPO_REF}"
-CORE_BLOB_SHA=d664c4eb13629cdaecd184aabc4376ef0c0e76c3
+CORE_BLOB_SHA=b092b61be1264ab3797f074836fa06f9930a6263
 PROTECTION_BLOB_SHA=4aeb40236721e92b7e840aa2cb0beb8427e63274
 CADDY_GUARD_BLOB_SHA=fc908882069fe50602c2411a46f4a5db77bddb74
 REMNA_NODE_IMAGE="${REMNA_NODE_IMAGE:-remnawave/node:3.4.1}"
@@ -648,7 +648,7 @@ Remna Node Manager — safe mode
  [10] Подготовить REALITY
  [11] Включить REALITY
  [12] Отключить REALITY
- [13] Config Profile JSON (XHTTP + REALITY)
+ [13] Профили для копипасты (XHTTP / REALITY / оба)
  [14] Repair Caddy / XHTTP / REALITY
  [15] Clean Remnanode/Caddy
  [16] Защита ноды (RKN/TSPU/GOV/GeoIP/Allow/Deny)
