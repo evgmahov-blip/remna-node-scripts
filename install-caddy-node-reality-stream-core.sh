@@ -1390,30 +1390,81 @@ cmd_reality_info() {
   ss -lntp 2>/dev/null | grep -E ":443 |127.0.0.1:${BACKEND_PORT}|127.0.0.1:${CADDY_LOCAL_PORT}" | sed 's/^/  /' || true
 }
 
+print_profile_json() {
+  local title="$1" file="$2"
+  echo
+  line
+  printf '%b%b  %s — КОПИРУЙ JSON НИЖЕ%b\n' "$B" "$G" "$title" "$N"
+  line
+  printf '{\n  "inbounds": [\n'
+  sed 's/^/    /' "$file"
+  printf '  ]\n}\n'
+  line
+}
+
+print_combined_profile_json() {
+  echo
+  line
+  printf '%b%b  XHTTP + REALITY — КОПИРУЙ JSON НИЖЕ%b\n' "$B" "$G" "$N"
+  line
+  cat "$PROFILE_INBOUNDS"
+  line
+}
+
 cmd_config_profile() {
+  local mode="${1:-menu}" choice=""
   banner
   resolve_existing
-  if [ ! -s "$PROFILE_INBOUNDS" ]; then
-    warn "Готовый Config Profile ещё не создан."
+  if [ ! -s "$XHTTP_INBOUND" ] || [ ! -s "$REALITY_INBOUND" ] || [ ! -s "$PROFILE_INBOUNDS" ]; then
+    warn "Готовые профили ещё не созданы."
     say "  Сначала выбери «Подготовить REALITY» или выполни:"
     say "  ${C}${MANAGER_PATH} reality-prepare${N}"
     return 1
   fi
 
-  echo
-  line
-  printf '%b%b  CONFIG PROFILE JSON — XHTTP + REALITY%b\n' "$B" "$G" "$N"
-  line
-  warn "Ниже полный JSON для вставки в Remnawave Config Profile."
-  warn "Он содержит REALITY privateKey. Не публикуй этот вывод и не отправляй его в issue/чаты."
-  echo
-  cat "$PROFILE_INBOUNDS"
-  echo
-  line
-  printf '  %-24s %s\n' 'Готовый профиль:' "$PROFILE_INBOUNDS"
-  printf '  %-24s %s\n' 'XHTTP отдельно:' "$XHTTP_INBOUND"
-  printf '  %-24s %s\n' 'REALITY отдельно:' "$REALITY_INBOUND"
-  line
+  case "$mode" in
+    xhttp)   print_profile_json "XHTTP CONFIG PROFILE" "$XHTTP_INBOUND"; return 0 ;;
+    reality) print_profile_json "REALITY CONFIG PROFILE" "$REALITY_INBOUND"; return 0 ;;
+    both|combined) print_combined_profile_json; return 0 ;;
+    all)
+      print_profile_json "XHTTP CONFIG PROFILE" "$XHTTP_INBOUND"
+      print_profile_json "REALITY CONFIG PROFILE" "$REALITY_INBOUND"
+      print_combined_profile_json
+      return 0
+      ;;
+  esac
+
+  warn "REALITY-профиль содержит privateKey. Не публикуй этот вывод."
+  while true; do
+    cat <<'EOF'
+
+────────────────────────────────────────────────────────────
+Config Profiles для копипасты в Remnawave
+────────────────────────────────────────────────────────────
+ [1] XHTTP — готовый Config Profile
+ [2] REALITY — готовый Config Profile
+ [3] XHTTP + REALITY — общий Config Profile
+ [4] Показать все три
+ [0] Назад
+────────────────────────────────────────────────────────────
+EOF
+    printf 'Выбор: '
+    read -r choice <"$TTY" || true
+    case "$choice" in
+      1) print_profile_json "XHTTP CONFIG PROFILE" "$XHTTP_INBOUND" ;;
+      2) print_profile_json "REALITY CONFIG PROFILE" "$REALITY_INBOUND" ;;
+      3) print_combined_profile_json ;;
+      4)
+        print_profile_json "XHTTP CONFIG PROFILE" "$XHTTP_INBOUND"
+        print_profile_json "REALITY CONFIG PROFILE" "$REALITY_INBOUND"
+        print_combined_profile_json
+        ;;
+      0|'') return 0 ;;
+      *) warn "Неизвестный пункт: $choice"; continue ;;
+    esac
+    printf '\nEnter — назад к выбору профиля... '
+    read -r _ <"$TTY" || true
+  done
 }
 
 cmd_repair() {
@@ -1466,7 +1517,7 @@ menu() {
   printf '   %b[9]%b  🔐  Подготовить REALITY     %b— XHTTP+REALITY JSON + Caddy:8443%b\n' "$C" "$N" "$DIM" "$N"
   printf '   %b[10]%b ⚡  Включить REALITY        %b— переключить один внешний TCP/443%b\n' "$G" "$N" "$DIM" "$N"
   printf '   %b[11]%b ↩   Отключить REALITY       %b— вернуть публичный Caddy:443%b\n' "$Y" "$N" "$DIM" "$N"
-  printf '   %b[12]%b 📋  Config Profile JSON      %b— готовый XHTTP + REALITY для Remnawave%b\n' "$BL" "$N" "$DIM" "$N"
+  printf '   %b[12]%b 📋  Профили для копипасты    %b— XHTTP / REALITY / оба для Remnawave%b\n' "$BL" "$N" "$DIM" "$N"
   printf '   %b[13]%b 🛠   Repair Caddy / XHTTP / REALITY %b— сайт, конфиги и конфликт TCP/443%b\n' "$G" "$N" "$DIM" "$N"
   printf '   %b[14]%b 🧹  Снести всё (clean)      %b— удалить ноду и конфиг Caddy%b\n' "$R" "$N" "$DIM" "$N"
   printf '   %b[0]%b  🚪  Выход\n' "$DIM" "$N"
@@ -1511,7 +1562,7 @@ main() {
     reality-enable)         cmd_reality_enable ;;
     reality-disable)        cmd_reality_disable ;;
     reality-info)           cmd_reality_info ;;
-    config-profile|profile-json|profile) cmd_config_profile ;;
+    config-profile|profile-json|profile) cmd_config_profile "${2:-menu}" ;;
     clean|uninstall)       clean_node ;;
     menu|"")               menu ;;
     -h|--help|help)        sed -n '18,43p' "$0" | sed 's/^# \{0,1\}//' ;;
