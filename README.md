@@ -64,7 +64,7 @@ Docker и Caddy при необходимости устанавливаются
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/28e73cf58eeddbe4b53e2dc16b0aab55b37e0f58/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/e76681801bc2a948c9670657df618ad6a824559e/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -135,7 +135,7 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/28e73cf58eeddbe4b53e2dc16b0aab55b37e0f58/full-clean-reinstall.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/e76681801bc2a948c9670657df618ad6a824559e/full-clean-reinstall.sh \
   -o /tmp/remna-restore-manager.sh
 
 sudo bash /tmp/remna-restore-manager.sh menu
@@ -160,7 +160,7 @@ sudo bash /tmp/remna-restore-manager.sh menu
 [10] Подготовить REALITY
 [11] Включить REALITY
 [12] Отключить REALITY
-[13] Config Profile JSON (XHTTP + REALITY)
+[13] Профили для копипасты (XHTTP / REALITY / оба)
 [14] Repair Caddy / XHTTP / REALITY
 [15] Clean Remnanode/Caddy
 [16] Защита ноды
@@ -205,28 +205,44 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh status
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-prepare
 ```
 
-### Показать готовый Config Profile JSON
+### Профили для копипасты в Remnawave
 
-Пункт **13** выводит прямо в терминал готовый JSON с обоими inbound — XHTTP и REALITY — для вставки в Remnawave Config Profile:
+Пункт **13** предназначен именно для копирования готовых Config Profile JSON. Он открывает подменю:
+
+```text
+[1] XHTTP — готовый Config Profile
+[2] REALITY — готовый Config Profile
+[3] XHTTP + REALITY — общий Config Profile
+[4] Показать все три
+[0] Назад
+```
+
+Каждый вариант выводит **полный JSON вида `{"inbounds":[...]}`**, который можно выделить и сразу вставить в Remnawave Config Profile. Это не путь к файлу и не отдельный inbound-фрагмент.
+
+Открыть подменю:
 
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh config-profile
 ```
 
-Готовый файл находится здесь:
+Можно вывести нужный вариант сразу:
 
-```text
-/opt/remnanode/reality/inbounds-ready.json
+```bash
+sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh config-profile xhttp
+sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh config-profile reality
+sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh config-profile both
+sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh config-profile all
 ```
 
-Отдельные части:
+Файлы также сохраняются на диске:
 
 ```text
 /opt/remnanode/reality/xhttp-inbound.json
 /opt/remnanode/reality/reality-inbound.json
+/opt/remnanode/reality/inbounds-ready.json
 ```
 
-**Важно:** полный Config Profile содержит REALITY `privateKey`. Пункт 13 показывает его намеренно, потому что он нужен серверному inbound. Не публикуйте этот вывод в issue/чатах.
+**Важно:** REALITY-профиль содержит `privateKey`. Пункт 13 показывает его намеренно, потому что он нужен серверному inbound. Не публикуйте этот JSON в issue/чатах.
 
 ### Включить REALITY после назначения профиля
 
@@ -284,7 +300,7 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protect-instal
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/28e73cf58eeddbe4b53e2dc16b0aab55b37e0f58/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/e76681801bc2a948c9670657df618ad6a824559e/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -392,7 +408,7 @@ install.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/28e73cf58eeddbe4b53e2dc16b0aab55b37e0f58/full-clean-reinstall.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/e76681801bc2a948c9670657df618ad6a824559e/full-clean-reinstall.sh \
   -o /tmp/remna-restore-manager.sh
 
 sudo bash /tmp/remna-restore-manager.sh menu
