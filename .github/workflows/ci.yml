@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
 
       - name: Install shellcheck
         run: |
@@ -98,6 +100,47 @@ jobs:
           grep -Fq 'MANAGER_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream.sh' install-caddy-node-reality-stream-core.sh
           grep -Fq 'CORE_SELF_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream-core.sh' install-caddy-node-reality-stream-core.sh
           ! grep -Fq 'install -o root -g root -m 0700 "$current" "$MANAGER_PATH"' install-caddy-node-reality-stream-core.sh
+
+      - name: Verify pinned installer chain
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          verify_blob() {
+            local ref="$1" path="$2" expected="$3" actual
+            actual="$(git rev-parse "$ref:$path")"
+            [ "$actual" = "$expected" ] || {
+              echo "pin mismatch: $ref:$path -> $actual, expected $expected" >&2
+              exit 1
+            }
+          }
+
+          for launcher in install.sh clean-install.sh; do
+            ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
+            expected="$(sed -n 's/^EXPECTED_BLOB_SHA="\([^"]*\)"/\1/p' "$launcher")"
+            verify_blob "$ref" full-clean-reinstall.sh "$expected"
+          done
+
+          ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          expected="$(sed -n 's/^EXPECTED_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          verify_blob "$ref" install-caddy-node-reality-stream.sh "$expected"
+
+          ref="$(sed -n 's/^REPO_REF=//p' install-caddy-node-reality-stream.sh)"
+          verify_blob "$ref" install-caddy-node-reality-stream-core.sh "$(sed -n 's/^CORE_BLOB_SHA=//p' install-caddy-node-reality-stream.sh)"
+          verify_blob "$ref" protection-manager.sh "$(sed -n 's/^PROTECTION_BLOB_SHA=//p' install-caddy-node-reality-stream.sh)"
+          verify_blob "$ref" caddy-resilient-start.sh "$(sed -n 's/^CADDY_GUARD_BLOB_SHA=//p' install-caddy-node-reality-stream.sh)"
+
+      - name: Interactive safety guards
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -Fq "MENU_BACK_RC=20" install-caddy-node-reality-stream.sh
+          grep -Fq "MENU_BACK_RC=20" install-caddy-node-reality-stream-core.sh
+          grep -Fq "MENU_BACK_RC=20" protection-manager.sh
+          grep -Fq "menu_action run_core repair" install-caddy-node-reality-stream.sh
+          grep -Fq "menu_action protection menu" install-caddy-node-reality-stream.sh
+          grep -Fq "curl -ksS --noproxy '*'" install-caddy-node-reality-stream-core.sh
+          grep -Fq "site_probe_diagnostics" install-caddy-node-reality-stream-core.sh
 
       - name: Caddy pre-start privilege guard
         run: grep -Fq 'ExecStartPre=+$SELF prepare' caddy-resilient-start.sh
