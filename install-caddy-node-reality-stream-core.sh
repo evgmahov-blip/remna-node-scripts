@@ -40,8 +40,8 @@ REALITY_PORT=443        # единый VLESS XHTTP + REALITY inbound
 CADDY_LOCAL_PORT=8443   # локальный HTTPS Caddy за REALITY self-steal
 REALITY_SOCKET_DIR=/dev/shm/remna-reality
 REALITY_SOCKET_TARGET=/dev/shm/nginx.sock
-FALLBACK_CONTAINER=remna-reality-fallback
-FALLBACK_IMAGE=haproxy:3.2-alpine
+FALLBACK_SERVICE=remna-reality-fallback.service
+FALLBACK_UNIT=/etc/systemd/system/$FALLBACK_SERVICE
 CADDYFILE=/etc/caddy/Caddyfile
 CADDY_PUBLIC=/etc/caddy/Caddyfile.public
 CADDY_REALITY=/etc/caddy/Caddyfile.reality
@@ -444,7 +444,12 @@ CADDY_REALITY_EOF
 }
 
 install_reality_socket_proxy() {
-  command -v docker >/dev/null 2>&1 || die "Docker нужен для REALITY fallback proxy."
+  command -v haproxy >/dev/null 2>&1 || {
+    apt_get update -y
+    apt_get install -y haproxy
+  }
+  command -v haproxy >/dev/null 2>&1 || die "haproxy не установлен."
+
   $SUDO install -d -o root -g root -m 0700 "$REALITY_DIR"
   $SUDO install -d -o root -g root -m 0755 "$REALITY_SOCKET_DIR"
 
@@ -461,22 +466,37 @@ defaults
   timeout server 300s
 
 frontend reality_selfsteal
-  bind /dev/shm/nginx.sock accept-proxy mode 660
+  bind $REALITY_SOCKET_TARGET accept-proxy mode 660
   default_backend caddy_tls
 
 backend caddy_tls
   server caddy 127.0.0.1:${CADDY_LOCAL_PORT}
 EOF
+  $SUDO haproxy -c -f "$tmp" >/dev/null 2>&1 || { rm -f "$tmp"; die "HAProxy config для self-steal невалиден."; }
   $SUDO install -o root -g root -m 0600 "$tmp" "$FALLBACK_CONFIG"
   rm -f "$tmp"
 
-  $SUDO docker pull "$FALLBACK_IMAGE" >/dev/null
-  $SUDO docker rm -f "$FALLBACK_CONTAINER" >/dev/null 2>&1 || true
-  $SUDO docker run -d --name "$FALLBACK_CONTAINER" \
-    --network host --restart always \
-    -v "$REALITY_SOCKET_DIR:/dev/shm" \
-    -v "$FALLBACK_CONFIG:/usr/local/etc/haproxy/haproxy.cfg:ro" \
-    "$FALLBACK_IMAGE" >/dev/null || die "Не удалось запустить REALITY fallback proxy."
+  tmp="$(mktemp)"
+  cat > "$tmp" <<EOF
+[Unit]
+Description=Remna REALITY self-steal fallback socket
+After=network.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/install -d -o root -g root -m 0755 $REALITY_SOCKET_DIR
+ExecStartPre=-/usr/bin/rm -f $REALITY_SOCKET_TARGET
+ExecStart=/usr/sbin/haproxy -W -db -f $FALLBACK_CONFIG
+Restart=always
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  $SUDO install -o root -g root -m 0644 "$tmp" "$FALLBACK_UNIT"
+  rm -f "$tmp"
+  $SUDO systemctl daemon-reload
+  $SUDO systemctl enable --now "$FALLBACK_SERVICE" >/dev/null || die "Не удалось запустить $FALLBACK_SERVICE."
 
   local i
   for i in $(seq 1 20); do
@@ -484,7 +504,7 @@ EOF
     sleep 1
   done
   [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] || {
-    $SUDO docker logs --tail 50 "$FALLBACK_CONTAINER" 2>&1 || true
+    $SUDO journalctl -u "$FALLBACK_SERVICE" -n 50 --no-pager 2>/dev/null || true
     die "Fallback socket не создан: $REALITY_SOCKET_DIR/nginx.sock"
   }
 
@@ -933,7 +953,9 @@ clean_node() {
   if command -v docker >/dev/null 2>&1 && [ -f "$NODE_DIR/docker-compose.yml" ]; then
     ( cd "$NODE_DIR" && $SUDO docker compose down ) 2>/dev/null || true
   fi
-  $SUDO docker rm -f "$FALLBACK_CONTAINER" 2>/dev/null || true
+  $SUDO systemctl disable --now "$FALLBACK_SERVICE" >/dev/null 2>&1 || true
+  $SUDO rm -f "$FALLBACK_UNIT"
+  $SUDO systemctl daemon-reload >/dev/null 2>&1 || true
   $SUDO docker rm -f remnanode 2>/dev/null || true
   $SUDO rm -rf "$NODE_DIR"
   $SUDO rm -rf "$REALITY_SOCKET_DIR" 2>/dev/null || true
@@ -1042,7 +1064,7 @@ cmd_status() {
   printf '  %bRemnanode%b : ' "$B" "$N"
   if $SUDO docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null | grep '^remnanode' ; then :; else echo "не запущен"; fi
   printf '  %bFallback%b  : ' "$B" "$N"
-  if $SUDO docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null | grep "^${FALLBACK_CONTAINER} " ; then :; else echo "не запущен"; fi
+  $SUDO systemctl is-active "$FALLBACK_SERVICE" 2>/dev/null || echo "не активен"
   printf '  %bПорты%b     :\n' "$B" "$N"
   ss -lntp 2>/dev/null | grep -E ":80 |:443 |127\.0\.0\.1:${CADDY_LOCAL_PORT}|:${NODE_PORT} " | sed 's/^/    /' || true
   printf '  %bSocket%b    : %s\n' "$B" "$N" "$([ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && echo "$REALITY_SOCKET_TARGET ready" || echo "missing")"
