@@ -64,7 +64,7 @@ Docker и Caddy при необходимости устанавливаются
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/3c1bce38c92d415895c143474be7d6f7e8efc4c6/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/28e73cf58eeddbe4b53e2dc16b0aab55b37e0f58/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -135,7 +135,7 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/3c1bce38c92d415895c143474be7d6f7e8efc4c6/full-clean-reinstall.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/28e73cf58eeddbe4b53e2dc16b0aab55b37e0f58/full-clean-reinstall.sh \
   -o /tmp/remna-restore-manager.sh
 
 sudo bash /tmp/remna-restore-manager.sh menu
@@ -160,7 +160,7 @@ sudo bash /tmp/remna-restore-manager.sh menu
 [10] Подготовить REALITY
 [11] Включить REALITY
 [12] Отключить REALITY
-[13] Файлы REALITY
+[13] Config Profile JSON (XHTTP + REALITY)
 [14] Repair Caddy / XHTTP / REALITY
 [15] Clean Remnanode/Caddy
 [16] Защита ноды
@@ -204,6 +204,29 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh status
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-prepare
 ```
+
+### Показать готовый Config Profile JSON
+
+Пункт **13** выводит прямо в терминал готовый JSON с обоими inbound — XHTTP и REALITY — для вставки в Remnawave Config Profile:
+
+```bash
+sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh config-profile
+```
+
+Готовый файл находится здесь:
+
+```text
+/opt/remnanode/reality/inbounds-ready.json
+```
+
+Отдельные части:
+
+```text
+/opt/remnanode/reality/xhttp-inbound.json
+/opt/remnanode/reality/reality-inbound.json
+```
+
+**Важно:** полный Config Profile содержит REALITY `privateKey`. Пункт 13 показывает его намеренно, потому что он нужен серверному inbound. Не публикуйте этот вывод в issue/чатах.
 
 ### Включить REALITY после назначения профиля
 
@@ -261,7 +284,7 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protect-instal
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/3c1bce38c92d415895c143474be7d6f7e8efc4c6/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/28e73cf58eeddbe4b53e2dc16b0aab55b37e0f58/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -369,7 +392,7 @@ install.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/3c1bce38c92d415895c143474be7d6f7e8efc4c6/full-clean-reinstall.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/28e73cf58eeddbe4b53e2dc16b0aab55b37e0f58/full-clean-reinstall.sh \
   -o /tmp/remna-restore-manager.sh
 
 sudo bash /tmp/remna-restore-manager.sh menu
