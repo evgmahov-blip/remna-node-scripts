@@ -11,7 +11,7 @@ SOURCE_URL="https://raw.githubusercontent.com/${REPO}/${SOURCE_REF}/vendor/remna
 APP_DIR="/opt/remnanode"
 NEXT_DIR="$APP_DIR/next-installer"
 CLI="/usr/local/bin/remnanode-next"
-SELF="$NEXT_DIR/remnanode-next.sh"
+SELF="/usr/local/libexec/remnanode-next.sh"
 LEGACY="$NEXT_DIR/setup_node-legacy.sh"
 TRANSPORT="$NEXT_DIR/remnawave-transport-manager.sh"
 SELFSTEAL="$NEXT_DIR/selfsteal-site-manager.sh"
@@ -86,7 +86,7 @@ FILES
   verify_source_file "$tmp/next-installer/selfsteal-site-manager.sh" "$EXPECTED_SELFSTEAL"
   verify_source_file "$tmp/next-installer/xhttp-signature-manager.sh" "$EXPECTED_SIGNATURE"
 
-  install -d -m 0700 "$NEXT_DIR"
+  install -d -m 0700 "$NEXT_DIR" /usr/local/libexec
   install -m 0700 "$tmp/next-installer/"*.sh "$NEXT_DIR/"
 
   if [[ -f "$0" ]]; then
