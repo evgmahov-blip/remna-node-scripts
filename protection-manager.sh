@@ -297,13 +297,20 @@ apply_rules(){
 
 set_panel_ip(){
   need_root; load_conf
-  local ip=${1:-}
-  if [ -z "$ip" ]; then
-    printf 'IP панели Remnawave (0 = назад): '
-    read -r ip < "$TTY" || true
-    is_menu_back "$ip" && return "$MENU_BACK_RC"
-  fi
-  valid_ip "$ip" || die "Некорректный IP панели: $ip"
+  local ip=${1:-} interactive=0
+  [ -t 0 ] || [ "$TTY" = /dev/tty ] && interactive=1
+  while true; do
+    if [ -z "$ip" ]; then
+      [ "$interactive" -eq 1 ] || die "PANEL_IP не задан."
+      printf 'IP панели Remnawave (0 = назад): '
+      read -r ip < "$TTY" || true
+      is_menu_back "$ip" && return "$MENU_BACK_RC"
+    fi
+    if valid_ip "$ip"; then break; fi
+    [ "$interactive" -eq 1 ] || die "Некорректный IP панели: $ip"
+    warn "Некорректный IP: $ip"
+    ip=
+  done
   set_conf PANEL_IP "$ip"
   apply_rules
   ok "TCP/2222 теперь разрешён только панели $ip; для остальных DROP."
@@ -388,8 +395,10 @@ EOF
 }
 
 install_all(){
+  local rc=0
   need_root; write_defaults; install_deps
-  ensure_panel_ip
+  ensure_panel_ip || rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
   write_units
   update_blocklists || { warn "Списки не обновились; применяю сохранённые правила."; apply_rules; }
   ok "Защита установлена."
@@ -407,9 +416,15 @@ status(){
 }
 
 self_test(){
+  local rc=0
   need_root; load_conf; install_deps
   echo '=== Protection self-test / auto-repair ==='
-  [ -n "$PANEL_IP" ] && valid_ip "$PANEL_IP" || { warn "PANEL_IP не задан/некорректен."; ensure_panel_ip; load_conf; }
+  if ! { [ -n "$PANEL_IP" ] && valid_ip "$PANEL_IP"; }; then
+    warn "PANEL_IP не задан/некорректен."
+    ensure_panel_ip || rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
+    load_conf
+  fi
   valid_ports "$FILTER_PORTS" || die "FILTER_PORTS некорректен."
 
   write_units
@@ -514,19 +529,62 @@ menu(){
 EOF
     printf 'Выбор: '; local c v; read -r c < "$TTY" || true
     case "$c" in
-      1) install_all || { rc=$?; [ "$rc" -eq "$MENU_BACK_RC" ] || return "$rc"; } ;;
-      2) set_panel_ip || { rc=$?; [ "$rc" -eq "$MENU_BACK_RC" ] || return "$rc"; } ;;
-      3) update_blocklists ;;
+      1)
+        rc=0; install_all || rc=$?
+        [ "$rc" -eq 0 ] || { [ "$rc" -eq "$MENU_BACK_RC" ] || warn "Установка защиты завершилась с кодом $rc."; }
+        ;;
+      2)
+        rc=0; set_panel_ip || rc=$?
+        [ "$rc" -eq 0 ] || { [ "$rc" -eq "$MENU_BACK_RC" ] || warn "Не удалось изменить PANEL_IP (код $rc)."; }
+        ;;
+      3) update_blocklists || warn "Не удалось обновить blocklists; старые наборы сохранены." ;;
       4) status ;;
-      5) printf 'IP/CIDR для allow (0 = назад): '; read -r v < "$TTY"; is_menu_back "$v" && continue; add_ip_file allow.txt "$v" ;;
-      6) printf 'IP/CIDR удалить из allow (0 = назад): '; read -r v < "$TTY"; is_menu_back "$v" && continue; remove_ip_file allow.txt "$v" ;;
-      7) printf 'IP/CIDR для deny (0 = назад): '; read -r v < "$TTY"; is_menu_back "$v" && continue; add_ip_file deny.txt "$v" ;;
-      8) printf 'IP/CIDR удалить из deny (0 = назад): '; read -r v < "$TTY"; is_menu_back "$v" && continue; remove_ip_file deny.txt "$v" ;;
-      9) printf 'Коды стран через запятую (например FI,DE; 0 = назад): '; read -r v < "$TTY"; is_menu_back "$v" && continue; set_conf GEO_COUNTRIES "$v"; set_conf ENABLE_GEOIP 1; apply_rules ;;
+      5)
+        printf 'IP/CIDR для allow (0 = назад): '; read -r v < "$TTY" || true
+        is_menu_back "$v" && continue
+        valid_cidr "$v" || { warn "Некорректный IP/CIDR: $v"; continue; }
+        add_ip_file allow.txt "$v"
+        ;;
+      6)
+        printf 'IP/CIDR удалить из allow (0 = назад): '; read -r v < "$TTY" || true
+        is_menu_back "$v" && continue
+        valid_cidr "$v" || { warn "Некорректный IP/CIDR: $v"; continue; }
+        remove_ip_file allow.txt "$v"
+        ;;
+      7)
+        printf 'IP/CIDR для deny (0 = назад): '; read -r v < "$TTY" || true
+        is_menu_back "$v" && continue
+        valid_cidr "$v" || { warn "Некорректный IP/CIDR: $v"; continue; }
+        add_ip_file deny.txt "$v"
+        ;;
+      8)
+        printf 'IP/CIDR удалить из deny (0 = назад): '; read -r v < "$TTY" || true
+        is_menu_back "$v" && continue
+        valid_cidr "$v" || { warn "Некорректный IP/CIDR: $v"; continue; }
+        remove_ip_file deny.txt "$v"
+        ;;
+      9)
+        printf 'Коды стран через запятую (например FI,DE; 0 = назад): '; read -r v < "$TTY" || true
+        is_menu_back "$v" && continue
+        [[ "$v" =~ ^([A-Za-z]{2})(,[A-Za-z]{2})*$ ]] || { warn "Ожидается список ISO-кодов, например FI,DE,NL."; continue; }
+        set_conf GEO_COUNTRIES "$v"; set_conf ENABLE_GEOIP 1; apply_rules
+        ;;
       10) set_conf ENABLE_GEOIP 0; apply_rules ;;
-      11) printf 'TCP-порты через запятую (до 15; 0 = назад): '; read -r v < "$TTY"; is_menu_back "$v" && continue; valid_ports "$v" || { warn "Некорректный список портов."; continue; }; set_conf FILTER_PORTS "$v"; apply_rules ;;
-      12) printf 'Удалить правила? Введите YES (0 = назад): '; read -r v < "$TTY"; is_menu_back "$v" && continue; [ "$v" = YES ] && uninstall ;;
-      13) self_test ;;
+      11)
+        printf 'TCP-порты через запятую (до 15; 0 = назад): '; read -r v < "$TTY" || true
+        is_menu_back "$v" && continue
+        valid_ports "$v" || { warn "Некорректный список портов."; continue; }
+        set_conf FILTER_PORTS "$v"; apply_rules
+        ;;
+      12)
+        printf 'Удалить правила? Введите YES (0 = назад): '; read -r v < "$TTY" || true
+        is_menu_back "$v" && continue
+        [ "$v" = YES ] && uninstall || warn "Удаление защиты отменено."
+        ;;
+      13)
+        rc=0; self_test || rc=$?
+        [ "$rc" -eq 0 ] || { [ "$rc" -eq "$MENU_BACK_RC" ] || warn "Self-test завершился с кодом $rc; см. сообщения выше."; }
+        ;;
       0|'') return ;;
       *) warn "Неизвестный пункт" ;;
     esac
