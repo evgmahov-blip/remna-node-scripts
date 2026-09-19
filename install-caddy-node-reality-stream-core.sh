@@ -789,67 +789,47 @@ verify_backend() {
 }
 # ── Домен/путь для standalone-сводки: из env, иначе из существующего Caddyfile
 resolve_for_summary() {
-  if [ -z "$DOMAIN" ] && [ -f "$CADDYFILE" ]; then
-    DOMAIN="$(awk '/^[A-Za-z0-9].*\{[[:space:]]*$/{gsub(/[[:space:]]*\{[[:space:]]*$/,""); print $1; exit}' "$CADDYFILE" 2>/dev/null || true)"
+  local ip4 public short
+  ip4="$(getent ahostsv4 "${DOMAIN:-}" 2>/dev/null | awk 'NR==1{print $1}' || true)"
+  [ -n "$ip4" ] || ip4="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  public=""; short=""
+  if [ -s "$REALITY_ENV" ]; then
+    public="$(awk -F= '/^REALITY_PUBLIC_KEY=/{print substr($0,index($0,"=")+1); exit}' "$REALITY_ENV")"
+    short="$(awk -F= '/^REALITY_SHORT_ID=/{print substr($0,index($0,"=")+1); exit}' "$REALITY_ENV")"
   fi
-  if [ -z "$TUNNEL_PATH" ] && [ -f "$CADDYFILE" ]; then
-    TUNNEL_PATH="$(current_path)"
-  fi
-  [ -n "$TUNNEL_PATH" ] || TUNNEL_PATH="$(gen_path)"
-}
 
-# ── ИТОГ: «что и куда вставлять» (CDN-ресурс + хост + инбаунд Remnawave) ─────
-summary() {
-  local ip4; ip4="$(getent ahostsv4 "${DOMAIN:-}" 2>/dev/null | awk 'NR==1{print $1}' || true)"; [ -n "$ip4" ] || ip4="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
   echo; line
-  printf '%b%b  📋 ЧТО И КУДА ВСТАВЛЯТЬ%b   %b(домен ноды: %s · путь: %s)%b\n' "$B" "$G" "$N" "$DIM" "${DOMAIN:-—}" "${TUNNEL_PATH:-—}" "$N"
+  printf '%b%b  📋 XHTTP + REALITY :443 — ЧТО КУДА ВСТАВЛЯТЬ%b\n' "$B" "$G" "$N"
   line
   cat <<EOF
 
-${B}Параметры этой ноды:${N}
-  Домен origin (Caddy) : ${DOMAIN:-—}   ${DIM}(auto-TLS Let's Encrypt)${N}
+${B}Нода:${N}
+  Домен / SNI          : ${DOMAIN:-—}
   IP сервера           : ${ip4:-—}
-  Бэкенд (Xray)        : 127.0.0.1:${BACKEND_PORT}
-  Туннель-путь         : ${G}${TUNNEL_PATH:-—}${N}   ${DIM}← ОДИН и тот же в 3 местах ниже${N}
-  Caddyfile            : ${CADDYFILE}
+  Внешний inbound      : 0.0.0.0:443
+  Transport            : VLESS · XHTTP · REALITY
+  XHTTP mode           : auto
+  XHTTP path           : ${G}${TUNNEL_PATH:-—}${N}
+  REALITY target       : ${G}${REALITY_SOCKET_TARGET}${N}
+  Caddy fallback       : 127.0.0.1:${CADDY_LOCAL_PORT}
+  Public key           : ${public:-—}
+  Short ID             : ${short:-—}
 
-${B}① Ресурс Beeline CDN (тип «Статика»):${N}
-  Источник (Адрес)         : ${DOMAIN:-<домен-ноды>}:443
-  Использовать HTTPS       : ✅ ВКЛ  ·  Указать имя SNI-хоста: ✅ ${DOMAIN:-<домен-ноды>}
-  Hostname к источнику     : ${DOMAIN:-<домен-ноды>}
-  Кэширование              : ❌ ВЫКЛ (обязательно)
-  HTTP/2                   : ✅ ВКЛ   ·   HTTP/3: ❌ ВЫКЛ
-  Только современные TLS   : ✅ ВКЛ   ·   Brotli/Gzip/CORS: ❌ ВЫКЛ
-  Таймауты (соед/отпр/отв) : 5 / 300 / 300
-  Экспертные → Rewrite     : Откуда ${G}${TUNNEL_PATH}/${N}  →  Куда ${G}${TUNNEL_PATH}${N}   (на конечных узлах)
-  Разрешённые HTTP-методы  : ${B}POST${N}  (GET/HEAD/OPTIONS разрешены всегда)
-  После настройки          : полная очистка кэша ресурса
+${B}Config Profile Remnawave:${N}
+  ${C}${PROFILE_INBOUNDS}${N}
+  Внутри ОДИН inbound: port 443 · listen 0.0.0.0 · network xhttp · security reality.
+  Никакого отдельного 127.0.0.1:7443 inbound эта схема не использует.
 
-${B}② Хост в Remnawave (Хосты → создать/править):${N}
-  Адрес        : <твой CDN-домен>   ${DIM}(cname вида *.a.trbcdn.net, НЕ edge-IP)${N}
-  Порт         : 443
-  SNI          : <твой CDN-домен>   ·   Хост: <твой CDN-домен>
-  Путь         : ${G}${TUNNEL_PATH}${N}
-  Security     : TLS   ·   ALPN: h2   ·   Отпечаток: ${B}firefox${N}   ${DIM}(НЕ chrome)${N}
-  xHTTP extra  : ПУСТО (все extra уже в инбаунде профиля)
+${B}Для копипасты прямо в терминал:${N}
+  ${C}${MANAGER_PATH} config-profile${N}
 
-${B}③ Config Profile / основной XHTTP inbound:${N}
-  listen 127.0.0.1 · port ${BACKEND_PORT} · network xhttp · mode packet-up · security none
-  path: ${G}${TUNNEL_PATH}${N}  ·  аплинк POST(body) / даунлинк GET  ·  sessionKey/sessionIDKey: auth
-
-${B}④ Готовые inbound для Config Profile:${N}
-  XHTTP   : ${C}${XHTTP_INBOUND}${N}
-  REALITY : ${C}${REALITY_INBOUND}${N}
-  Оба     : ${C}${PROFILE_INBOUNDS}${N}
-  В них уже стоят домен ${DOMAIN:-—}, путь ${TUNNEL_PATH:-—}, Origin/Referer и target 127.0.0.1:${CADDY_LOCAL_PORT}.
-  Caddy topology guard выбирает режим по владельцу TCP/443: rw-core держит :443 → Caddy 127.0.0.1:${CADDY_LOCAL_PORT}; rw-core нет → публичный Caddy :443.
-  Отсутствие XHTTP 127.0.0.1:${BACKEND_PORT} не останавливает Caddy, но означает неполный Config Profile.
-
-${B}Проверка:${N} нода 🟢 в панели → ss -lntp | grep ${BACKEND_PORT} (LISTEN) → подключись клиентом (Happ/INCY).
+${B}Важно:${N}
+  Это XHTTP+REALITY self-steal на одном TCP/443.
+  REALITY xver=1 приходит на ${REALITY_SOCKET_TARGET}, L4 fallback снимает PROXY header
+  и передаёт TLS в Caddy на 127.0.0.1:${CADDY_LOCAL_PORT}.
 EOF
   line
 }
-
 stage_reality_front() {
   [ -s "$CADDY_REALITY" ] || die "Не найден $CADDY_REALITY"
   [ -s "$CADDY_PUBLIC" ] || $SUDO cp -a "$CADDYFILE" "$CADDY_PUBLIC"
