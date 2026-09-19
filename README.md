@@ -96,6 +96,41 @@ RKN снова находится непосредственно в основн
 
 JSON XHTTP/REALITY содержит private key — не публикуйте его.
 
+### Hysteria2: совместимость с рабочим Xray/Remnawave профилем
+
+Recovered snapshot генерировал Hysteria2 близко к правильному варианту, но не полностью совпадал с рабочим клиентским профилем Remnawave/Xray.
+
+На runtime перед установкой transport-manager автоматически применяется compatibility patch:
+
+- server inbound использует `settings.clients: []` — именно этот массив Remnawave заполняет per-user `auth`;
+- `network: hysteria`, `security: tls`, `version: 2`, UDP/443 и ALPN `h3`;
+- добавляется `finalmask.quicParams.congestion = brutal`;
+- в подсказку Host явно выводится `streamOverrides.finalMask = {"quicParams":{"congestion":"brutal"}}`;
+- Hysteria `auth` не хардкодится в Config Profile: Remnawave получает его из UUID пользователя и генерирует клиентский `hysteriaSettings.auth`.
+
+Рабочая пара выглядит так:
+
+```text
+SERVER CONFIG PROFILE
+  protocol=hysteria
+  settings.clients=[]
+  network=hysteria
+  security=tls
+  alpn=h3
+  finalmask.quicParams.congestion=brutal
+
+REMNAWAVE HOST / CLIENT
+  address=<node domain>
+  port=443
+  hysteriaSettings.version=2
+  hysteriaSettings.auth=<UUID пользователя>
+  tlsSettings.serverName=<node domain>
+  tlsSettings.alpn=[h3]
+  finalmask.quicParams.congestion=brutal
+```
+
+`masquerade` остаётся серверной настройкой и не обязан присутствовать в клиентском JSON.
+
 ## Рабочая архитектура
 
 ```text
