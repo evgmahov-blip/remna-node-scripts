@@ -46,21 +46,24 @@ jobs:
           trap 'rm -rf "$tmp"' EXIT
 
           tar -tzf vendor/remna-next-source.tar.gz | sed '/\/$/d' | LC_ALL=C sort > "$tmp/listing.txt"
-          cat > "$tmp/expected.txt" <<'FILES'
-docker-compose.yml
-next-installer/next-runtime-guards.sh
-next-installer/remnawave-transport-manager.sh
-next-installer/rkn-watcher-manager.sh
-next-installer/selfsteal-site-manager.sh
-next-installer/setup_node-legacy.sh
-next-installer/xhttp-signature-manager.sh
-nginx.conf
-FILES
+          printf '%s\n' \
+            'docker-compose.yml' \
+            'next-installer/next-runtime-guards.sh' \
+            'next-installer/remnawave-transport-manager.sh' \
+            'next-installer/rkn-watcher-manager.sh' \
+            'next-installer/selfsteal-site-manager.sh' \
+            'next-installer/setup_node-legacy.sh' \
+            'next-installer/xhttp-signature-manager.sh' \
+            'nginx.conf' \
+            > "$tmp/expected.txt"
           diff -u "$tmp/expected.txt" "$tmp/listing.txt"
 
-          # The runtime reference files are provenance only. No .env, certificates,
-          # private keys or other secrets may enter the recovered source bundle.
-          ! tar -tzf vendor/remna-next-source.tar.gz | grep -E '(^|/)(\.env|certs?/|.*private.*key|reality\.env)            cd "$tmp"
+          # Provenance files are allowed, but secrets are not.
+          ! tar -tzf vendor/remna-next-source.tar.gz | grep -E '(^|/)(\.env|certs?/|.*private.*key|reality\.env)$'
+
+          tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
+          (
+            cd "$tmp"
             printf '%s\n' \
               '728ed22841a1c494a9d9fce026109f6151fe16a2b861496d267005bd4850477c  next-installer/setup_node-legacy.sh' \
               '620797d0677d091d6550894e32fea58ce7f2adf2f125d6f6ccfb217a7b3382fd  next-installer/next-runtime-guards.sh' \
