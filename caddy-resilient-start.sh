@@ -10,7 +10,7 @@ CADDY_REALITY=${CADDY_REALITY:-/etc/caddy/Caddyfile.reality}
 CADDY_LOCAL_PORT=${CADDY_LOCAL_PORT:-8443}
 REALITY_SOCKET_DIR=${REALITY_SOCKET_DIR:-/dev/shm/remna-reality}
 REALITY_SOCKET_TARGET=${REALITY_SOCKET_TARGET:-/dev/shm/nginx.sock}
-FALLBACK_CONTAINER=${FALLBACK_CONTAINER:-remna-reality-fallback}
+FALLBACK_SERVICE=${FALLBACK_SERVICE:-remna-reality-fallback.service}
 
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO=sudo; fi
 say(){ printf '%s\n' "$*"; }
@@ -158,11 +158,7 @@ status(){
   printf 'Caddy :443     : %s\n' "$(caddy_on_443 && echo yes || echo no)"
   printf 'Caddy :8443    : %s\n' "$(caddy_on_8443 && echo yes || echo no)"
   printf 'Self-steal sock: %s\n' "$([ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && echo "$REALITY_SOCKET_TARGET ready" || echo missing)"
-  if command -v docker >/dev/null 2>&1 && $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$FALLBACK_CONTAINER"; then
-    echo 'Fallback proxy : running'
-  else
-    echo 'Fallback proxy : not running'
-  fi
+  printf 'Fallback proxy : %s\n' "$($SUDO systemctl is-active "$FALLBACK_SERVICE" 2>/dev/null || echo not-active)"
 }
 
 case "${1:-status}" in
