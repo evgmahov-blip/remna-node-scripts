@@ -13,7 +13,7 @@
 #    reinstall          снос всего локального + установка заново
 #    path               сгенерировать/показать туннель-путь
 #    path-set PATH      изменить XHTTP-путь в Caddy-конфигах
-#    summary            «что и куда вставлять» (CDN + панель Remnawave)
+#    summary            «что и куда вставлять» для Config Profile / Host
 #    diagnose | diag    глубокая диагностика (симптом → причина → фикс)
 #    status             статус сервисов (caddy / remnanode / порты)
 #    repair | fix       исправить сайт и конфликт Caddy/Reality на текущей ноде
@@ -91,9 +91,9 @@ back_to_menu() {
 banner() {
   echo
   printf '  %b%b────────────────────────────────────────────────────────────%b\n' "$B" "$C" "$N"
-  printf '  %b%b🌐 REMNA NODE%b  %b·%b  %bCDN XHTTP + REALITY%b  %b·%b  %bSTREAM%b\n' \
+  printf '  %b%b🌐 REMNA NODE%b  %b·%b  %bXHTTP + REALITY :443%b  %b·%b  %bSELF-STEAL%b\n' \
     "$B" "$C" "$N" "$DIM" "$N" "$B" "$N" "$DIM" "$N" "$M" "$N"
-  printf '  %bОсновной: XHTTP/CDN · второй: RAW/REALITY/Vision · один внешний TCP/443%b\n' "$DIM" "$N"
+  printf '  %bОдин inbound: VLESS XHTTP + REALITY на 0.0.0.0:443 · Caddy fallback :8443%b\n' "$DIM" "$N"
   printf '  %b%b────────────────────────────────────────────────────────────%b\n' "$B" "$C" "$N"
   echo
 }
@@ -681,7 +681,7 @@ site_probe_diagnostics() {
   warn "Локальная HTTPS-проверка не прошла. Диагностика без изменения конфигурации:"
   printf '  caddy service : %s\n' "$($SUDO systemctl is-active caddy 2>/dev/null || echo unknown)"
   printf '  listeners     :\n'
-  ss -lntp 2>/dev/null | grep -E ":${port}[[:space:]]|127\.0\.0\.1:${CADDY_LOCAL_PORT}[[:space:]]|127\.0\.0\.1:${BACKEND_PORT}[[:space:]]" | sed 's/^/    /' || echo '    (нет ожидаемых listener)'
+  ss -lntp 2>/dev/null | grep -E ":${port}[[:space:]]|127\.0\.0\.1:${CADDY_LOCAL_PORT}[[:space:]]|:${NODE_PORT}[[:space:]]" | sed 's/^/    /' || echo '    (нет ожидаемых listener)'
   printf '  caddy journal :\n'
   $SUDO journalctl -u caddy -n 20 --no-pager 2>/dev/null | tail -20 | sed 's/^/    /' || true
 }
@@ -818,7 +818,7 @@ ${B}Нода:${N}
 ${B}Config Profile Remnawave:${N}
   ${C}${PROFILE_INBOUNDS}${N}
   Внутри ОДИН inbound: port 443 · listen 0.0.0.0 · network xhttp · security reality.
-  Никакого отдельного 127.0.0.1:7443 inbound эта схема не использует.
+  Отдельного внутреннего XHTTP backend-порта эта схема не использует.
 
 ${B}Для копипасты прямо в терминал:${N}
   ${C}${MANAGER_PATH} config-profile${N}
@@ -881,13 +881,13 @@ run_install() {
   banner
   install_prerequisites
   # guard повторного запуска: нода уже настроена → по умолчанию ОСТАВЛЯЕМ текущий путь
-  # (новый случайный путь рассинхронизирует ноду с CDN Rewrite и хостом панели → трафик встанет).
+  # (новый случайный путь рассинхронизирует ноду с Config Profile и Host в панели → трафик встанет).
   # reinstall сначала сносит Caddyfile через clean_node, поэтому там guard не мешает (файла нет → новый путь).
   if [ -z "$TUNNEL_PATH" ] && [ -f "$CADDYFILE" ] && [ "$INTERACTIVE" = 1 ]; then
     _cur="$(current_path)"
     if [ -n "$_cur" ]; then
       warn "Найдена прошлая установка. Текущий туннель-путь: ${G}${_cur}${N}"
-      warn "Новый путь рассинхронизирует ноду с CDN Rewrite и хостом панели — трафик встанет, пока не обновишь их."
+      warn "Новый путь рассинхронизирует ноду с Config Profile и Host в панели — трафик встанет, пока не обновишь их."
       printf 'Оставить ТЕКУЩИЙ путь? [Y/n/0]  (n = новый, 0 = назад) '; read -r _keep <"$TTY" || true
       is_menu_back "$_keep" && back_to_menu
       case "${_keep:-Y}" in [Nn]*) : ;; *) TUNNEL_PATH="$_cur" ;; esac
@@ -967,7 +967,7 @@ cmd_path() {
   printf '  Новый туннель-путь: %b%s%b\n\n' "$G" "$p" "$N"
   say  "  Вставь его в ТРИ места (должны совпадать):"
   say  "   ${DIM}•${N} инбаунд ноды (Config Profile): path и extra.path = ${G}${p}${N}"
-  say  "   ${DIM}•${N} CDN Rewrite: Откуда ${G}${p}/${N} → Куда ${G}${p}${N}"
+  say  "   ${DIM}•${N} Config Profile: xhttpSettings.path = ${G}${p}${N}"
   say  "   ${DIM}•${N} хост Remnawave → поле «Путь» = ${G}${p}${N}"
   echo
   say  "  ${DIM}Либо сгенерируй путь в браузере (кнопка 🎲 в конструкторе на странице гайда) —${N}"
@@ -1050,7 +1050,7 @@ cmd_status() {
     printf '  %bXHTTP path%b: %s\n' "$B" "$N" "$(current_path)"
   fi
 }
-# ── Глубокая диагностика: [A] сбор → [B] вердикты → [C] CDN → [D] итог ────────
+# ── Диагностика единого XHTTP+REALITY inbound :443 ───────────────────────────
 cmd_diagnose() {
   set +e; trap - ERR
   banner
@@ -1369,7 +1369,7 @@ menu() {
   printf '   %b[3]%b  🛡   Только фронт Caddy      %b— ноду поднимаешь отдельно%b\n' "$BL" "$N" "$DIM" "$N"
   printf '   %b[4]%b  🎲  Сгенерировать путь      %b— случайный туннель-путь (как в браузере)%b\n' "$M" "$N" "$DIM" "$N"
   printf '   %b[5]%b  📻  Обновить стрим-сайт     %b— загрузить рабочую страницу заново%b\n' "$G" "$N" "$DIM" "$N"
-  printf '   %b[6]%b  📋  Что и куда вставлять    %b— сводка для CDN и панели Remnawave%b\n' "$BL" "$N" "$DIM" "$N"
+  printf '   %b[6]%b  📋  Что и куда вставлять    %b— Config Profile / Host Remnawave%b\n' "$BL" "$N" "$DIM" "$N"
   printf '   %b[7]%b  🩺  Диагностика            %b— симптом → причина → фикс%b\n' "$M" "$N" "$DIM" "$N"
   printf '   %b[8]%b  📊  Статус сервисов        %b— caddy / remnanode / порты%b\n' "$Y" "$N" "$DIM" "$N"
   printf '   %b[9]%b  🔐  Подготовить профиль     %b— единый XHTTP+REALITY :443%b\n' "$C" "$N" "$DIM" "$N"
