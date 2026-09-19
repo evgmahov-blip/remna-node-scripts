@@ -7,8 +7,8 @@ REPO="evgmahov-blip/remna-node-scripts"
 SOURCE_REF="721269e2c48e31b7cac86e04bc14c46b33e31e72"
 SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"
 SOURCE_URL="https://raw.githubusercontent.com/${REPO}/${SOURCE_REF}/vendor/remna-next-source.tar.gz"
-HYSTERIA_OVERLAY_REF="5d022cef3efd046844445c06a1d1ba387359c2c8"
-HYSTERIA_OVERLAY_BLOB_SHA="dbb3a99a9c2a1f442c9e0e19fbebf3ec9d6d871f"
+HYSTERIA_OVERLAY_REF="10923927b647881e1ad778835a99ef15b286e85f"
+HYSTERIA_OVERLAY_BLOB_SHA="ad66559279bc77732cac34048526a5cad99a4950"
 HYSTERIA_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${HYSTERIA_OVERLAY_REF}/next-installer/remnawave-transport-manager.sh"
 V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"
 V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
@@ -112,6 +112,8 @@ FILES
   grep -Fq '"settings": {"version": 2, "clients": []}' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: clients[] отсутствует.'
   grep -Fq '"congestion": "$HYSTERIA_CONGESTION"' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: finalmask congestion отсутствует.'
   grep -Fq 'verify_hysteria_profile_shape' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: profile guard отсутствует.'
+  grep -Fq 'Mapper: ПУСТО.' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Transport overlay: Remnawave VLESS mapper guard отсутствует.'
+  grep -Fq 'settings.vnext ДОЛЖЕН содержать РОВНО 1 endpoint' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Transport overlay: VLESS vnext guard отсутствует.'
   ok 'Hysteria2 transport overlay применён: Remnawave clients[] + finalmask brutal + profile guard.'
 
   verify_source_file "$tmp/next-installer/rkn-watcher-manager.sh" "$EXPECTED_RKN"

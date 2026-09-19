@@ -662,6 +662,9 @@ Path: $XHTTP_PATH
 Mode: auto
 Flow: пусто
 Reality keys: берутся из Inbound при Security Layer DEFAULT; вручную в Host не вводятся
+Xray JSON Template override: DEFAULT / пусто
+Mapper: ПУСТО. Особенно НЕ должно быть операций, меняющих settings.vnext или settings.vnext.*
+Expected Xray client outbound: protocol=vless; settings.vnext ДОЛЖЕН содержать РОВНО 1 endpoint
 Camouflage: $CAMOUFLAGE_MODE
 Reality target: $REALITY_TARGET
 Min client ver: $minver
@@ -680,6 +683,9 @@ Host: пусто
 Path: пусто
 Flow: пусто (осознанно: совместимость; xtls-rprx-vision не включён)
 Reality keys: берутся из Inbound при Security Layer DEFAULT; вручную в Host не вводятся
+Xray JSON Template override: DEFAULT / пусто
+Mapper: ПУСТО. Особенно НЕ должно быть операций, меняющих settings.vnext или settings.vnext.*
+Expected Xray client outbound: protocol=vless; settings.vnext ДОЛЖЕН содержать РОВНО 1 endpoint
 Camouflage: $CAMOUFLAGE_MODE
 Reality target: $REALITY_TARGET
 Min client ver: $minver
@@ -769,6 +775,13 @@ show_result(){
     echo
     echo '[HOST 2]'
     cat "$host2"
+  fi
+  if [[ "$transport" == xhttp || "$transport" == raw || "$transport" == combined ]]; then
+    echo
+    echo '!!! REMNAWAVE CLIENT CHECK !!!'
+    echo 'Для VLESS Host: Xray JSON Template override = DEFAULT/пусто; Mapper = ПУСТО.'
+    echo 'Итоговый client outbound должен иметь settings.vnext ровно из 1 элемента.'
+    echo 'Если Xray пишет "vnext should have one and only one member" — проверь/очисти Host -> Mapper.'
   fi
   echo '#################### КОНЕЦ ВЫВОДА: REMNAWAVE TRANSPORT PROFILE ####################'
 }
