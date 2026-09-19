@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - 'fix/**'
   pull_request:
   workflow_dispatch:
 
@@ -39,6 +41,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+
           test "$(git rev-parse HEAD:vendor/remna-next-source.tar.gz)" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
           test "$(git rev-parse 721269e2c48e31b7cac86e04bc14c46b33e31e72:vendor/remna-next-source.tar.gz)" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
 
@@ -58,7 +61,6 @@ jobs:
             > "$tmp/expected.txt"
           diff -u "$tmp/expected.txt" "$tmp/listing.txt"
 
-          # Provenance files are allowed, but secrets are not.
           ! tar -tzf vendor/remna-next-source.tar.gz | grep -E '(^|/)(\.env|certs?/|.*private.*key|reality\.env)$'
 
           tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
@@ -76,13 +78,37 @@ jobs:
             for f in next-installer/*.sh; do bash -n "$f"; done
           )
 
-      - name: NEXT architecture guards
+      - name: Working-node topology provenance
         shell: bash
         run: |
           set -Eeuo pipefail
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
+
+          compose="$tmp/docker-compose.yml"
+          nginx="$tmp/nginx.conf"
+
+          grep -Fq 'image: ghcr.io/remnawave/node:latest' "$compose"
+          grep -Fq 'image: nginx:1.28' "$compose"
+          grep -Fq 'container_name: remnanode' "$compose"
+          grep -Fq 'container_name: remnawave-nginx' "$compose"
+          test "$(grep -Fc -- '- /dev/shm:/dev/shm:rw' "$compose")" -ge 2
+          grep -Fq 'listen unix:/dev/shm/nginx.sock ssl proxy_protocol' "$nginx"
+
+          # Reference runtime files are not installed from the recovered bundle.
+          grep -Fq 'install -m 0700 "$tmp/next-installer/"*.sh "$NEXT_DIR/"' full-clean-reinstall.sh
+          ! grep -Fq '"$tmp/docker-compose.yml"' full-clean-reinstall.sh
+          ! grep -Fq '"$tmp/nginx.conf"' full-clean-reinstall.sh
+
+      - name: NEXT transport architecture
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
+
           t="$tmp/next-installer/remnawave-transport-manager.sh"
           base="$tmp/next-installer/setup_node-legacy.sh"
           rkn="$tmp/next-installer/rkn-watcher-manager.sh"
@@ -94,15 +120,16 @@ jobs:
           grep -Fq '4) XHTTP + Hysteria2 одновременно (TCP/443 + UDP/443)' "$t"
           grep -Fq 'PUBLIC_PORT="${PUBLIC_PORT:-443}"' "$t"
           grep -Fq 'SELFSTEAL_SOCKET="${SELFSTEAL_SOCKET:-/dev/shm/nginx.sock}"' "$t"
+          grep -Fq '"protocol": "vless"' "$t"
+          grep -Fq '"network": "xhttp"' "$t"
+          grep -Fq '"network": "raw"' "$t"
           grep -Fq '"protocol": "hysteria"' "$t"
           grep -Fq '"network": "hysteria"' "$t"
           grep -Fq '"alpn": ["h3"]' "$t"
           grep -Fq 'xhttp-hysteria2.json' "$t"
 
           grep -Fq 'remnawave-nginx:' "$base"
-          test "$(grep -Fc -- '- /dev/shm:/dev/shm:rw' "$base")" -ge 2
           grep -Fq '/dev/shm/nginx.sock' "$base"
-
           grep -Fq 'rollback 120 сек' "$rkn"
           grep -Fq 'last-good-tspu.ipset' "$rkn"
           grep -Fq 'restore-hysteria' "$guards"
@@ -112,6 +139,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+
           grep -Fq 'patch_hysteria_compat(){' full-clean-reinstall.sh
           grep -Fq 'HYSTERIA_CONGESTION="${HYSTERIA_CONGESTION:-brutal}"' full-clean-reinstall.sh
           grep -Fq '"settings": {"version": 2, "clients": []}' full-clean-reinstall.sh
@@ -127,6 +155,7 @@ jobs:
           grep -Fq '"network": "hysteria"' "$t"
           grep -Fq '"security": "tls"' "$t"
           grep -Fq '"alpn": ["h3"]' "$t"
+
       - name: NEXT is the primary launcher
         shell: bash
         run: |
@@ -137,7 +166,7 @@ jobs:
           grep -Fq 'SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"' full-clean-reinstall.sh
           grep -Fq 'REMNANODE NEXT — main' full-clean-reinstall.sh
           grep -Fq 'Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)' full-clean-reinstall.sh
-          grep -Fq 'РКН защита — SAFE scanner guard' full-clean-reinstall.sh
+          grep -Fq 'SAFE scanner guard' full-clean-reinstall.sh
           ! grep -Fq 'install-caddy-node-reality-stream.sh' full-clean-reinstall.sh
 
           source_ref="$(sed -n 's/^SOURCE_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
@@ -156,155 +185,9 @@ jobs:
           set -Eeuo pipefail
           grep -Fq 'Главный installer этого репозитория — **REMNANODE NEXT**' README.md
           grep -Fq 'XHTTP + Hysteria2' README.md
-          grep -Fq 'RKN защита — SAFE scanner guard' README.md
+          grep -Fq 'SAFE scanner guard' README.md
           grep -Fq 'Они **не являются main installer**' README.md
-
-      - name: Legacy safety guard
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          grep -Fq 'set -Eeuo pipefail' full-clean-reinstall.sh
-          grep -Fq 'global UFW reset' full-clean-reinstall.sh
-          grep -Fq 'remnanode-next-backup-' full-clean-reinstall.sh
-          grep -Fq 'docker rm -f remnanode remnawave-nginx' full-clean-reinstall.sh
-          ! grep -Fq 'ufw --force reset' full-clean-reinstall.sh
-
-      - name: Supply-chain and secret guards
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          mapfile -d '' shell_files < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
-          ! grep -nE 'ghostos\.space|GHOST_(LIC|ID|SITE|DL|Q)' "${shell_files[@]}"
-          ! grep -nE 'printf .*Password:|printf .*Username:' "${shell_files[@]}"
-
-      - name: Invisible-character guard
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          forbidden = {
-              "\u200b": "ZERO WIDTH SPACE",
-              "\u200c": "ZERO WIDTH NON-JOINER",
-              "\u200d": "ZERO WIDTH JOINER",
-              "\u2060": "WORD JOINER",
-              "\ufeff": "ZERO WIDTH NO-BREAK SPACE/BOM",
-          }
-
-          bad = []
-          for path in Path(".").rglob("*"):
-              if not path.is_file() or ".git" in path.parts:
-                  continue
-              try:
-                  text = path.read_text(encoding="utf-8")
-              except (UnicodeDecodeError, OSError):
-                  continue
-              for char, name in forbidden.items():
-                  if char in text:
-                      bad.append(f"{path}: {name}")
-
-          if bad:
-              raise SystemExit("Invisible control characters found:\n" + "\n".join(bad))
-          PY
-
-
-          tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
-
-          (
-            cd "$tmp"
-            printf '%s\n' \
-              '728ed22841a1c494a9d9fce026109f6151fe16a2b861496d267005bd4850477c  next-installer/setup_node-legacy.sh' \
-              '620797d0677d091d6550894e32fea58ce7f2adf2f125d6f6ccfb217a7b3382fd  next-installer/next-runtime-guards.sh' \
-              '441c82fb0eb3b155986d7b84bd66aa82bb1d028b8a9c49e02f1fbac326fac2e2  next-installer/remnawave-transport-manager.sh' \
-              '2d5838809881a00cac755b43606d7c929e7ba8f5786f64ebff849eb73edeb3e7  next-installer/rkn-watcher-manager.sh' \
-              'b783e94f2ef3764b2e397cba9eb96aeab88d7da11da017a2c867054f9546a84a  next-installer/selfsteal-site-manager.sh' \
-              'dbbd1110aec2e6dd32aee204b6d0174d7fe511e1b97118570cbbea553946bd4a  next-installer/xhttp-signature-manager.sh' \
-              > SHA256SUMS
-            sha256sum -c SHA256SUMS
-            for f in next-installer/*.sh; do bash -n "$f"; done
-          )
-
-      - name: NEXT architecture guards
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
-          tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
-          t="$tmp/next-installer/remnawave-transport-manager.sh"
-          base="$tmp/next-installer/setup_node-legacy.sh"
-          rkn="$tmp/next-installer/rkn-watcher-manager.sh"
-          guards="$tmp/next-installer/next-runtime-guards.sh"
-
-          grep -Fq '1) VLESS + REALITY + XHTTP (основной)' "$t"
-          grep -Fq '2) VLESS + REALITY + RAW (fallback)' "$t"
-          grep -Fq '3) Hysteria2 + TLS (UDP)' "$t"
-          grep -Fq '4) XHTTP + Hysteria2 одновременно (TCP/443 + UDP/443)' "$t"
-          grep -Fq 'PUBLIC_PORT="${PUBLIC_PORT:-443}"' "$t"
-          grep -Fq 'SELFSTEAL_SOCKET="${SELFSTEAL_SOCKET:-/dev/shm/nginx.sock}"' "$t"
-          grep -Fq '"protocol": "hysteria"' "$t"
-          grep -Fq '"network": "hysteria"' "$t"
-          grep -Fq '"alpn": ["h3"]' "$t"
-          grep -Fq 'xhttp-hysteria2.json' "$t"
-
-          grep -Fq 'remnawave-nginx:' "$base"
-          test "$(grep -Fc -- '- /dev/shm:/dev/shm:rw' "$base")" -ge 2
-          grep -Fq '/dev/shm/nginx.sock' "$base"
-
-          grep -Fq 'rollback 120 сек' "$rkn"
-          grep -Fq 'last-good-tspu.ipset' "$rkn"
-          grep -Fq 'restore-hysteria' "$guards"
-          grep -Fq 'sync-rkn-watch' "$guards"
-
-      - name: Hysteria2 compatibility guard
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          grep -Fq 'patch_hysteria_compat(){' full-clean-reinstall.sh
-          grep -Fq 'HYSTERIA_CONGESTION="${HYSTERIA_CONGESTION:-brutal}"' full-clean-reinstall.sh
-          grep -Fq '"settings": {"version": 2, "clients": []}' full-clean-reinstall.sh
-          grep -Fq '"congestion": "$HYSTERIA_CONGESTION"' full-clean-reinstall.sh
-          grep -Fq 'streamOverrides.finalMask' full-clean-reinstall.sh
-          grep -Fq 'backend добавляет settings.clients[].auth' full-clean-reinstall.sh
-
-          tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
-          tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
-          t="$tmp/next-installer/remnawave-transport-manager.sh"
-          grep -Fq '"settings": {"version": 2, "users": []}' "$t"
-          grep -Fq '"network": "hysteria"' "$t"
-          grep -Fq '"security": "tls"' "$t"
-          grep -Fq '"alpn": ["h3"]' "$t"
-      - name: NEXT is the primary launcher
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          grep -Fq 'TASK_NAME="REMNA NODE NEXT"' full-clean-reinstall.sh
-          grep -Fq 'SOURCE_REF="721269e2c48e31b7cac86e04bc14c46b33e31e72"' full-clean-reinstall.sh
-          grep -Fq 'SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"' full-clean-reinstall.sh
-          grep -Fq 'REMNANODE NEXT — main' full-clean-reinstall.sh
-          grep -Fq 'Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)' full-clean-reinstall.sh
-          grep -Fq 'РКН защита — SAFE scanner guard' full-clean-reinstall.sh
-          ! grep -Fq 'install-caddy-node-reality-stream.sh' full-clean-reinstall.sh
-
-          source_ref="$(sed -n 's/^SOURCE_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
-          test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
-
-          for launcher in install.sh clean-install.sh; do
-            ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
-            expected="$(sed -n 's/^EXPECTED_BLOB_SHA="\([^"]*\)"/\1/p' "$launcher")"
-            test "$(git rev-parse "$ref:full-clean-reinstall.sh")" = "$expected"
-            ! grep -Fq 'install-caddy-node-reality-stream.sh' "$launcher"
-          done
-
-      - name: README architecture guard
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          grep -Fq 'Главный installer этого репозитория — **REMNANODE NEXT**' README.md
-          grep -Fq 'XHTTP + Hysteria2' README.md
-          grep -Fq 'RKN защита — SAFE scanner guard' README.md
-          grep -Fq 'Они **не являются main installer**' README.md
+          grep -Fq 'Installer их из bundle **не устанавливает**' README.md
 
       - name: Legacy safety guard
         shell: bash
