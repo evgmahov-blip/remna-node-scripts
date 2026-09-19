@@ -13,8 +13,8 @@ HYSTERIA_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${HYSTERIA_OVERL
 V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"
 V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
 V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next-installer/existing-node-v2-cleanup.sh"
-NETWORK_REF="a8c3f5ccd32e0b528715eabf575495f2a8aa0f8e"
-NETWORK_BLOB_SHA="e42fae983026ce3b054f76ef58d611254d0a6717"
+NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"
+NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
 
 APP_DIR="/opt/remnanode"
@@ -333,6 +333,7 @@ show_status(){
   if command -v docker >/dev/null 2>&1; then docker ps --filter name='^/remnawave-nginx$' --format '{{.Status}}' 2>/dev/null | head -1 || true; else echo 'docker отсутствует'; fi
   echo 'Listeners :'
   ss -lntup 2>/dev/null | grep -E '(:443|:2222)[[:space:]]' || true
+  printf 'Network   : %s / %s\n' "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)" "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo unknown)"
   echo 'Profiles  :'
   find "$APP_DIR/remnawave-profiles" -maxdepth 1 -type f -name '*.json' -printf '  %f\n' 2>/dev/null | sort || true
   if [[ -x "$RKN" ]]; then
@@ -471,6 +472,27 @@ network_menu(){
   "$NETWORK" menu
 }
 
+rkn_default_active(){
+  [[ -s "$APP_DIR/rkn-safe/.scanner-guard-active" ]] || return 1
+  command -v iptables >/dev/null 2>&1 || return 1
+  iptables -C INPUT -j REMNA_RKN_SCANNERS >/dev/null 2>&1
+}
+
+ensure_default_rkn(){
+  if rkn_default_active; then
+    ok 'RKN SAFE scanner guard уже установлен и активен.'
+    return 0
+  fi
+
+  say '>>> DEFAULT: устанавливаю RKN SAFE scanner guard'
+  RKN_ASSUME_KEEP=1 "$RKN" install-safe
+}
+
+ensure_default_network(){
+  say '>>> DEFAULT: применяю BBR TUNE (SAFE/HIGHLOAD, без замены ядра)'
+  "$NETWORK" ensure-default
+}
+
 run_install(){
   sync_next_sources
   if [[ ! -s "$APP_DIR/docker-compose.yml" ]] || ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx remnanode; then
@@ -484,11 +506,13 @@ run_install(){
   "$TRANSPORT"
   post_transport
 
-  local answer
-  printf 'Открыть RKN SAFE menu сейчас? [y/N]: '
-  read -r answer < "$TTY" || true
-  [[ "$answer" =~ ^[Yy]$ ]] && "$RKN" menu || true
-  "$GUARDS" sync-rkn-watch >/dev/null 2>&1 || true
+  echo
+  echo '================ DEFAULT PROTECTION / NETWORK ================='
+  ensure_default_rkn || warn 'RKN SAFE scanner guard не удалось установить автоматически. Доступно вручную: sudo remnanode-next rkn'
+  "$GUARDS" sync-rkn-watch >/dev/null 2>&1 || warn 'RKN self-heal watcher требует внимания.'
+  ensure_default_network || warn 'BBR TUNE не применён автоматически. Проверить: sudo remnanode-next network-status'
+  echo '==============================================================='
+
   show_status
   offer_current_profile
 }
@@ -529,7 +553,7 @@ CLI:  sudo remnanode-next
  [3]  Профили для копипасты в Remnawave
  [4]  SelfSteal / маскировочный сайт
  [5]  XHTTP signature
- [6]  РКН защита — SAFE scanner guard
+ [6]  РКН защита — SAFE scanner guard (DEFAULT)
  [7]  Runtime repair / guards
  [8]  Базовое управление Remnanode
  [9]  Статус
@@ -537,7 +561,7 @@ CLI:  sudo remnanode-next
  [11] Safe reinstall текущей NEXT-ноды
  [12] NEXT V2 — существующая/legacy нода → очистка хвостов → NEXT
 
- [13] СЕТЬ / BBR TUNE / BBR3
+ [13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
       RUN:    sudo remnanode-next network
       TUNE:   https://github.com/Balbuto/safe-remnanode-setup
       BBR3:   https://github.com/ivan-nginx/bbr3
