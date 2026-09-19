@@ -443,6 +443,57 @@ CADDY_REALITY_EOF
   ok "Локальный Caddyfile REALITY → $CADDY_REALITY"
 }
 
+install_reality_socket_proxy() {
+  command -v docker >/dev/null 2>&1 || die "Docker нужен для REALITY fallback proxy."
+  $SUDO install -d -o root -g root -m 0700 "$REALITY_DIR"
+  $SUDO install -d -o root -g root -m 0755 "$REALITY_SOCKET_DIR"
+
+  local tmp; tmp="$(mktemp)"
+  cat > "$tmp" <<EOF
+global
+  log stdout format raw local0
+
+defaults
+  log global
+  mode tcp
+  timeout connect 5s
+  timeout client 300s
+  timeout server 300s
+
+frontend reality_selfsteal
+  bind /dev/shm/nginx.sock accept-proxy mode 660
+  default_backend caddy_tls
+
+backend caddy_tls
+  server caddy 127.0.0.1:${CADDY_LOCAL_PORT}
+EOF
+  $SUDO install -o root -g root -m 0600 "$tmp" "$FALLBACK_CONFIG"
+  rm -f "$tmp"
+
+  $SUDO docker pull "$FALLBACK_IMAGE" >/dev/null
+  $SUDO docker rm -f "$FALLBACK_CONTAINER" >/dev/null 2>&1 || true
+  $SUDO docker run -d --name "$FALLBACK_CONTAINER" \
+    --network host --restart always \
+    -v "$REALITY_SOCKET_DIR:/dev/shm" \
+    -v "$FALLBACK_CONFIG:/usr/local/etc/haproxy/haproxy.cfg:ro" \
+    "$FALLBACK_IMAGE" >/dev/null || die "Не удалось запустить REALITY fallback proxy."
+
+  local i
+  for i in $(seq 1 20); do
+    [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && break
+    sleep 1
+  done
+  [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] || {
+    $SUDO docker logs --tail 50 "$FALLBACK_CONTAINER" 2>&1 || true
+    die "Fallback socket не создан: $REALITY_SOCKET_DIR/nginx.sock"
+  }
+
+  if $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode; then
+    $SUDO docker exec remnanode test -S "$REALITY_SOCKET_TARGET" 2>/dev/null ||
+      warn "В remnanode пока не виден $REALITY_SOCKET_TARGET; compose будет пересоздан с shared /dev/shm mount."
+  fi
+  ok "REALITY self-steal socket готов: $REALITY_SOCKET_TARGET → Caddy 127.0.0.1:${CADDY_LOCAL_PORT}"
+}
 fix_site_permissions() {
   [ -d "$WEBROOT" ] || return 0
   $SUDO chmod 755 /var /var/www "$WEBROOT" 2>/dev/null || true
