@@ -39,6 +39,7 @@ NODE_PORT=2222          # API-порт ноды Remnawave (mTLS)
 REALITY_PORT=443        # единый VLESS XHTTP + REALITY inbound
 CADDY_LOCAL_PORT=8443   # локальный HTTPS Caddy за REALITY self-steal
 REALITY_SOCKET_DIR=/dev/shm/remna-reality
+REALITY_SOCKET_HOST=$REALITY_SOCKET_DIR/nginx.sock
 REALITY_SOCKET_TARGET=/dev/shm/nginx.sock
 FALLBACK_SERVICE=remna-reality-fallback.service
 FALLBACK_UNIT=/etc/systemd/system/$FALLBACK_SERVICE
@@ -466,7 +467,7 @@ defaults
   timeout server 300s
 
 frontend reality_selfsteal
-  bind $REALITY_SOCKET_TARGET accept-proxy mode 660
+  bind $REALITY_SOCKET_HOST accept-proxy mode 660
   default_backend caddy_tls
 
 backend caddy_tls
@@ -485,7 +486,7 @@ After=network.target
 [Service]
 Type=simple
 ExecStartPre=/usr/bin/install -d -o root -g root -m 0755 $REALITY_SOCKET_DIR
-ExecStartPre=-/usr/bin/rm -f $REALITY_SOCKET_TARGET
+ExecStartPre=-/usr/bin/rm -f $REALITY_SOCKET_HOST
 ExecStart=/usr/sbin/haproxy -W -db -f $FALLBACK_CONFIG
 Restart=always
 RestartSec=2s
@@ -500,12 +501,12 @@ EOF
 
   local i
   for i in $(seq 1 20); do
-    [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && break
+    [ -S "$REALITY_SOCKET_HOST" ] && break
     sleep 1
   done
-  [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] || {
+  [ -S "$REALITY_SOCKET_HOST" ] || {
     $SUDO journalctl -u "$FALLBACK_SERVICE" -n 50 --no-pager 2>/dev/null || true
-    die "Fallback socket не создан: $REALITY_SOCKET_DIR/nginx.sock"
+    die "Fallback socket не создан: $REALITY_SOCKET_HOST"
   }
 
   if $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode; then
@@ -760,13 +761,13 @@ reality_front_ready() {
 final_topology_ready() {
   reality_front_ready &&
   listener_is "$NODE_PORT" 'rw-node' &&
-  [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] &&
+  [ -S "$REALITY_SOCKET_HOST" ] &&
   $SUDO docker exec remnanode test -S "$REALITY_SOCKET_TARGET" >/dev/null 2>&1
 }
 
 show_topology() {
   ss -lntp 2>/dev/null | grep -E ":(${NODE_PORT}|${REALITY_PORT}|${CADDY_LOCAL_PORT})[[:space:]]" || true
-  printf '  self-steal socket: %s\n' "$([ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && echo ready || echo missing)"
+  printf '  self-steal socket: %s\n' "$([ -S "$REALITY_SOCKET_HOST" ] && echo ready || echo missing)"
 }
 
 node_has_443_conflict() {
@@ -794,7 +795,7 @@ verify_backend() {
   printf '\n%bПрофиль XHTTP+REALITY :443:%b ' "$B" "$N"
   if rw_core_on_443; then
     printf '%b✓ rw-core слушает 0.0.0.0:443%b\n' "$G" "$N"
-    [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && ok "Self-steal socket готов: $REALITY_SOCKET_TARGET"
+    [ -S "$REALITY_SOCKET_HOST" ] && ok "Self-steal socket готов: $REALITY_SOCKET_TARGET"
   elif [ -n "$SECRET_KEY" ] && $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^remnanode$'; then
     printf '%bконтейнер поднят, профиль ещё не применён%b\n' "$Y" "$N"
     warn "Назначь ноде Config Profile из $PROFILE_INBOUNDS: один inbound VLESS XHTTP+REALITY на :443."
@@ -1067,7 +1068,7 @@ cmd_status() {
   $SUDO systemctl is-active "$FALLBACK_SERVICE" 2>/dev/null || echo "не активен"
   printf '  %bПорты%b     :\n' "$B" "$N"
   ss -lntp 2>/dev/null | grep -E ":80 |:443 |127\.0\.0\.1:${CADDY_LOCAL_PORT}|:${NODE_PORT} " | sed 's/^/    /' || true
-  printf '  %bSocket%b    : %s\n' "$B" "$N" "$([ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && echo "$REALITY_SOCKET_TARGET ready" || echo "missing")"
+  printf '  %bSocket%b    : %s\n' "$B" "$N" "$([ -S "$REALITY_SOCKET_HOST" ] && echo "$REALITY_SOCKET_TARGET ready" || echo "missing")"
   if [ -f "$CADDYFILE" ]; then
     printf '  %bXHTTP path%b: %s\n' "$B" "$N" "$(current_path)"
   fi
@@ -1089,7 +1090,7 @@ cmd_diagnose() {
   if rw_core_on_443; then
     ok "rw-core слушает единый XHTTP+REALITY inbound на :443"
     caddy_local_8443 && ok "Caddy fallback слушает 127.0.0.1:${CADDY_LOCAL_PORT}" || { warn "Caddy fallback :${CADDY_LOCAL_PORT} отсутствует"; fail=$((fail+1)); }
-    [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && ok "Host self-steal socket существует" || { warn "Нет $REALITY_SOCKET_DIR/nginx.sock"; fail=$((fail+1)); }
+    [ -S "$REALITY_SOCKET_HOST" ] && ok "Host self-steal socket существует" || { warn "Нет $REALITY_SOCKET_DIR/nginx.sock"; fail=$((fail+1)); }
     $SUDO docker exec remnanode test -S "$REALITY_SOCKET_TARGET" >/dev/null 2>&1 && ok "Socket виден в remnanode как $REALITY_SOCKET_TARGET" || { warn "remnanode не видит $REALITY_SOCKET_TARGET"; fail=$((fail+1)); }
   elif caddy_public_443; then
     ok "Caddy публично держит :443; Config Profile ещё не активировал rw-core"
