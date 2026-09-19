@@ -846,8 +846,7 @@ stage_reality_front() {
   if rw_core_on_443; then
     restart_caddy_for_owner || die "rw-core держит :443, но Caddy не удалось запустить на 127.0.0.1:${CADDY_LOCAL_PORT}."
     verify_site_port "$REALITY_PORT"
-    warn_if_xhttp_missing
-    ok "Схема выбрана по владельцу TCP/443: rw-core → :443; Caddy → 127.0.0.1:${CADDY_LOCAL_PORT}."
+    ok "Единый XHTTP+REALITY inbound держит :443; self-steal fallback → Caddy 127.0.0.1:${CADDY_LOCAL_PORT}."
     return 0
   fi
 
@@ -860,8 +859,7 @@ stage_reality_front() {
     if wait_for_rw_core_443 "${REALITY_HANDOFF_WAIT:-35}"; then
       restart_caddy_for_owner || die "rw-core занял :443, но Caddy не удалось запустить на 127.0.0.1:${CADDY_LOCAL_PORT}."
       verify_site_port "$REALITY_PORT"
-      warn_if_xhttp_missing
-      ok "Схема выбрана по владельцу TCP/443: rw-core → :443; Caddy → 127.0.0.1:${CADDY_LOCAL_PORT}."
+        ok "Единый XHTTP+REALITY inbound держит :443; self-steal fallback → Caddy 127.0.0.1:${CADDY_LOCAL_PORT}."
       return 0
     fi
     warn "rw-core не занял TCP/443 — возвращаю публичный Caddy."
@@ -870,7 +868,7 @@ stage_reality_front() {
   restart_caddy_for_owner || die "Не удалось запустить Caddy в публичном режиме."
   verify_site_port "$REALITY_PORT"
   if final_topology_ready; then
-    ok "Профиль активен: rw-core → :443 и 127.0.0.1:${BACKEND_PORT}; Caddy → 127.0.0.1:${CADDY_LOCAL_PORT}."
+    ok "Профиль активен: XHTTP+REALITY rw-core → :443; Caddy fallback → 127.0.0.1:${CADDY_LOCAL_PORT}."
   else
     ok "Caddy оставлен на публичном TCP/443, потому что rw-core пока не держит :443."
     warn "После назначения REALITY profile watcher/guard освободит :443 для rw-core и переведёт Caddy на 127.0.0.1:${CADDY_LOCAL_PORT}."
@@ -920,8 +918,7 @@ run_install() {
   printf '\n%b%bУстановка завершена.%b\n' "$G" "$B" "$N"
   say "  Домен       : ${C}${DOMAIN}${N}"
   say "  Туннель-путь: ${G}${TUNNEL_PATH}${N}"
-  say "  XHTTP JSON  : ${C}${XHTTP_INBOUND}${N}"
-  say "  REALITY JSON: ${C}${REALITY_INBOUND}${N}"
+  say "  Config Profile: ${C}${PROFILE_INBOUNDS}${N}"
   printf '%bПорты 80 и 443 должны быть открыты для выпуска Let'\''s Encrypt.%b\n' "$Y" "$N"
   verify_backend
   summary
@@ -936,8 +933,10 @@ clean_node() {
   if command -v docker >/dev/null 2>&1 && [ -f "$NODE_DIR/docker-compose.yml" ]; then
     ( cd "$NODE_DIR" && $SUDO docker compose down ) 2>/dev/null || true
   fi
+  $SUDO docker rm -f "$FALLBACK_CONTAINER" 2>/dev/null || true
   $SUDO docker rm -f remnanode 2>/dev/null || true
   $SUDO rm -rf "$NODE_DIR"
+  $SUDO rm -rf "$REALITY_SOCKET_DIR" 2>/dev/null || true
   if [ -f "$CADDYFILE" ]; then
     $SUDO cp "$CADDYFILE" "${CADDYFILE}.bak.$(date +%s 2>/dev/null || echo old)" 2>/dev/null || true
     $SUDO rm -f "$CADDYFILE"
@@ -1028,11 +1027,11 @@ cmd_path_set() {
     die "Caddy не применил новый путь; выполнен откат."
   }
   if [ -s "$REALITY_ENV" ]; then
-    write_xhttp_inbound
-    [ -s "$REALITY_INBOUND" ] && write_profile_bundle
+    write_profile_inbound
+    write_profile_bundle
   fi
   ok "XHTTP-путь изменён: $old → $requested"
-  warn "Теперь поставь тот же путь в Config Profile, CDN Rewrite и хосте Remnawave."
+  warn "Теперь поставь тот же путь в Config Profile и Host Remnawave."
 }
 
 # ── Статус сервисов ──────────────────────────────────────────────────────────
@@ -1042,60 +1041,49 @@ cmd_status() {
   $SUDO systemctl is-active caddy 2>/dev/null || echo "не активен"
   printf '  %bRemnanode%b : ' "$B" "$N"
   if $SUDO docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null | grep '^remnanode' ; then :; else echo "не запущен"; fi
+  printf '  %bFallback%b  : ' "$B" "$N"
+  if $SUDO docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null | grep "^${FALLBACK_CONTAINER} " ; then :; else echo "не запущен"; fi
   printf '  %bПорты%b     :\n' "$B" "$N"
-  ss -lntp 2>/dev/null | grep -E ":80 |:443 |127.0.0.1:${BACKEND_PORT}|127.0.0.1:${CADDY_LOCAL_PORT}|:${NODE_PORT} " | sed 's/^/    /' || echo "    (нет слушателей 80/443/${BACKEND_PORT}/${CADDY_LOCAL_PORT}/${NODE_PORT})"
+  ss -lntp 2>/dev/null | grep -E ":80 |:443 |127\.0\.0\.1:${CADDY_LOCAL_PORT}|:${NODE_PORT} " | sed 's/^/    /' || true
+  printf '  %bSocket%b    : %s\n' "$B" "$N" "$([ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && echo "$REALITY_SOCKET_TARGET ready" || echo "missing")"
   if [ -f "$CADDYFILE" ]; then
-    printf '  %bПуть в Caddyfile%b : %s\n' "$B" "$N" "$(current_path)"
+    printf '  %bXHTTP path%b: %s\n' "$B" "$N" "$(current_path)"
   fi
 }
-
 # ── Глубокая диагностика: [A] сбор → [B] вердикты → [C] CDN → [D] итог ────────
 cmd_diagnose() {
-  set +e; trap - ERR   # диагностика намеренно запускает падающие пробы
+  set +e; trap - ERR
   banner
-  local path; path="$(current_path)"; [ -n "$path" ] || path="—"
-  printf '  %b🩺 Диагностика узла%b  %b(бэкенд 127.0.0.1:%s · путь %s)%b\n\n' "$B" "$N" "$DIM" "$BACKEND_PORT" "$path" "$N"
+  local fail=0 path
+  path="$(current_path)"; [ -n "$path" ] || path="—"
+  line; printf '%b  Диагностика XHTTP+REALITY :443%b\n' "$B" "$N"; line
 
-  line; printf '%b  [A] Автосбор состояния%b\n' "$B" "$N"; line
-  printf '%b$ systemctl is-active caddy%b  → %s\n' "$C" "$N" "$($SUDO systemctl is-active caddy 2>/dev/null || echo нет)"
-  printf '%b$ docker ps -a (remnanode)%b\n' "$C" "$N"; $SUDO docker ps -a --filter name=remnanode --format '  {{.Names}}\t{{.Status}}' 2>/dev/null || echo "  (docker нет / контейнера нет)"
-  printf '%b$ ss -lntp (80/443/%s/%s)%b\n' "$C" "$BACKEND_PORT" "$NODE_PORT" "$N"; ss -lntp 2>/dev/null | grep -E ":80 |:443 |:${BACKEND_PORT} |:${NODE_PORT} " | sed 's/^/  /' || echo "  (нет)"
-  printf '%b$ docker logs remnanode --tail 12%b\n' "$C" "$N"; $SUDO docker logs remnanode --tail 12 2>&1 | sed -E 's/(token=)[^&[:space:]]+/\1<REDACTED>/Ig; s/(SECRET_KEY[=:][[:space:]]*)[^[:space:]]+/\1<REDACTED>/Ig' | sed 's/^/  /' || echo "  (контейнера нет)"
-  echo
-
-  line; printf '%b  [B] Диагноз по компонентам%b\n' "$B" "$N"; line
-  local fail=0
-  _diag(){ printf '  %b▸ %s%b\n    %bпричина:%b %s\n    %bфикс:%b    %s\n\n' "$R" "$1" "$N" "$Y" "$N" "$2" "$G" "$N" "$3"; fail=$((fail+1)); }
-
-  if ! $SUDO systemctl is-active caddy >/dev/null 2>&1; then
-    _diag "Caddy НЕ запущен" "битый Caddyfile или занят порт 80/443" "caddy validate --config $CADDYFILE ; ss -lntp | grep -E ':80|:443' ; systemctl restart caddy"
-  fi
-  if ! $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^remnanode$'; then
-    if $SUDO docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^remnanode$'; then
-      _diag "Remnanode УПАЛ (есть в ps -a, нет в ps)" "неверный/обрезанный SECRET_KEY или нет сети до панели" "docker logs --tail 50 remnanode ; проверь SECRET_KEY в $NODE_DIR/docker-compose.yml (только значение) ; cd $NODE_DIR && docker compose up -d"
-    else
-      _diag "Remnanode ОТСУТСТВУЕТ" "нода не разворачивалась на этом сервере" "bash $0 install (введи SECRET_KEY)"
-    fi
-  fi
-  if ! ss -lntp 2>/dev/null | grep -q "127.0.0.1:${BACKEND_PORT}"; then
-    _diag "127.0.0.1:${BACKEND_PORT} НЕ слушает → Caddy отдаёт 502" "инбаунд Xray не поднят: нода без Config Profile ИЛИ порт ${NODE_PORT} закрыт для панели" "Remnawave → Профили → создай/привяжи профиль ноде (path=${path}, listen 127.0.0.1:${BACKEND_PORT}) ; открой порт ${NODE_PORT} для панели ; docker logs -f remnanode"
-  fi
-  if [ ! -f "$CADDYFILE" ]; then
-    _diag "Caddyfile отсутствует" "фронт не устанавливался" "bash $0 install"
+  if $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode; then
+    ok "Remnanode запущен"
+  else
+    warn "Remnanode не запущен"; fail=$((fail+1))
   fi
 
-  line; printf '%b  [C] CDN-уровень (с ноды НЕ тестируется достоверно)%b\n' "$B" "$N"; line
-  say "  ${Y}Не тестируй CDN-домен curl'ом С НОДЫ${N} — запрос уходит в кривой edge и врёт."
-  say "  Проверяй пути ЛОКАЛЬНО (Caddy → Xray), CDN — с клиента:"
-  say "   ${DIM}живой путь${N}  : curl -I \"https://${DOMAIN:-<домен>}${path}?auth=test\"  → 400 + заголовок x-api-key"
-  say "   ${DIM}мёртвый путь${N}: тот же curl на ЧУЖОЙ путь           → 200 + HTML стрим-сайта"
-  echo
-  line; printf '%b  [D] Итог%b\n' "$B" "$N"; line
-  if [ "$fail" -eq 0 ]; then say "  ${G}Локальный узел здоров.${N} Если клиент не работает — сверь путь во всех местах и настройку CDN-ресурса (блок C)."
-  else say "  ${Y}Проблем на узле: ${fail}.${N} Чини по подсказкам (фикс) сверху вниз и запусти диагностику снова."; fi
-  say "  ${DIM}Сводка не обращается к внешним guide/license сервисам.${N}"
+  if rw_core_on_443; then
+    ok "rw-core слушает единый XHTTP+REALITY inbound на :443"
+    caddy_local_8443 && ok "Caddy fallback слушает 127.0.0.1:${CADDY_LOCAL_PORT}" || { warn "Caddy fallback :${CADDY_LOCAL_PORT} отсутствует"; fail=$((fail+1)); }
+    [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && ok "Host self-steal socket существует" || { warn "Нет $REALITY_SOCKET_DIR/nginx.sock"; fail=$((fail+1)); }
+    $SUDO docker exec remnanode test -S "$REALITY_SOCKET_TARGET" >/dev/null 2>&1 && ok "Socket виден в remnanode как $REALITY_SOCKET_TARGET" || { warn "remnanode не видит $REALITY_SOCKET_TARGET"; fail=$((fail+1)); }
+  elif caddy_public_443; then
+    ok "Caddy публично держит :443; Config Profile ещё не активировал rw-core"
+  else
+    warn "Ни rw-core, ни Caddy не держат :443"; fail=$((fail+1))
+  fi
+
+  if ss -lntp 2>/dev/null | grep -q ":${NODE_PORT} "; then ok "Node API :${NODE_PORT} слушает"; else warn "Node API :${NODE_PORT} не слушает"; fail=$((fail+1)); fi
+  printf '  XHTTP path  : %s\n' "$path"
+  printf '  Profile JSON: %s\n' "$PROFILE_INBOUNDS"
+  show_topology
+  set -e
+  [ "$fail" -eq 0 ] && { ok "Диагностика: PASS"; return 0; }
+  warn "Диагностика: найдено проблем: $fail"
+  return 1
 }
-
 # ── Обновить стрим-сайт ──────────────────────────────────────────────────────
 cmd_stream() {
   banner
@@ -1255,6 +1243,7 @@ cmd_reality_prepare() {
 reality_enable_impl() {
   resolve_existing
   [ -s "$CADDY_REALITY" ] || prepare_profile_files
+  install_reality_socket_proxy
   $SUDO caddy validate --config "$CADDY_REALITY" --adapter caddyfile || die "Caddyfile REALITY невалиден."
   [ -s "$CADDY_PUBLIC" ] || $SUDO cp -a "$CADDYFILE" "$CADDY_PUBLIC"
   fix_site_permissions
@@ -1262,46 +1251,30 @@ reality_enable_impl() {
   if rw_core_on_443; then
     restart_caddy_for_owner || die "rw-core держит :443, но Caddy не удалось запустить на 127.0.0.1:${CADDY_LOCAL_PORT}."
     verify_site_port "$REALITY_PORT"
-    if final_topology_ready; then
-      ok "Готово: rw-core → :443; Caddy → 127.0.0.1:${CADDY_LOCAL_PORT}; XHTTP → 127.0.0.1:${BACKEND_PORT}"
-    else
-      warn_if_xhttp_missing
-      ok "Caddy работает через REALITY fallback; отсутствие XHTTP 127.0.0.1:${BACKEND_PORT} не останавливает Caddy."
-    fi
+    final_topology_ready || warn "Проверь shared /dev/shm mount и self-steal socket."
+    ok "Готово: XHTTP+REALITY :443 → ${REALITY_SOCKET_TARGET} → Caddy 127.0.0.1:${CADDY_LOCAL_PORT}"
     show_topology
     return 0
   fi
 
-  warn "rw-core пока не держит :443 — временно останавливаю Caddy, чтобы REALITY мог занять порт."
+  warn "Освобождаю TCP/443 для единого XHTTP+REALITY inbound."
   $SUDO systemctl stop caddy 2>/dev/null || true
   restart_remnanode_if_present
-  log "Жду rw-core на :443; Caddy будет запущен через topology guard..."
-  local i
-  for i in $(seq 1 120); do
-    if rw_core_on_443; then
-      restart_caddy_for_owner || die "rw-core занял :443, но Caddy не удалось запустить на 127.0.0.1:${CADDY_LOCAL_PORT}."
-      if check_site_port "$REALITY_PORT" 8; then
-        warn_if_xhttp_missing
-        ok "Готово: режим выбран по владельцу TCP/443; Caddy не зависит от наличия XHTTP ${BACKEND_PORT}."
-        show_topology
-        return 0
-      fi
-      warn "Порты поднялись, но сайт через REALITY fallback не отвечает."
-      show_topology
-      $SUDO docker logs --since 5m remnanode 2>&1 | tr -d '\000' | \
-        sed -E 's/(token=)[^&[:space:]]+/\1<REDACTED>/Ig; s/("privateKey"[[:space:]]*:[[:space:]]*")[^"]+/\1<REDACTED>/Ig' | tail -60 || true
-      die "Проверь target=127.0.0.1:${CADDY_LOCAL_PORT} и serverNames=${DOMAIN} в REALITY inbound."
-    fi
-    sleep 1
-  done
-  warn "rw-core не занял :443; откатываю публичный Caddy."
+  if wait_for_rw_core_443 "${REALITY_HANDOFF_WAIT:-120}"; then
+    restart_caddy_for_owner || die "rw-core занял :443, но Caddy fallback не запустился на 127.0.0.1:${CADDY_LOCAL_PORT}."
+    verify_site_port "$REALITY_PORT"
+    final_topology_ready || warn "Профиль :443 поднялся, но self-steal topology неполна."
+    ok "Готово: XHTTP+REALITY :443 → ${REALITY_SOCKET_TARGET} → Caddy 127.0.0.1:${CADDY_LOCAL_PORT}"
+    show_topology
+    return 0
+  fi
+
+  warn "rw-core не занял :443; возвращаю публичный Caddy."
   restart_caddy_for_owner || true
   verify_site_port 443 || true
-  $SUDO docker logs --since 5m remnanode 2>&1 | tr -d '\000' | \
-    sed -E 's/(token=)[^&[:space:]]+/\1<REDACTED>/Ig; s/("privateKey"[[:space:]]*:[[:space:]]*")[^"]+/\1<REDACTED>/Ig' | tail -60 || true
-  die "Reality inbound не запустился. Проверь JSON профиля."
+  $SUDO docker logs --since 5m remnanode 2>&1 | tr -d '\000' | tail -60 || true
+  die "XHTTP+REALITY inbound :443 не запустился. Проверь Config Profile."
 }
-
 cmd_reality_enable() {
   banner
   $SUDO systemctl stop "$PROFILE_WATCH_SERVICE" >/dev/null 2>&1 || true
@@ -1321,95 +1294,37 @@ cmd_reality_disable() {
 
 cmd_reality_info() {
   banner
-  printf '  %-24s %s\n' 'XHTTP inbound JSON:' "$XHTTP_INBOUND"
-  printf '  %-24s %s\n' 'REALITY inbound JSON:' "$REALITY_INBOUND"
-  printf '  %-24s %s\n' 'Оба inbound:' "$PROFILE_INBOUNDS"
-  printf '  %-24s %s\n' 'REALITY ключи:' "$REALITY_ENV"
-  printf '  %-24s %s\n' 'Caddy public:' "$CADDY_PUBLIC"
-  printf '  %-24s %s\n' 'Caddy reality:' "$CADDY_REALITY"
-  printf '  %-24s %s\n' 'Стрим-сайт:' "$WEBROOT"
+  printf '  %-26s %s\n' 'Config Profile:' "$PROFILE_INBOUNDS"
+  printf '  %-26s %s\n' 'Inbound XHTTP+REALITY:' "$PROFILE_INBOUND"
+  printf '  %-26s %s\n' 'REALITY ключи:' "$REALITY_ENV"
+  printf '  %-26s %s\n' 'REALITY target:' "$REALITY_SOCKET_TARGET"
+  printf '  %-26s %s\n' 'Caddy fallback:' "$CADDY_REALITY"
   echo
-  say "  Секретные значения намеренно не выводятся."
-  ss -lntp 2>/dev/null | grep -E ":443 |127.0.0.1:${BACKEND_PORT}|127.0.0.1:${CADDY_LOCAL_PORT}" | sed 's/^/  /' || true
+  say "  Private key намеренно не выводится этой командой."
+  show_topology
 }
 
 print_profile_json() {
-  local title="$1" file="$2"
   echo
   line
-  printf '%b%b  %s — КОПИРУЙ JSON НИЖЕ%b\n' "$B" "$G" "$title" "$N"
-  line
-  printf '{\n  "inbounds": [\n'
-  sed 's/^/    /' "$file"
-  printf '  ]\n}\n'
-  line
-}
-
-print_combined_profile_json() {
-  echo
-  line
-  printf '%b%b  XHTTP + REALITY — КОПИРУЙ JSON НИЖЕ%b\n' "$B" "$G" "$N"
+  printf '%b%b  CONFIG PROFILE — XHTTP + REALITY :443 — КОПИРУЙ НИЖЕ%b\n' "$B" "$G" "$N"
   line
   cat "$PROFILE_INBOUNDS"
   line
 }
 
 cmd_config_profile() {
-  local mode="${1:-menu}" choice=""
   banner
   resolve_existing
-  if [ ! -s "$XHTTP_INBOUND" ] || [ ! -s "$REALITY_INBOUND" ] || [ ! -s "$PROFILE_INBOUNDS" ]; then
-    warn "Готовые профили ещё не созданы."
-    say "  Сначала выбери «Подготовить REALITY» или выполни:"
+  if [ ! -s "$PROFILE_INBOUNDS" ]; then
+    warn "Готовый Config Profile ещё не создан."
+    say "  Сначала выбери «Подготовить профиль» или выполни:"
     say "  ${C}${MANAGER_PATH} reality-prepare${N}"
     return 1
   fi
-
-  case "$mode" in
-    xhttp)   print_profile_json "XHTTP CONFIG PROFILE" "$XHTTP_INBOUND"; return 0 ;;
-    reality) print_profile_json "REALITY CONFIG PROFILE" "$REALITY_INBOUND"; return 0 ;;
-    both|combined) print_combined_profile_json; return 0 ;;
-    all)
-      print_profile_json "XHTTP CONFIG PROFILE" "$XHTTP_INBOUND"
-      print_profile_json "REALITY CONFIG PROFILE" "$REALITY_INBOUND"
-      print_combined_profile_json
-      return 0
-      ;;
-  esac
-
-  warn "REALITY-профиль содержит privateKey. Не публикуй этот вывод."
-  while true; do
-    cat <<'EOF'
-
-────────────────────────────────────────────────────────────
-Config Profiles для копипасты в Remnawave
-────────────────────────────────────────────────────────────
- [1] XHTTP — готовый Config Profile
- [2] REALITY — готовый Config Profile
- [3] XHTTP + REALITY — общий Config Profile
- [4] Показать все три
- [0] Назад
-────────────────────────────────────────────────────────────
-EOF
-    printf 'Выбор: '
-    read -r choice <"$TTY" || true
-    case "$choice" in
-      1) print_profile_json "XHTTP CONFIG PROFILE" "$XHTTP_INBOUND" ;;
-      2) print_profile_json "REALITY CONFIG PROFILE" "$REALITY_INBOUND" ;;
-      3) print_combined_profile_json ;;
-      4)
-        print_profile_json "XHTTP CONFIG PROFILE" "$XHTTP_INBOUND"
-        print_profile_json "REALITY CONFIG PROFILE" "$REALITY_INBOUND"
-        print_combined_profile_json
-        ;;
-      0|'') return 0 ;;
-      *) warn "Неизвестный пункт: $choice"; continue ;;
-    esac
-    printf '\nEnter — назад к выбору профиля... '
-    read -r _ <"$TTY" || true
-  done
+  warn "JSON содержит REALITY privateKey. Не публикуй его."
+  print_profile_json
 }
-
 cmd_repair() {
   banner
   install_prerequisites
@@ -1431,10 +1346,10 @@ cmd_repair() {
   else
     start_caddy
     verify_site_port 443
-    if ss -lntp 2>/dev/null | grep -q "127.0.0.1:${BACKEND_PORT}"; then
-      ok "Сайт и XHTTP работают; REALITY inbound на 443 в профиле пока не активен."
+    if rw_core_on_443; then
+      ok "XHTTP+REALITY профиль активен на :443."
     else
-      warn "Сайт исправлен. XHTTP/REALITY появятся после применения корректного Config Profile."
+      warn "Сайт исправлен. Единый XHTTP+REALITY inbound появится после назначения Config Profile."
     fi
   fi
 
@@ -1457,10 +1372,10 @@ menu() {
   printf '   %b[6]%b  📋  Что и куда вставлять    %b— сводка для CDN и панели Remnawave%b\n' "$BL" "$N" "$DIM" "$N"
   printf '   %b[7]%b  🩺  Диагностика            %b— симптом → причина → фикс%b\n' "$M" "$N" "$DIM" "$N"
   printf '   %b[8]%b  📊  Статус сервисов        %b— caddy / remnanode / порты%b\n' "$Y" "$N" "$DIM" "$N"
-  printf '   %b[9]%b  🔐  Подготовить REALITY     %b— XHTTP+REALITY JSON + Caddy:8443%b\n' "$C" "$N" "$DIM" "$N"
+  printf '   %b[9]%b  🔐  Подготовить профиль     %b— единый XHTTP+REALITY :443%b\n' "$C" "$N" "$DIM" "$N"
   printf '   %b[10]%b ⚡  Включить REALITY        %b— переключить один внешний TCP/443%b\n' "$G" "$N" "$DIM" "$N"
   printf '   %b[11]%b ↩   Отключить REALITY       %b— вернуть публичный Caddy:443%b\n' "$Y" "$N" "$DIM" "$N"
-  printf '   %b[12]%b 📋  Профили для копипасты    %b— XHTTP / REALITY / оба для Remnawave%b\n' "$BL" "$N" "$DIM" "$N"
+  printf '   %b[12]%b 📋  Профиль для копипасты   %b— готовый XHTTP+REALITY :443%b\n' "$BL" "$N" "$DIM" "$N"
   printf '   %b[13]%b 🛠   Repair Caddy / XHTTP / REALITY %b— сайт, конфиги и конфликт TCP/443%b\n' "$G" "$N" "$DIM" "$N"
   printf '   %b[14]%b 🧹  Снести всё (clean)      %b— удалить ноду и конфиг Caddy%b\n' "$R" "$N" "$DIM" "$N"
   printf '   %b[0]%b  🚪  Выход\n' "$DIM" "$N"
@@ -1505,7 +1420,7 @@ main() {
     reality-enable)         cmd_reality_enable ;;
     reality-disable)        cmd_reality_disable ;;
     reality-info)           cmd_reality_info ;;
-    config-profile|profile-json|profile) cmd_config_profile "${2:-menu}" ;;
+    config-profile|profile-json|profile) cmd_config_profile ;;
     clean|uninstall)       clean_node ;;
     menu|"")               menu ;;
     -h|--help|help)        sed -n '18,43p' "$0" | sed 's/^# \{0,1\}//' ;;
