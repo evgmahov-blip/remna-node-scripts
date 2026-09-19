@@ -183,6 +183,8 @@ jobs:
 
           grep -Fq 'V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
+          grep -Fq 'NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"' full-clean-reinstall.sh
+          grep -Fq 'NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"' full-clean-reinstall.sh
           grep -Fq 'run_existing_node_v2(){' full-clean-reinstall.sh
           grep -Fq 'NEXT V2 — существующая/legacy нода' full-clean-reinstall.sh
           grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
@@ -201,14 +203,23 @@ jobs:
           grep -Fq 'https://github.com/Balbuto/safe-remnanode-setup' full-clean-reinstall.sh
           grep -Fq 'https://github.com/ivan-nginx/bbr3' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next network' full-clean-reinstall.sh
+          grep -Fq 'ensure_default_rkn(){' full-clean-reinstall.sh
+          grep -Fq 'RKN_ASSUME_KEEP=1 "$RKN" install-safe' full-clean-reinstall.sh
+          grep -Fq 'ensure_default_network(){' full-clean-reinstall.sh
+          grep -Fq '"$NETWORK" ensure-default' full-clean-reinstall.sh
+          ! grep -Fq 'Открыть RKN SAFE menu сейчас?' full-clean-reinstall.sh
 
           n=next-installer/network-tuning-manager.sh
-          test "$(git rev-parse HEAD:$n)" = "e42fae983026ce3b054f76ef58d611254d0a6717"
-          test "$(git rev-parse a8c3f5ccd32e0b528715eabf575495f2a8aa0f8e:$n)" = "e42fae983026ce3b054f76ef58d611254d0a6717"
+          test "$(git rev-parse HEAD:$n)" = "8616189227534a4c651000d233162b1603a50d7b"
+          test "$(git rev-parse dd7474f8f72b7d4b56221e89bb969ac75b2dff00:$n)" = "8616189227534a4c651000d233162b1603a50d7b"
           grep -Fq 'sudo remnanode-next bbr-tune' "$n"
           grep -Fq 'sudo remnanode-next bbr3' "$n"
           grep -Fq 'BBR3 — КАСТОМНОЕ ЯДРО, НУЖЕН REBOOT' "$n"
-          grep -Fq 'BBR TUNE — SAFE/HIGHLOAD, БЕЗ ЗАМЕНЫ ЯДРА' "$n"
+          grep -Fq 'BBR TUNE — DEFAULT, SAFE/HIGHLOAD, БЕЗ ЗАМЕНЫ ЯДРА' "$n"
+          grep -Fq 'ensure_default_tune(){' "$n"
+          grep -Fq 'bbr_available(){' "$n"
+          grep -Fq 'rm -f "$SYSCTL_BBR3"' "$n"
+          grep -Fq 'rm -f "$SYSCTL_TUNE"' "$n"
 
       - name: NEXT launcher pin chain
         shell: bash
@@ -256,6 +267,8 @@ jobs:
           grep -Fq 'NEXT V2 migration' README.md
           grep -Fq 'существующая/legacy нода' README.md
           grep -Fq '/root/remna-node-v2-backups/' README.md
+          grep -Fq 'ставится автоматически по умолчанию' README.md
+          grep -Fq 'BBR3 не ставится автоматически' README.md
           grep -Fq 'Дополнительное подтверждение `MIGRATE` не требуется' README.md
 
       - name: Legacy safety guard
