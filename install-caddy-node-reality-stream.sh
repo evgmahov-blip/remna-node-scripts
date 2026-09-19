@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-REPO_REF=19752f6e52c2c4f9d76442139282bc02b25e9cb0
+REPO_REF=15e05427b29e0f2a3c3c877bdd3feb9cdfa2ff97
 REPO_RAW="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${REPO_REF}"
 CORE_BLOB_SHA=0e70f9cf0e26f56e5badae1e9bf70747a6def9ba
-PROTECTION_BLOB_SHA=623b4c44a34e49bcae48db66765a89ef646f1da4
+PROTECTION_BLOB_SHA=4aeb40236721e92b7e840aa2cb0beb8427e63274
 CADDY_GUARD_BLOB_SHA=fc908882069fe50602c2411a46f4a5db77bddb74
 REMNA_NODE_IMAGE="${REMNA_NODE_IMAGE:-remnawave/node:3.4.1}"
 INSTALL_DIR=/opt/remna-node-scripts
@@ -36,6 +36,17 @@ back_to_manager_menu(){
     return 0
   fi
   menu
+}
+menu_action(){
+  local rc=0
+  "$@" || rc=$?
+  if [ "$rc" -eq "$MENU_BACK_RC" ]; then
+    return 0
+  fi
+  if [ "$rc" -ne 0 ]; then
+    warn "Операция завершилась с кодом $rc — возвращаюсь в меню."
+  fi
+  return 0
 }
 
 ensure_self(){
@@ -648,25 +659,39 @@ Remna Node Manager — safe mode
 MENU
     printf 'Выбор: '; local c p; read -r c <"$TTY" || true
     case "$c" in
-      1) run_core install ;; 2) run_core reinstall ;; 3) run_core front-only ;; 4) run_core path ;;
-      5) printf 'Новый XHTTP-путь (0 = назад): '; read -r p <"$TTY" || true; is_menu_back "$p" || { [ -n "$p" ] && run_core path-set "$p"; } ;;
-      6) run_core stream ;; 7) run_core summary ;; 8) safe_diagnose ;; 9) run_core status ;;
-      10) run_core reality-prepare ;; 11) run_core reality-enable ;; 12) run_core reality-disable ;; 13) run_core reality-info ;;
-      14) run_core repair ;;
+      1) menu_action run_core install ;;
+      2) menu_action run_core reinstall ;;
+      3) menu_action run_core front-only ;;
+      4) menu_action run_core path ;;
+      5)
+        printf 'Новый XHTTP-путь (0 = назад): '; read -r p <"$TTY" || true
+        is_menu_back "$p" || { [ -n "$p" ] && menu_action run_core path-set "$p"; }
+        ;;
+      6) menu_action run_core stream ;;
+      7) menu_action run_core summary ;;
+      8) menu_action safe_diagnose ;;
+      9) menu_action run_core status ;;
+      10) menu_action run_core reality-prepare ;;
+      11) menu_action run_core reality-enable ;;
+      12) menu_action run_core reality-disable ;;
+      13) menu_action run_core reality-info ;;
+      14) menu_action run_core repair ;;
       15)
         printf 'Снести локальный Remnanode/Caddy? Введите YES (0 = назад): '
         read -r p <"$TTY" || true
-        is_menu_back "$p" || { [ "$p" = YES ] && run_core clean || warn "Clean отменён."; }
+        if is_menu_back "$p"; then
+          :
+        elif [ "$p" = YES ]; then
+          menu_action run_core clean
+        else
+          warn "Clean отменён."
+        fi
         ;;
-      16) protection menu ;;
-      17)
-        protection panel-set || {
-          rc=$?
-          [ "$rc" -eq "$MENU_BACK_RC" ] || warn "Не удалось изменить PANEL_IP."
-        }
-        ;;
-      18) selftest_all ;;
-      0|'') exit 0 ;; *) warn "Неизвестный пункт: $c" ;;
+      16) menu_action protection menu ;;
+      17) menu_action protection panel-set ;;
+      18) menu_action selftest_all ;;
+      0|'') exit 0 ;;
+      *) warn "Неизвестный пункт: $c" ;;
     esac
     printf '\nEnter — вернуться в меню... '; read -r _ <"$TTY" || true
   done
