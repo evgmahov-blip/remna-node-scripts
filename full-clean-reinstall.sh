@@ -13,6 +13,9 @@ HYSTERIA_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${HYSTERIA_OVERL
 V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"
 V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
 V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next-installer/existing-node-v2-cleanup.sh"
+NETWORK_REF="a8c3f5ccd32e0b528715eabf575495f2a8aa0f8e"
+NETWORK_BLOB_SHA="e42fae983026ce3b054f76ef58d611254d0a6717"
+NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
 
 APP_DIR="/opt/remnanode"
 NEXT_DIR="$APP_DIR/next-installer"
@@ -25,6 +28,7 @@ RKN="$NEXT_DIR/rkn-watcher-manager.sh"
 GUARDS="$NEXT_DIR/next-runtime-guards.sh"
 SIGNATURE="$NEXT_DIR/xhttp-signature-manager.sh"
 V2_CLEANER="$NEXT_DIR/existing-node-v2-cleanup.sh"
+NETWORK="$NEXT_DIR/network-tuning-manager.sh"
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
 
@@ -122,6 +126,16 @@ FILES
   bash -n "$v2cleanup" || die 'NEXT V2 cleanup module не прошёл bash -n.'
   grep -Fq 'V2 POSTCHECK PASS' "$v2cleanup" || die 'NEXT V2 cleanup module: postcheck guard отсутствует.'
   grep -Fq 'global UFW reset НЕ выполнялся' "$v2cleanup" || die 'NEXT V2 cleanup module: firewall safety marker отсутствует.'
+
+  local network
+  network="$tmp/next-installer/network-tuning-manager.sh"
+  curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 3 \
+    "$NETWORK_URL" -o "$network" || die 'Не удалось скачать Network/BBR manager.'
+  [[ "$(git_blob_sha "$network")" == "$NETWORK_BLOB_SHA" ]] || die 'Network/BBR manager не прошёл Git blob SHA.'
+  bash -n "$network" || die 'Network/BBR manager не прошёл bash -n.'
+  grep -Fq 'sudo remnanode-next bbr-tune' "$network" || die 'Network/BBR manager: CLI hint отсутствует.'
+  grep -Fq 'https://github.com/ivan-nginx/bbr3' "$network" || die 'Network/BBR manager: BBR3 source link отсутствует.'
+  grep -Fq 'https://github.com/Balbuto/safe-remnanode-setup' "$network" || die 'Network/BBR manager: BBR tune source link отсутствует.'
 
   install -d -m 0700 "$NEXT_DIR" /usr/local/libexec
   install -m 0700 "$tmp/next-installer/"*.sh "$NEXT_DIR/"
@@ -390,6 +404,73 @@ safe_clean(){
   safe_clean_impl
 }
 
+show_current_copy_profile(){
+  local transport profile host1="" host2=""
+  transport="$(cat "$APP_DIR/.transport" 2>/dev/null || true)"
+  case "$transport" in
+    xhttp)
+      profile="$APP_DIR/remnawave-profiles/xhttp-reality.json"
+      host1="$APP_DIR/remnawave-profiles/host-xhttp.txt"
+      ;;
+    raw)
+      profile="$APP_DIR/remnawave-profiles/raw-reality.json"
+      host1="$APP_DIR/remnawave-profiles/host-raw.txt"
+      ;;
+    hysteria)
+      profile="$APP_DIR/remnawave-profiles/hysteria2-tls.json"
+      host1="$APP_DIR/remnawave-profiles/host-hysteria2.txt"
+      ;;
+    combined)
+      profile="$APP_DIR/remnawave-profiles/xhttp-hysteria2.json"
+      host1="$APP_DIR/remnawave-profiles/host-xhttp.txt"
+      host2="$APP_DIR/remnawave-profiles/host-hysteria2.txt"
+      ;;
+    *)
+      warn 'Текущий transport не определён — профиль показать не могу.'
+      return 1
+      ;;
+  esac
+
+  [[ -s "$profile" ]] || { warn "Профиль не найден: $profile"; return 1; }
+
+  echo
+  echo '================ ГОТОВЫЙ CONFIG PROFILE — КОПИРУЙ ================='
+  echo "Transport: $transport"
+  echo "File:      $profile"
+  echo
+  cat "$profile"
+  echo
+  echo '================ КОНЕЦ CONFIG PROFILE =============================='
+  if [[ -s "$host1" ]]; then
+    echo
+    echo '================ HOST SETTINGS ====================================='
+    cat "$host1"
+  fi
+  if [[ -s "$host2" ]]; then
+    echo
+    echo '================ HOST SETTINGS 2 ==================================='
+    cat "$host2"
+  fi
+  echo '====================================================================='
+  warn 'В полном Config Profile может быть REALITY privateKey. Не публикуй этот вывод.'
+}
+
+offer_current_profile(){
+  local answer
+  echo
+  printf 'ПОКАЗАТЬ ГОТОВЫЙ ПРОФИЛЬ / ПРОФИЛИ ДЛЯ КОПИПАСТЫ? [Y/n]: '
+  read -r answer < "$TTY" || true
+  case "${answer:-Y}" in
+    Y|y|YES|yes|Да|да) show_current_copy_profile || true ;;
+    *) say 'Профиль не выводил. В любой момент: sudo remnanode-next current-profile' ;;
+  esac
+}
+
+network_menu(){
+  sync_next_sources
+  "$NETWORK" menu
+}
+
 run_install(){
   sync_next_sources
   if [[ ! -s "$APP_DIR/docker-compose.yml" ]] || ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx remnanode; then
@@ -409,6 +490,7 @@ run_install(){
   [[ "$answer" =~ ^[Yy]$ ]] && "$RKN" menu || true
   "$GUARDS" sync-rkn-watch >/dev/null 2>&1 || true
   show_status
+  offer_current_profile
 }
 
 run_reinstall(){
@@ -438,7 +520,9 @@ main_menu(){
   while true; do
     cat <<'MENU'
 
-REMNANODE NEXT — main
+REMNANODE NEXT — MAIN
+REPO: https://github.com/evgmahov-blip/remna-node-scripts
+CLI:  sudo remnanode-next
 ────────────────────────────────────────────────────────────
  [1]  Установка / продолжить настройку NEXT
  [2]  Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)
@@ -452,6 +536,12 @@ REMNANODE NEXT — main
  [10] Safe clean текущей NEXT-ноды
  [11] Safe reinstall текущей NEXT-ноды
  [12] NEXT V2 — существующая/legacy нода → очистка хвостов → NEXT
+
+ [13] СЕТЬ / BBR TUNE / BBR3
+      RUN:    sudo remnanode-next network
+      TUNE:   https://github.com/Balbuto/safe-remnanode-setup
+      BBR3:   https://github.com/ivan-nginx/bbr3
+
  [0]  Выход
 ────────────────────────────────────────────────────────────
 MENU
@@ -469,6 +559,7 @@ MENU
       10) safe_clean; pause ;;
       11) run_reinstall; pause ;;
       12) run_existing_node_v2; pause ;;
+      13) network_menu ;;
       0|'') return 0 ;;
       *) warn 'Неверный пункт.' ;;
     esac
@@ -490,8 +581,13 @@ main(){
     signature) sync_next_sources; shift; "$SIGNATURE" "${1:-apply}" ;;
     runtime) sync_next_sources; shift; "$GUARDS" "$@" ;;
     status) show_status ;;
+    current-profile|copy-profile-now) show_current_copy_profile ;;
+    network) sync_next_sources; "$NETWORK" menu ;;
+    network-status) sync_next_sources; "$NETWORK" status ;;
+    bbr-tune) sync_next_sources; "$NETWORK" tune ;;
+    bbr3) sync_next_sources; "$NETWORK" bbr3 ;;
     sync-source) sync_next_sources ;;
-    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|selfsteal|rkn|signature|runtime|status|sync-source]' ;;
+    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|sync-source]' ;;
   esac
 }
 
