@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-REPO_REF=1f46e9b186c5fd57afe2a25e9cc2b4ef19bff4d6
+REPO_REF=679db0eac3119e8074e6b9bce9228335d6f1d544
 REPO_RAW="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${REPO_REF}"
-CORE_BLOB_SHA=7c283708c212fda60d9c4e628229192cb14f1874
+CORE_BLOB_SHA=553ef9a77f68399cb9f6fe55ae35592f89d31da0
 PROTECTION_BLOB_SHA=550d5e1d6342005355657d129c5c99122fa769d7
 CADDY_GUARD_BLOB_SHA=e5a6c6f03682bbe0551184dfdb35c3f22ca1c62e
 REMNA_NODE_IMAGE="${REMNA_NODE_IMAGE:-remnawave/node:3.4.1}"
