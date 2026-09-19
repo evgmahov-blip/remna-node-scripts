@@ -49,7 +49,8 @@ REALITY_INBOUND=$REALITY_DIR/reality-inbound.json
 XHTTP_INBOUND=$REALITY_DIR/xhttp-inbound.json
 PROFILE_INBOUNDS=$REALITY_DIR/inbounds-ready.json
 SCRIPT_INSTALL_DIR=/opt/remna-node-scripts
-SCRIPT_INSTALL_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream.sh
+MANAGER_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream.sh
+CORE_SELF_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream-core.sh
 CADDY_GUARD=$SCRIPT_INSTALL_DIR/caddy-resilient-start.sh
 PROFILE_WATCH_SERVICE=remna-profile-wait.service  # legacy: удаляется при обновлении/сносе
 PROFILE_WATCH_UNIT=/etc/systemd/system/$PROFILE_WATCH_SERVICE
@@ -105,12 +106,12 @@ apt_get(){ $SUDO apt-get -o DPkg::Lock::Timeout="$APT_LOCK_TIMEOUT" "$@"; }
 persist_self() {
   local current
   current="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
-  [ "$current" = "$SCRIPT_INSTALL_PATH" ] && [ -s "$SCRIPT_INSTALL_PATH" ] && return 0
+  [ "$current" = "$CORE_SELF_PATH" ] && [ -s "$CORE_SELF_PATH" ] && return 0
   case "$current" in /dev/fd/*|/proc/*/fd/*) return 0 ;; esac
   [ -f "$current" ] && [ -s "$current" ] || return 0
   $SUDO install -d -o root -g root -m 0755 "$SCRIPT_INSTALL_DIR"
-  $SUDO install -o root -g root -m 0700 "$current" "$SCRIPT_INSTALL_PATH"
-  ok "Скрипт сохранён → $SCRIPT_INSTALL_PATH"
+  $SUDO install -o root -g root -m 0700 "$current" "$CORE_SELF_PATH"
+  ok "Core сохранён → $CORE_SELF_PATH"
 }
 
 git_blob_sha() {
@@ -1253,7 +1254,7 @@ cmd_reality_prepare() {
   say "  Готовый REALITY inbound: ${C}${REALITY_INBOUND}${N}"
   say "  Оба объекта вместе     : ${C}${PROFILE_INBOUNDS}${N}"
   say "  В JSON уже стоят правильные DOMAIN, Origin, Referer, target=127.0.0.1:${CADDY_LOCAL_PORT} и выбранный XHTTP-путь."
-  say "  Если Caddy ещё публично слушает :443, выполни после сохранения профиля: ${C}${SCRIPT_INSTALL_PATH} reality-enable${N}"
+  say "  Если Caddy ещё публично слушает :443, выполни после сохранения профиля: ${C}${MANAGER_PATH} reality-enable${N}"
   line
 }
 
