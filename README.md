@@ -64,7 +64,7 @@ Docker и Caddy при необходимости устанавливаются
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/caba7bce5db9d2bc35b82a1abae4df5456c14758/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/5ed0944801bd533b6034e192445edbdd073aa59e/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -135,13 +135,15 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/caba7bce5db9d2bc35b82a1abae4df5456c14758/full-clean-reinstall.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/787f092d4d9e287d27872a79040b3b8c70f75c7c/full-clean-reinstall.sh \
   -o /tmp/remna-restore-manager.sh
 
 sudo bash /tmp/remna-restore-manager.sh menu
 ```
 
 Эта команда не делает reinstall: она загружает проверенный manager, восстанавливает его в `/opt/remna-node-scripts/` и открывает меню.
+
+Во всех интерактивных вводах можно использовать `0` / `назад` для отмены текущего действия. Ничего из частично введённых данных при этом не применяется. На финальном подтверждении установки `n` также возвращает в меню. Для destructive clean требуется явное `YES`.
 
 В меню доступны:
 
@@ -259,7 +261,7 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protect-instal
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/caba7bce5db9d2bc35b82a1abae4df5456c14758/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/5ed0944801bd533b6034e192445edbdd073aa59e/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -360,6 +362,22 @@ install.sh
 - не печатает `SECRET_KEY` или REALITY private key.
 
 ---
+
+## Если установка оборвалась на `HTTP 000`
+
+Не делайте reinstall. Если Remnanode уже запущен и JSON-файлы созданы, сначала восстановите актуальный manager и запустите Repair:
+
+```bash
+curl -fsSL --proto '=https' --tlsv1.2 \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/787f092d4d9e287d27872a79040b3b8c70f75c7c/full-clean-reinstall.sh \
+  -o /tmp/remna-restore-manager.sh
+
+sudo bash /tmp/remna-restore-manager.sh menu
+```
+
+В меню выберите **14 — Repair Caddy / XHTTP / REALITY**.
+
+Актуальный локальный HTTPS-probe не использует `HTTP_PROXY` / `HTTPS_PROXY`. Если ответ всё равно `000`, скрипт автоматически показывает владельца портов, состояние Caddy и последние строки журнала Caddy/ACME.
 
 ## Если что-то не работает
 
