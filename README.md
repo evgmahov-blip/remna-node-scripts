@@ -26,7 +26,7 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/62cb7619e021788cb07a3fd66ca9007dddf34cd2/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/2f4fa0e858e01b6a616b0d148020a526e43d1a9a/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -36,13 +36,13 @@ sudo bash /tmp/remna-install.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/b8d1a42b9f4bd047c278acb735459cda15d0ff39/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/44f108b9f2c856faf7403c80680d766197eb7422/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
 ```
 
-`clean-install.sh` теперь снова означает старый сценарий **V2 для существующей ноды**, а не обычный reinstall текущего NEXT: он делает preflight, recovery backup, вычищает известные legacy-хвосты и только после успешного postcheck запускает свежую установку.
+`clean-install.sh` теперь снова означает старый сценарий **V2 для существующей ноды**, а не обычный reinstall текущего NEXT: он сразу делает preflight, recovery backup, вычищает известные legacy-хвосты и только после успешного postcheck запускает свежую установку. Дополнительное подтверждение `MIGRATE` не требуется: сам запуск `clean-install.sh` считается подтверждением миграции.
 
 Обе команды используют immutable commit SHA. Следующий launcher проверяется по Git blob SHA; recovered NEXT source bundle — по immutable commit + Git blob SHA, а каждый входящий в него скрипт дополнительно проверяется по SHA256.
 
