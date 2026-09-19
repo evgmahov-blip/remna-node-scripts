@@ -1,385 +1,231 @@
 # Remna Node Scripts
 
-Установка и обслуживание **Remnawave Node** с рабочей схемой:
+Главный installer этого репозитория — **REMNANODE NEXT**.
 
-```text
-VLESS + XHTTP + REALITY
-0.0.0.0:443
-        |
-      rw-core
-        |
-REALITY xver=1
-target=/dev/shm/nginx.sock
-        |
- remna-reality-fallback
-     (HAProxy)
-        |
-127.0.0.1:8443
-        |
-      Caddy
-        |
- маскировочный сайт
-```
+NEXT восстановлен из source snapshot реально работающей ноды и снова является основной цепочкой установки. Старый Caddy-based manager оставлен только для обслуживания legacy-нод и **не вызывается** из `install.sh`, `clean-install.sh` или `full-clean-reinstall.sh`.
 
-Главный принцип: **один XHTTP+REALITY inbound на TCP/443**.
+## Что умеет NEXT
 
-Отдельного XHTTP inbound на внутреннем порту здесь нет.
+- Remnawave Node + `remnawave-nginx`;
+- SelfSteal через общий `/dev/shm/nginx.sock`;
+- VLESS + REALITY + XHTTP на TCP/443;
+- VLESS + REALITY + RAW на TCP/443;
+- Hysteria2 + TLS на UDP/443;
+- комбинированный профиль **XHTTP + Hysteria2**: TCP/443 + UDP/443;
+- генерация Config Profile и Host для Remnawave;
+- стабильная per-node XHTTP signature;
+- RKN SAFE scanner guard с rollback и self-heal;
+- runtime repair для Hysteria cert mount / RKN;
+- маскировочный SelfSteal-сайт;
+- безопасный backup / clean / reinstall без глобального `ufw reset`.
 
----
+## Быстрая установка
 
-## Что создаёт скрипт
-
-После установки/подготовки профиля получается Config Profile Remnawave примерно такого вида:
-
-```json
-{
-  "inbounds": [
-    {
-      "tag": "PL-node1-xHTTP",
-      "port": 443,
-      "listen": "0.0.0.0",
-      "protocol": "vless",
-      "settings": {
-        "clients": [],
-        "decryption": "none"
-      },
-      "streamSettings": {
-        "network": "xhttp",
-        "security": "reality",
-        "xhttpSettings": {
-          "mode": "auto",
-          "path": "/api/example/example.ts",
-          "extra": {
-            "xmux": {
-              "cMaxReuseTimes": 12,
-              "maxConcurrency": 1
-            },
-            "seqKey": "visitor_id",
-            "xPaddingKey": "_r",
-            "seqPlacement": "cookie",
-            "sessionIDKey": "auth_session",
-            "xPaddingBytes": "270-1096",
-            "sessionIDTable": "Base62",
-            "xPaddingHeader": "X-Request-Token",
-            "xPaddingMethod": "tokenish",
-            "sessionIDLength": "16-32",
-            "xPaddingObfsMode": true,
-            "xPaddingPlacement": "queryInHeader",
-            "sessionIDPlacement": "cookie"
-          }
-        },
-        "realitySettings": {
-          "show": false,
-          "xver": 1,
-          "target": "/dev/shm/nginx.sock",
-          "shortIds": ["GENERATED"],
-          "privateKey": "GENERATED",
-          "serverNames": ["node.example.com"],
-          "minClientVer": "1"
-        }
-      }
-    }
-  ]
-}
-```
-
-Домен, XHTTP path, private key и short ID генерируются/подставляются автоматически.
-
----
-
-## Требования
-
-- Debian / Ubuntu;
-- root или `sudo`;
-- домен ноды с A-записью на сервер;
-- TCP/80 и TCP/443;
-- `SECRET_KEY` Remnawave Node;
-- IP сервера панели Remnawave для ограничения TCP/2222.
-
-Скрипт при необходимости устанавливает Docker, Caddy и HAProxy.
-
----
-
-## Установка
-
-Закреплённый installer snapshot:
+Новая нода:
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/152a2c1898b2404fe1843788a1c7cdfc84b27eed/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/262726dab7ee5762f751f624456d8a1830f61464/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
 ```
 
-Установщик запросит:
+Safe reinstall:
 
-1. email для Let's Encrypt;
-2. домен ноды;
-3. `SECRET_KEY`;
-4. XHTTP path — Enter создаёт случайный;
-5. IP панели для защиты TCP/2222.
+```bash
+curl -fsSL --proto '=https' --tlsv1.2 \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/c08d8d873965af4e3e88cfb38d08a1b03afc8c80/clean-install.sh \
+  -o /tmp/remna-clean-install.sh
 
-Во время интерактивного ввода `0` / `назад` отменяет текущее действие и возвращает в manager.
+sudo bash /tmp/remna-clean-install.sh
+```
 
----
+Обе команды используют immutable commit SHA. Следующий launcher проверяется по Git blob SHA; recovered NEXT source bundle — по immutable commit + Git blob SHA, а каждый входящий в него скрипт дополнительно проверяется по SHA256.
 
 ## Главное меню
 
-После установки:
+После первой синхронизации:
 
 ```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
+sudo remnanode-next
 ```
 
-Актуальное меню:
+Меню:
 
 ```text
-[1]  Полная установка
-[2]  Переустановка с нуля
-[3]  Только фронт Caddy
-[4]  Сгенерировать XHTTP-путь
-[5]  Изменить XHTTP-путь
-[6]  Обновить стрим-сайт
-[7]  Сводка настроек
-[8]  Диагностика
-[9]  Статус сервисов
-[10] Подготовить профиль XHTTP+REALITY
-[11] Переключить :443 на XHTTP+REALITY
-[12] Вернуть Caddy на :443
-[13] Профиль для копипасты (XHTTP + REALITY :443)
-[14] Repair Caddy / XHTTP / REALITY
-[15] Clean Remnanode/Caddy
-[16] Защита ноды (RKN/TSPU/GOV/GeoIP/Allow/Deny)
-[17] Закрыть TCP/2222 только для IP панели
-[18] Полный self-test инфраструктуры
-[19] РКН защита (TSPU/GOV)
-[0]  Выход
+REMNANODE NEXT — main
+
+ [1]  Установка / продолжить настройку NEXT
+ [2]  Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)
+ [3]  Профили для копипасты в Remnawave
+ [4]  SelfSteal / маскировочный сайт
+ [5]  XHTTP signature
+ [6]  РКН защита — SAFE scanner guard
+ [7]  Runtime repair / guards
+ [8]  Базовое управление Remnanode
+ [9]  Статус
+ [10] Safe clean текущей ноды
+ [11] Safe reinstall
+ [0]  Выход
 ```
 
----
+RKN снова находится непосредственно в основном меню NEXT.
 
-## Config Profile для копипасты
+## Транспортные профили
 
-Сначала подготовить профиль:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-prepare
-```
-
-Потом вывести готовый JSON прямо в терминал:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh config-profile
-```
-
-Или выбрать **пункт 13**.
-
-Вывод — это полный:
-
-```json
-{
-  "inbounds": [
-    ...
-  ]
-}
-```
-
-Его можно целиком копировать в Remnawave Config Profile.
-
-Файл на диске:
+Пункт 2 использует восстановленный `remnawave-transport-manager.sh`:
 
 ```text
-/opt/remnanode/reality/inbounds-ready.json
+1) VLESS + REALITY + XHTTP (основной)
+2) VLESS + REALITY + RAW (fallback)
+3) Hysteria2 + TLS (UDP)
+4) XHTTP + Hysteria2 одновременно (TCP/443 + UDP/443)
 ```
 
-Внутренний объект:
+Профили сохраняются в:
 
 ```text
-/opt/remnanode/reality/xhttp-reality-inbound.json
+/opt/remnanode/remnawave-profiles/xhttp-reality.json
+/opt/remnanode/remnawave-profiles/raw-reality.json
+/opt/remnanode/remnawave-profiles/hysteria2-tls.json
+/opt/remnanode/remnawave-profiles/xhttp-hysteria2.json
 ```
 
-**Важно:** JSON содержит REALITY private key. Не публикуйте его.
+Пункт 3 основного меню печатает выбранный **полный JSON прямо в терминал для копипасты в Remnawave**.
 
----
+JSON XHTTP/REALITY содержит private key — не публикуйте его.
 
-## Как работает self-steal
+### Hysteria2: совместимость с рабочим Xray/Remnawave профилем
 
-В Config Profile используется:
+Recovered snapshot генерировал Hysteria2 близко к правильному варианту, но не полностью совпадал с рабочим клиентским профилем Remnawave/Xray.
+
+На runtime перед установкой transport-manager автоматически применяется compatibility patch:
+
+- server inbound использует `settings.clients: []` — именно этот массив Remnawave заполняет per-user `auth`;
+- `network: hysteria`, `security: tls`, `version: 2`, UDP/443 и ALPN `h3`;
+- добавляется `finalmask.quicParams.congestion = brutal`;
+- в подсказку Host явно выводится `streamOverrides.finalMask = {"quicParams":{"congestion":"brutal"}}`;
+- Hysteria `auth` не хардкодится в Config Profile: Remnawave получает его из UUID пользователя и генерирует клиентский `hysteriaSettings.auth`.
+
+Рабочая пара выглядит так:
 
 ```text
-"target": "/dev/shm/nginx.sock"
-"xver": 1
+SERVER CONFIG PROFILE
+  protocol=hysteria
+  settings.clients=[]
+  network=hysteria
+  security=tls
+  alpn=h3
+  finalmask.quicParams.congestion=brutal
+
+REMNAWAVE HOST / CLIENT
+  address=<node domain>
+  port=443
+  hysteriaSettings.version=2
+  hysteriaSettings.auth=<UUID пользователя>
+  tlsSettings.serverName=<node domain>
+  tlsSettings.alpn=[h3]
+  finalmask.quicParams.congestion=brutal
 ```
 
-Для этого скрипт создаёт host socket:
+`masquerade` остаётся серверной настройкой и не обязан присутствовать в клиентском JSON.
+
+## Рабочая архитектура
 
 ```text
-/dev/shm/remna-reality/nginx.sock
+                       rw-core
+
+TCP/443  ───────► XHTTP + REALITY
+                       │
+                       │ target=/dev/shm/nginx.sock
+                       ▼
+                 remnawave-nginx
+                 SelfSteal / mask
+
+UDP/443  ───────► Hysteria2 + TLS/QUIC
 ```
 
-Каталог `/dev/shm/remna-reality` bind-mount'ится в контейнер Remnanode как `/dev/shm`, поэтому для rw-core тот же socket виден как:
+Remnanode и Nginx используют общий `/dev/shm`. Это та схема, которая была снята с рабочей NEXT-ноды.
+
+**Отдельный Caddy → 127.0.0.1:7443 pipeline не является основной NEXT-архитектурой.**
+
+## RKN SAFE
+
+Пункт 6:
 
 ```text
-/dev/shm/nginx.sock
+RKN WATCHER — SAFE SCANNER MODE
+
+1) Установить / обновить SAFE scanner protection
+2) Активировать / пере-применить guard с rollback 120 сек
+3) Обновить scanner lists сейчас
+4) Статус
+5) ADVANCED upstream menu
+6) Полностью удалить RKN Watcher
+0) Назад
 ```
 
-Отдельный systemd unit:
+SAFE guard защищает TCP/80, TCP/443 и UDP/443 от известных scanner IP. При активации используется rollback и last-good проверка, чтобы не заменить рабочий набор повреждённым.
+
+## Safe clean / reinstall
+
+Top-level NEXT manager **не вызывает legacy uninstall**, потому что старый uninstall умеет делать глобальный `ufw reset`.
+
+Перед clean/reinstall сохраняются важные настройки, профили, сертификаты и секреты в root-only backup:
 
 ```text
-remna-reality-fallback.service
+/root/remnanode-next-backup-YYYYMMDD-HHMMSS.tar.gz
 ```
 
-запускает HAProxy. Он принимает PROXY protocol от REALITY `xver=1` на Unix socket и передаёт TLS в Caddy:
+Удаляются только известные компоненты текущей Remnanode/NEXT установки. Docker как пакет, SSH, DNS, default route и чужие контейнеры не удаляются.
+
+## Восстановленный source snapshot
+
+Source NEXT хранится внутри этого репозитория:
 
 ```text
-127.0.0.1:8443
+vendor/remna-next-source.tar.gz
 ```
 
-До активации профиля Caddy держит публичный TCP/443. После того как rw-core занимает TCP/443, topology guard переводит Caddy на локальный 8443.
-
----
-
-## РКН защита
-
-В главное меню вынесен отдельный пункт:
+Манифест и контрольные суммы:
 
 ```text
-[19] РКН защита (TSPU/GOV)
+NEXT_SOURCE_MANIFEST.md
 ```
 
-Подменю:
+В bundle входят:
 
 ```text
-[1] Включить / установить RKN-защиту
-[2] Обновить TSPU/GOV списки сейчас
-[3] Статус RKN-защиты
-[4] Выключить TSPU/GOV фильтрацию
-[0] Назад
+next-installer/setup_node-legacy.sh
+next-installer/remnawave-transport-manager.sh
+next-installer/selfsteal-site-manager.sh
+next-installer/rkn-watcher-manager.sh
+next-installer/next-runtime-guards.sh
+next-installer/xhttp-signature-manager.sh
 ```
 
-CLI:
+В recovered bundle байт-в-байт сохранены также `docker-compose.yml` и `nginx.conf` с рабочей ноды как эталон архитектуры. Installer их из bundle **не устанавливает**: для runtime используются штатные NEXT-функции. `.env`, сертификаты и приватные ключи в bundle отсутствуют.
 
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh rkn
-```
+### Известный хвост recovered snapshot
 
-По умолчанию TSPU/GOV применяются к TCP/443. Выключение RKN-фильтрации не удаляет отдельную защиту Node API TCP/2222.
+В восстановленном SelfSteal manager режим STREAM всё ещё содержит pinned URL старого `setup-remna-node`, который сейчас недоступен через GitHub. Свежая установка по умолчанию использует RANDOM/template SelfSteal и от этого URL не зависит. STREAM нужно отдельно перевендорить из рабочей копии сайта; это не причина возвращать legacy Caddy-manager в основную цепочку.
 
----
+## Legacy Caddy manager
 
-## Защита Node API TCP/2222
-
-Порт 2222 должен быть разрешён только серверу панели.
-
-Задать IP панели:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh panel-set 203.0.113.10
-```
-
-Полное меню firewall:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protection
-```
-
-Подробности: [PROTECTION.md](./PROTECTION.md).
-
----
-
-## Диагностика
-
-Статус:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh status
-```
-
-Read-only диагностика:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh diagnose
-```
-
-Полный self-test:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh selftest
-```
-
-Repair трафикового тракта:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh repair
-```
-
-Repair и self-test — разные механизмы:
-
-| Команда | Назначение |
-|---|---|
-| `repair` | Caddy, сайт, профиль XHTTP+REALITY, TCP/443, self-steal |
-| `selftest` | compose, SECRET_KEY, NET_ADMIN, firewall, TCP/2222, systemd, topology |
-
----
-
-## Порты и endpoints
-
-| Endpoint | Назначение |
-|---|---|
-| TCP/80 | ACME / HTTP |
-| TCP/443 | единый rw-core XHTTP+REALITY inbound после активации |
-| TCP/2222 | Remnawave Node API, только IP панели |
-| 127.0.0.1:8443 | Caddy fallback за REALITY |
-| /dev/shm/nginx.sock | REALITY self-steal target внутри Remnanode |
-
-**Отдельного XHTTP backend-порта в этой схеме нет.**
-
----
-
-## Основные файлы
-
-| Файл | Назначение |
-|---|---|
-| `install.sh` | установка |
-| `clean-install.sh` | clean reinstall |
-| `full-clean-reinstall.sh` | проверяемый launcher |
-| `install-caddy-node-reality-stream.sh` | основной manager |
-| `install-caddy-node-reality-stream-core.sh` | установка и генерация профиля |
-| `protection-manager.sh` | TCP/2222, RKN/TSPU/GOV, GeoIP, allow/deny |
-| `caddy-resilient-start.sh` | Caddy topology guard |
-
----
-
-## Supply-chain
-
-Launcher-цепочка использует immutable commit SHA + Git blob SHA:
+Эти файлы сохранены только для старых нод:
 
 ```text
-install.sh / clean-install.sh
-  -> pinned full-clean-reinstall.sh
-      -> pinned manager
-          -> pinned core / protection / Caddy guard
+install-caddy-node-reality-stream.sh
+install-caddy-node-reality-stream-core.sh
+caddy-resilient-start.sh
+protection-manager.sh
 ```
 
-CI дополнительно проверяет:
+Они **не являются main installer**.
 
-- Bash syntax;
-- shellcheck;
-- pin-chain;
-- отсутствие старой схемы с отдельным XHTTP backend-портом;
-- обязательный XHTTP+REALITY профиль на `0.0.0.0:443`;
-- `mode:auto`;
-- `target=/dev/shm/nginx.sock`;
-- наличие RKN-пункта в основном меню;
-- защиту manager от перезаписи core.
+## История восстановления
 
----
+Последний корректный main до архитектурной ошибки: `cf8c8f5910b1bbd56364b99a457f2b999c743119`.
 
-## Что репозиторий не устанавливает
-
-- Remnawave Panel;
-- 3x-ui;
-- Telemt.
-
-Также скрипт не делает глобальный `ufw reset` и не должен трогать чужие Docker-сервисы.
+В `42d7d662c1f11b4705c8bfba3c74839ce98d669a` launcher был ошибочно переключён с NEXT на legacy Caddy-manager. Текущая ветка восстанавливает исходную роль NEXT, но хранит recovered source внутри этого репозитория, чтобы больше не зависеть от исчезнувшего внешнего `setup-remna-node`.

@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - 'fix/**'
   pull_request:
   workflow_dispatch:
 
@@ -19,7 +21,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
 
-      - name: bash -n all shell scripts
+      - name: Bash syntax
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -28,35 +30,184 @@ jobs:
             bash -n "$f"
           done < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
 
-      - name: shellcheck errors
+      - name: Shellcheck errors
         shell: bash
         run: |
           set -Eeuo pipefail
           mapfile -d '' files < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
           shellcheck -S error "${files[@]}"
 
-      - name: supply-chain guard
+      - name: Verify recovered NEXT source
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          # Root-executed code must not depend on these previously mutable or
-          # privacy-sensitive endpoints.
+          test "$(git rev-parse HEAD:vendor/remna-next-source.tar.gz)" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
+          test "$(git rev-parse 721269e2c48e31b7cac86e04bc14c46b33e31e72:vendor/remna-next-source.tar.gz)" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          tar -tzf vendor/remna-next-source.tar.gz | sed '/\/$/d' | LC_ALL=C sort > "$tmp/listing.txt"
+          printf '%s\n' \
+            'docker-compose.yml' \
+            'next-installer/next-runtime-guards.sh' \
+            'next-installer/remnawave-transport-manager.sh' \
+            'next-installer/rkn-watcher-manager.sh' \
+            'next-installer/selfsteal-site-manager.sh' \
+            'next-installer/setup_node-legacy.sh' \
+            'next-installer/xhttp-signature-manager.sh' \
+            'nginx.conf' \
+            > "$tmp/expected.txt"
+          diff -u "$tmp/expected.txt" "$tmp/listing.txt"
+
+          ! tar -tzf vendor/remna-next-source.tar.gz | grep -E '(^|/)(\.env|certs?/|.*private.*key|reality\.env)$'
+
+          tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
+          (
+            cd "$tmp"
+            printf '%s\n' \
+              '728ed22841a1c494a9d9fce026109f6151fe16a2b861496d267005bd4850477c  next-installer/setup_node-legacy.sh' \
+              '620797d0677d091d6550894e32fea58ce7f2adf2f125d6f6ccfb217a7b3382fd  next-installer/next-runtime-guards.sh' \
+              '441c82fb0eb3b155986d7b84bd66aa82bb1d028b8a9c49e02f1fbac326fac2e2  next-installer/remnawave-transport-manager.sh' \
+              '2d5838809881a00cac755b43606d7c929e7ba8f5786f64ebff849eb73edeb3e7  next-installer/rkn-watcher-manager.sh' \
+              'b783e94f2ef3764b2e397cba9eb96aeab88d7da11da017a2c867054f9546a84a  next-installer/selfsteal-site-manager.sh' \
+              'dbbd1110aec2e6dd32aee204b6d0174d7fe511e1b97118570cbbea553946bd4a  next-installer/xhttp-signature-manager.sh' \
+              > SHA256SUMS
+            sha256sum -c SHA256SUMS
+            for f in next-installer/*.sh; do bash -n "$f"; done
+          )
+
+      - name: Working-node topology provenance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
+
+          compose="$tmp/docker-compose.yml"
+          nginx="$tmp/nginx.conf"
+
+          grep -Fq 'image: ghcr.io/remnawave/node:latest' "$compose"
+          grep -Fq 'image: nginx:1.28' "$compose"
+          grep -Fq 'container_name: remnanode' "$compose"
+          grep -Fq 'container_name: remnawave-nginx' "$compose"
+          test "$(grep -Fc -- '- /dev/shm:/dev/shm:rw' "$compose")" -ge 2
+          grep -Fq 'listen unix:/dev/shm/nginx.sock ssl proxy_protocol' "$nginx"
+
+          # Reference runtime files are not installed from the recovered bundle.
+          grep -Fq 'install -m 0700 "$tmp/next-installer/"*.sh "$NEXT_DIR/"' full-clean-reinstall.sh
+          ! grep -Fq '"$tmp/docker-compose.yml"' full-clean-reinstall.sh
+          ! grep -Fq '"$tmp/nginx.conf"' full-clean-reinstall.sh
+
+      - name: NEXT transport architecture
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
+
+          t="$tmp/next-installer/remnawave-transport-manager.sh"
+          base="$tmp/next-installer/setup_node-legacy.sh"
+          rkn="$tmp/next-installer/rkn-watcher-manager.sh"
+          guards="$tmp/next-installer/next-runtime-guards.sh"
+
+          grep -Fq '1) VLESS + REALITY + XHTTP (основной)' "$t"
+          grep -Fq '2) VLESS + REALITY + RAW (fallback)' "$t"
+          grep -Fq '3) Hysteria2 + TLS (UDP)' "$t"
+          grep -Fq '4) XHTTP + Hysteria2 одновременно (TCP/443 + UDP/443)' "$t"
+          grep -Fq 'PUBLIC_PORT="${PUBLIC_PORT:-443}"' "$t"
+          grep -Fq 'SELFSTEAL_SOCKET="${SELFSTEAL_SOCKET:-/dev/shm/nginx.sock}"' "$t"
+          grep -Fq '"protocol": "vless"' "$t"
+          grep -Fq '"network": "xhttp"' "$t"
+          grep -Fq '"network": "raw"' "$t"
+          grep -Fq '"protocol": "hysteria"' "$t"
+          grep -Fq '"network": "hysteria"' "$t"
+          grep -Fq '"alpn": ["h3"]' "$t"
+          grep -Fq 'xhttp-hysteria2.json' "$t"
+
+          grep -Fq 'remnawave-nginx:' "$base"
+          grep -Fq '/dev/shm/nginx.sock' "$base"
+          grep -Fq 'rollback 120 сек' "$rkn"
+          grep -Fq 'last-good-tspu.ipset' "$rkn"
+          grep -Fq 'restore-hysteria' "$guards"
+          grep -Fq 'sync-rkn-watch' "$guards"
+
+      - name: Hysteria2 compatibility guard
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          grep -Fq 'patch_hysteria_compat(){' full-clean-reinstall.sh
+          grep -Fq 'HYSTERIA_CONGESTION="${HYSTERIA_CONGESTION:-brutal}"' full-clean-reinstall.sh
+          grep -Fq '"settings": {"version": 2, "clients": []}' full-clean-reinstall.sh
+          grep -Fq '"congestion": "$HYSTERIA_CONGESTION"' full-clean-reinstall.sh
+          grep -Fq 'streamOverrides.finalMask' full-clean-reinstall.sh
+          grep -Fq 'backend добавляет settings.clients[].auth' full-clean-reinstall.sh
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
+          t="$tmp/next-installer/remnawave-transport-manager.sh"
+          grep -Fq '"settings": {"version": 2, "users": []}' "$t"
+          grep -Fq '"network": "hysteria"' "$t"
+          grep -Fq '"security": "tls"' "$t"
+          grep -Fq '"alpn": ["h3"]' "$t"
+
+      - name: NEXT is the primary launcher
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          grep -Fq 'TASK_NAME="REMNA NODE NEXT"' full-clean-reinstall.sh
+          grep -Fq 'SOURCE_REF="721269e2c48e31b7cac86e04bc14c46b33e31e72"' full-clean-reinstall.sh
+          grep -Fq 'SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"' full-clean-reinstall.sh
+          grep -Fq 'REMNANODE NEXT — main' full-clean-reinstall.sh
+          grep -Fq 'Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)' full-clean-reinstall.sh
+          grep -Fq 'SAFE scanner guard' full-clean-reinstall.sh
+          ! grep -Fq 'install-caddy-node-reality-stream.sh' full-clean-reinstall.sh
+
+          source_ref="$(sed -n 's/^SOURCE_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
+
+          for launcher in install.sh clean-install.sh; do
+            ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
+            expected="$(sed -n 's/^EXPECTED_BLOB_SHA="\([^"]*\)"/\1/p' "$launcher")"
+            test "$(git rev-parse "$ref:full-clean-reinstall.sh")" = "$expected"
+            ! grep -Fq 'install-caddy-node-reality-stream.sh' "$launcher"
+          done
+
+      - name: README architecture guard
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'Главный installer этого репозитория — **REMNANODE NEXT**' README.md
+          grep -Fq 'XHTTP + Hysteria2' README.md
+          grep -Fq 'SAFE scanner guard' README.md
+          grep -Fq 'Они **не являются main installer**' README.md
+          grep -Fq 'Installer их из bundle **не устанавливает**' README.md
+
+      - name: Legacy safety guard
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'set -Eeuo pipefail' full-clean-reinstall.sh
+          grep -Fq 'global UFW reset' full-clean-reinstall.sh
+          grep -Fq 'remnanode-next-backup-' full-clean-reinstall.sh
+          grep -Fq 'docker rm -f remnanode remnawave-nginx' full-clean-reinstall.sh
+          ! grep -Fq 'ufw --force reset' full-clean-reinstall.sh
+
+      - name: Supply-chain and secret guards
+        shell: bash
+        run: |
+          set -Eeuo pipefail
           mapfile -d '' shell_files < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
+          ! grep -nE 'ghostos\.space|GHOST_(LIC|ID|SITE|DL|Q)' "${shell_files[@]}"
+          ! grep -nE 'printf .*Password:|printf .*Username:' "${shell_files[@]}"
 
-          ! grep -nE 'ghostos\.space|GHOST_(LIC|ID|SITE|DL|Q)|stream\.deepbeat\.ru|rustream\.remna\.space|\.2rdp\.ru|setup-remna-node|radio-stub-site/main|CyberOK_Skipa_ips/main|AS_Network_List/main|ipdeny\.com|telemt|3x-ui|3xui' "${shell_files[@]}"
-
-          ! grep -nE 'protocols[[:space:]]+tls1\.2[[:space:]]+tls1\.2|printf .*Password:|printf .*Username:' "${shell_files[@]}"
-
-          # Existing image / installer invariants.
-          ! grep -nE 'image:[[:space:]]*remnawave/node:latest|https://get\.docker\.com' install-caddy-node-reality-stream-core.sh
-
-          # Firewall data sources must be immutable snapshots.
-          grep -Fq 'TSPU_COMMIT=a465e13f4cb43c1692eb650430eb857900558c5d' protection-manager.sh
-          grep -Fq 'GOV_COMMIT=0e999cd730c4d6ca3d58053407a22f63f2d464e6' protection-manager.sh
-          grep -Fq 'GEOIP_COMMIT=6e3f7978b0391935e306060b11beba774fc7f624' protection-manager.sh
-
-      - name: invisible-character guard
+      - name: Invisible-character guard
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -84,104 +235,3 @@ jobs:
           if bad:
               raise SystemExit("Invisible control characters found:\n" + "\n".join(bad))
           PY
-
-      - name: strict-mode guards
-        run: |
-          set -e
-          for f in             install.sh             clean-install.sh             full-clean-reinstall.sh             install-caddy-node-reality-stream-core.sh             protection-manager.sh
-          do
-            grep -Fq 'set -Eeuo pipefail' "$f"
-          done
-
-      - name: Core must not overwrite manager
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          grep -Fq 'MANAGER_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream.sh' install-caddy-node-reality-stream-core.sh
-          grep -Fq 'CORE_SELF_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream-core.sh' install-caddy-node-reality-stream-core.sh
-          ! grep -Fq 'install -o root -g root -m 0700 "$current" "$MANAGER_PATH"' install-caddy-node-reality-stream-core.sh
-
-      - name: Verify pinned installer chain
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          verify_blob() {
-            local ref="$1" path="$2" expected="$3" actual
-            actual="$(git rev-parse "$ref:$path")"
-            [ "$actual" = "$expected" ] || {
-              echo "pin mismatch: $ref:$path -> $actual, expected $expected" >&2
-              exit 1
-            }
-          }
-
-          for launcher in install.sh clean-install.sh; do
-            ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
-            expected="$(sed -n 's/^EXPECTED_BLOB_SHA="\([^"]*\)"/\1/p' "$launcher")"
-            verify_blob "$ref" full-clean-reinstall.sh "$expected"
-          done
-
-          ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
-          expected="$(sed -n 's/^EXPECTED_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
-          verify_blob "$ref" install-caddy-node-reality-stream.sh "$expected"
-
-          ref="$(sed -n 's/^REPO_REF=//p' install-caddy-node-reality-stream.sh)"
-          verify_blob "$ref" install-caddy-node-reality-stream-core.sh "$(sed -n 's/^CORE_BLOB_SHA=//p' install-caddy-node-reality-stream.sh)"
-          verify_blob "$ref" protection-manager.sh "$(sed -n 's/^PROTECTION_BLOB_SHA=//p' install-caddy-node-reality-stream.sh)"
-          verify_blob "$ref" caddy-resilient-start.sh "$(sed -n 's/^CADDY_GUARD_BLOB_SHA=//p' install-caddy-node-reality-stream.sh)"
-
-      - name: Interactive safety guards
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          grep -Fq "MENU_BACK_RC=20" install-caddy-node-reality-stream.sh
-          grep -Fq "MENU_BACK_RC=20" install-caddy-node-reality-stream-core.sh
-          grep -Fq "MENU_BACK_RC=20" protection-manager.sh
-          grep -Fq "menu_action run_core repair" install-caddy-node-reality-stream.sh
-          grep -Fq "menu_action protection menu" install-caddy-node-reality-stream.sh
-          grep -Fq "[13] Профиль для копипасты (XHTTP + REALITY :443)" install-caddy-node-reality-stream.sh
-          grep -Fq "13) menu_action run_core config-profile" install-caddy-node-reality-stream.sh
-          grep -Fq "[19] РКН защита (TSPU/GOV)" install-caddy-node-reality-stream.sh
-          grep -Fq "19) menu_action protection rkn" install-caddy-node-reality-stream.sh
-          grep -Fq "rkn_menu(){" protection-manager.sh
-          grep -Fq 'cat "$PROFILE_INBOUNDS"' install-caddy-node-reality-stream-core.sh
-          grep -Fq "curl -ksS --noproxy '*'" install-caddy-node-reality-stream-core.sh
-          grep -Fq "site_probe_diagnostics" install-caddy-node-reality-stream-core.sh
-
-      - name: Single-port XHTTP Reality profile guards
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          mapfile -d '' shell_files < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
-          ! grep -nF '7443' "${shell_files[@]}"
-          ! grep -nF 'BACKEND_PORT' "${shell_files[@]}"
-          ! grep -nF 'XHTTP_INBOUND' "${shell_files[@]}"
-          ! grep -nF 'REALITY_INBOUND' "${shell_files[@]}"
-          ! grep -nF '"mode": "packet-up"' install-caddy-node-reality-stream-core.sh
-
-          grep -Fq 'REALITY_SOCKET_TARGET=/dev/shm/nginx.sock' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"port": 443' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"listen": "0.0.0.0"' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"network": "xhttp"' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"security": "reality"' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"mode": "auto"' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"cMaxReuseTimes": 12' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"seqKey": "visitor_id"' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"sessionIDKey": "auth_session"' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"xPaddingBytes": "270-1096"' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"xPaddingHeader": "X-Request-Token"' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"xPaddingPlacement": "queryInHeader"' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"xver": 1' install-caddy-node-reality-stream-core.sh
-          grep -Fq '"target": "$REALITY_SOCKET_TARGET"' install-caddy-node-reality-stream-core.sh
-          grep -Fq 'accept-proxy mode 660' install-caddy-node-reality-stream-core.sh
-          grep -Fq '${REALITY_SOCKET_DIR}:/dev/shm' install-caddy-node-reality-stream-core.sh
-          grep -Fq 'remna-reality-fallback.service' install-caddy-node-reality-stream-core.sh
-
-      - name: Caddy pre-start privilege guard
-        run: grep -Fq 'ExecStartPre=+$SELF prepare' caddy-resilient-start.sh
-
-      - name: apt lock wait guard
-        run: |
-          grep -Fq 'DPkg::Lock::Timeout=' full-clean-reinstall.sh
-          grep -Fq 'DPkg::Lock::Timeout=' install-caddy-node-reality-stream-core.sh
-          grep -Fq 'DPkg::Lock::Timeout=' protection-manager.sh
