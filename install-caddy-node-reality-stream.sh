@@ -598,9 +598,9 @@ Remna Node Manager — safe mode
  [7]  Сводка настроек
  [8]  Диагностика
  [9]  Статус сервисов
- [10] Подготовить REALITY
- [11] Включить REALITY
- [12] Отключить REALITY
+ [10] Подготовить профиль XHTTP+REALITY
+ [11] Переключить :443 на XHTTP+REALITY
+ [12] Вернуть Caddy на :443
  [13] Профиль для копипасты (XHTTP + REALITY :443)
  [14] Repair Caddy / XHTTP / REALITY
  [15] Clean Remnanode/Caddy
