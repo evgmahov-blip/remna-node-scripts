@@ -78,6 +78,29 @@ jobs:
             for f in next-installer/*.sh; do bash -n "$f"; done
           )
 
+      - name: Verify Hysteria2 overlay
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          t=next-installer/remnawave-transport-manager.sh
+          test "$(git rev-parse HEAD:$t)" = "dbb3a99a9c2a1f442c9e0e19fbebf3ec9d6d871f"
+          test "$(git rev-parse 5d022cef3efd046844445c06a1d1ba387359c2c8:$t)" = "dbb3a99a9c2a1f442c9e0e19fbebf3ec9d6d871f"
+
+          grep -Fq 'HYSTERIA_CONGESTION="${HYSTERIA_CONGESTION:-brutal}"' "$t"
+          grep -Fq '"settings": {"version": 2, "clients": []}' "$t"
+          grep -Fq '"congestion": "$HYSTERIA_CONGESTION"' "$t"
+          grep -Fq 'verify_hysteria_profile_shape(){' "$t"
+          grep -Fq 'hysteriaSettings.auth=<UUID пользователя>' "$t"
+          grep -Fq 'Final Mask JSON:' "$t"
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
+          raw="$tmp/next-installer/remnawave-transport-manager.sh"
+          grep -Fq '"settings": {"version": 2, "users": []}' "$raw"
+          ! grep -Fq 'verify_hysteria_profile_shape(){' "$raw"
+
       - name: Working-node topology provenance
         shell: bash
         run: |
@@ -96,7 +119,6 @@ jobs:
           test "$(grep -Fc -- '- /dev/shm:/dev/shm:rw' "$compose")" -ge 2
           grep -Fq 'listen unix:/dev/shm/nginx.sock ssl proxy_protocol' "$nginx"
 
-          # Reference runtime files are not installed from the recovered bundle.
           grep -Fq 'install -m 0700 "$tmp/next-installer/"*.sh "$NEXT_DIR/"' full-clean-reinstall.sh
           ! grep -Fq '"$tmp/docker-compose.yml"' full-clean-reinstall.sh
           ! grep -Fq '"$tmp/nginx.conf"' full-clean-reinstall.sh
@@ -109,7 +131,7 @@ jobs:
           trap 'rm -rf "$tmp"' EXIT
           tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
 
-          t="$tmp/next-installer/remnawave-transport-manager.sh"
+          t=next-installer/remnawave-transport-manager.sh
           base="$tmp/next-installer/setup_node-legacy.sh"
           rkn="$tmp/next-installer/rkn-watcher-manager.sh"
           guards="$tmp/next-installer/next-runtime-guards.sh"
@@ -125,7 +147,9 @@ jobs:
           grep -Fq '"network": "raw"' "$t"
           grep -Fq '"protocol": "hysteria"' "$t"
           grep -Fq '"network": "hysteria"' "$t"
+          grep -Fq '"security": "tls"' "$t"
           grep -Fq '"alpn": ["h3"]' "$t"
+          grep -Fq '"finalmask": {' "$t"
           grep -Fq 'xhttp-hysteria2.json' "$t"
 
           grep -Fq 'remnawave-nginx:' "$base"
@@ -135,28 +159,7 @@ jobs:
           grep -Fq 'restore-hysteria' "$guards"
           grep -Fq 'sync-rkn-watch' "$guards"
 
-      - name: Hysteria2 compatibility guard
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          grep -Fq 'patch_hysteria_compat(){' full-clean-reinstall.sh
-          grep -Fq 'HYSTERIA_CONGESTION="${HYSTERIA_CONGESTION:-brutal}"' full-clean-reinstall.sh
-          grep -Fq '"settings": {"version": 2, "clients": []}' full-clean-reinstall.sh
-          grep -Fq '"congestion": "$HYSTERIA_CONGESTION"' full-clean-reinstall.sh
-          grep -Fq 'streamOverrides.finalMask' full-clean-reinstall.sh
-          grep -Fq 'backend добавляет settings.clients[].auth' full-clean-reinstall.sh
-
-          tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
-          tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
-          t="$tmp/next-installer/remnawave-transport-manager.sh"
-          grep -Fq '"settings": {"version": 2, "users": []}' "$t"
-          grep -Fq '"network": "hysteria"' "$t"
-          grep -Fq '"security": "tls"' "$t"
-          grep -Fq '"alpn": ["h3"]' "$t"
-
-      - name: NEXT is the primary launcher
+      - name: NEXT launcher pin chain
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -164,13 +167,18 @@ jobs:
           grep -Fq 'TASK_NAME="REMNA NODE NEXT"' full-clean-reinstall.sh
           grep -Fq 'SOURCE_REF="721269e2c48e31b7cac86e04bc14c46b33e31e72"' full-clean-reinstall.sh
           grep -Fq 'SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"' full-clean-reinstall.sh
+          grep -Fq 'HYSTERIA_OVERLAY_REF="5d022cef3efd046844445c06a1d1ba387359c2c8"' full-clean-reinstall.sh
+          grep -Fq 'HYSTERIA_OVERLAY_BLOB_SHA="dbb3a99a9c2a1f442c9e0e19fbebf3ec9d6d871f"' full-clean-reinstall.sh
           grep -Fq 'REMNANODE NEXT — main' full-clean-reinstall.sh
           grep -Fq 'Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)' full-clean-reinstall.sh
           grep -Fq 'SAFE scanner guard' full-clean-reinstall.sh
+          ! grep -Fq 'patch_hysteria_compat(){' full-clean-reinstall.sh
           ! grep -Fq 'install-caddy-node-reality-stream.sh' full-clean-reinstall.sh
 
           source_ref="$(sed -n 's/^SOURCE_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          overlay_ref="$(sed -n 's/^HYSTERIA_OVERLAY_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
+          test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "dbb3a99a9c2a1f442c9e0e19fbebf3ec9d6d871f"
 
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
@@ -186,6 +194,8 @@ jobs:
           grep -Fq 'Главный installer этого репозитория — **REMNANODE NEXT**' README.md
           grep -Fq 'XHTTP + Hysteria2' README.md
           grep -Fq 'SAFE scanner guard' README.md
+          grep -Fq 'settings.clients: []' README.md
+          grep -Fq 'finalmask.quicParams.congestion: brutal' README.md
           grep -Fq 'Они **не являются main installer**' README.md
           grep -Fq 'Installer их из bundle **не устанавливает**' README.md
 
