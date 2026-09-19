@@ -1,11 +1,11 @@
 # Recovered REMNANODE NEXT source snapshot
 
 Source: known-good running node snapshot supplied 2026-09-19.
-Runtime-specific docker-compose.yml, nginx.conf, secrets, certificates and domain data are intentionally NOT vendored.
+The recovered archive is stored byte-for-byte. It includes the working node docker-compose.yml and nginx.conf only as provenance/reference. The installer never copies those two files from the bundle. Secrets, .env and certificates are not included.
 
 Bundle:
-- source commit: `d0113fb15d1c332e12b13ce547d31d7711dec337`
-- Git blob SHA: `43f83602f43f450c0c7e6df15f97b908e39037c8`
+- source commit: `721269e2c48e31b7cac86e04bc14c46b33e31e72`
+- Git blob SHA: `51a91d5745d0bea9b03eefeeaac52677fcf56b60`
 - path: `vendor/remna-next-source.tar.gz`
 
 The bundle itself is verified by immutable commit + Git blob SHA. Individual recovered scripts are additionally verified by SHA256 below.
