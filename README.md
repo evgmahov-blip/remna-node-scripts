@@ -64,7 +64,7 @@ Docker и Caddy при необходимости устанавливаются
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/7c9ab91eb62bb96c0dd35d089806a5afe21968c0/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/caba7bce5db9d2bc35b82a1abae4df5456c14758/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -117,17 +117,31 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh summary
 
 ## Главное меню
 
-После первой установки manager сохраняется сюда:
+Пользовательское меню находится **только во внешнем manager**:
 
 ```text
 /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 ```
 
-Запуск меню:
+Запуск:
 
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 ```
+
+Нормальное меню manager содержит **18 пунктов**. Файл `install-caddy-node-reality-stream-core.sh` — внутренний helper; его меню предназначено для отладки core и вручную его запускать не нужно.
+
+Если вместо 18 пунктов показывается внутреннее меню core на 14 пунктов, восстановите manager проверяемым launcher:
+
+```bash
+curl -fsSL --proto '=https' --tlsv1.2 \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/caba7bce5db9d2bc35b82a1abae4df5456c14758/full-clean-reinstall.sh \
+  -o /tmp/remna-restore-manager.sh
+
+sudo bash /tmp/remna-restore-manager.sh menu
+```
+
+Эта команда не делает reinstall: она загружает проверенный manager, восстанавливает его в `/opt/remna-node-scripts/` и открывает меню.
 
 В меню доступны:
 
@@ -245,7 +259,7 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protect-instal
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/7c9ab91eb62bb96c0dd35d089806a5afe21968c0/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/caba7bce5db9d2bc35b82a1abae4df5456c14758/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
