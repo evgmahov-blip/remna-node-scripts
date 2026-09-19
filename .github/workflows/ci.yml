@@ -188,6 +188,8 @@ jobs:
           grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
           grep -Fq 'exec bash "$TMP" migrate-existing' clean-install.sh
           grep -Fq 'exec bash "$TMP" install' install.sh
+          ! grep -Fq 'Для продолжения введи MIGRATE' full-clean-reinstall.sh
+          ! grep -Fq 'read -r answer < "$TTY"' <(sed -n '/run_existing_node_v2(){/,/^}/p' full-clean-reinstall.sh)
 
       - name: NEXT launcher pin chain
         shell: bash
@@ -235,6 +237,7 @@ jobs:
           grep -Fq 'NEXT V2 migration' README.md
           grep -Fq 'существующая/legacy нода' README.md
           grep -Fq '/root/remna-node-v2-backups/' README.md
+          grep -Fq 'Дополнительное подтверждение `MIGRATE` не требуется' README.md
 
       - name: Legacy safety guard
         shell: bash
