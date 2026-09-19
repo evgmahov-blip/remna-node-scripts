@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ============================================================================
 #  version: r9
-#  install-caddy-node-reality-stream.sh — Caddy + стрим-сайт для основной
-#  XHTTP-ноды за Beeline CDN и подготовка второго VLESS RAW REALITY Vision
-#  на том же внешнем TCP/443. Опционально поднимает Remnanode. Caddy выбирает
-#  режим по фактическому владельцу TCP/443: rw-core на :443 → локальный
-#  127.0.0.1:8443, rw-core нет → публичный :443.
+#  install-caddy-node-reality-stream.sh — Remnawave Node + единый
+#  VLESS XHTTP+REALITY inbound на внешнем TCP/443 и Caddy self-steal fallback.
+#  До применения профиля Caddy держит :443. После старта rw-core Caddy
+#  переводится на 127.0.0.1:8443, а REALITY target /dev/shm/nginx.sock
+#  проходит через локальный L4 fallback-proxy к Caddy.
 #
 #  Запуск без аргументов открывает МЕНЮ. Также доступны подкоманды:
 #    install | --auto   полная установка (нода по SECRET_KEY + Caddy)
@@ -35,19 +35,22 @@
 set -Eeuo pipefail
 
 # ── Порты (фиксированные для метода) ─────────────────────────────────────────
-BACKEND_PORT=7443       # основной XHTTP-инбаунд (127.0.0.1:7443)
 NODE_PORT=2222          # API-порт ноды Remnawave (mTLS)
-REALITY_PORT=443        # второй прямой inbound VLESS RAW REALITY Vision
+REALITY_PORT=443        # единый VLESS XHTTP + REALITY inbound
 CADDY_LOCAL_PORT=8443   # локальный HTTPS Caddy за REALITY self-steal
+REALITY_SOCKET_DIR=/dev/shm/remna-reality
+REALITY_SOCKET_TARGET=/dev/shm/nginx.sock
+FALLBACK_CONTAINER=remna-reality-fallback
+FALLBACK_IMAGE=haproxy:3.2-alpine
 CADDYFILE=/etc/caddy/Caddyfile
 CADDY_PUBLIC=/etc/caddy/Caddyfile.public
 CADDY_REALITY=/etc/caddy/Caddyfile.reality
 NODE_DIR=/opt/remnanode
 REALITY_DIR=/opt/remnanode/reality
 REALITY_ENV=$REALITY_DIR/reality.env
-REALITY_INBOUND=$REALITY_DIR/reality-inbound.json
-XHTTP_INBOUND=$REALITY_DIR/xhttp-inbound.json
+PROFILE_INBOUND=$REALITY_DIR/xhttp-reality-inbound.json
 PROFILE_INBOUNDS=$REALITY_DIR/inbounds-ready.json
+FALLBACK_CONFIG=$REALITY_DIR/haproxy.cfg
 SCRIPT_INSTALL_DIR=/opt/remna-node-scripts
 MANAGER_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream.sh
 CORE_SELF_PATH=$SCRIPT_INSTALL_DIR/install-caddy-node-reality-stream-core.sh
@@ -282,7 +285,8 @@ install_node() {
   fi
   command -v docker >/dev/null 2>&1 || die "Docker не установлен."
   $SUDO docker compose version >/dev/null 2>&1 || die "Docker Compose plugin не найден."
-  $SUDO install -d -o root -g root -m 0700 "$NODE_DIR"
+  $SUDO install -d -o root -g root -m 0700 "$NODE_DIR" "$REALITY_DIR"
+  $SUDO install -d -o root -g root -m 0755 "$REALITY_SOCKET_DIR"
   local compose_tmp; compose_tmp="$(mktemp)"
   cat >"$compose_tmp" <<NODE_EOF
 services:
@@ -292,6 +296,8 @@ services:
     image: ${REMNA_NODE_IMAGE}
     network_mode: host
     restart: always
+    volumes:
+      - ${REALITY_SOCKET_DIR}:/dev/shm
     environment:
       NODE_PORT: "${NODE_PORT}"
       SECRET_KEY: "${SECRET_KEY}"
@@ -360,23 +366,6 @@ __DOMAIN__ {
     respond 404
   }
 
-  @tunnel {
-    path __PATH__*
-    query auth=*
-  }
-  handle @tunnel {
-    rewrite * __PATH__/
-    reverse_proxy 127.0.0.1:__BACKEND__ {
-      flush_interval -1
-      header_up Host {host}
-      header_up X-Real-IP {remote_host}
-      transport http {
-        versions h2c 1.1
-        keepalive_idle_conns 256
-        keepalive 30s
-      }
-    }
-  }
 
   handle {
     root * __WEBROOT__
@@ -398,7 +387,7 @@ render_caddy_template() {
   sd="$(printf '%s' "$DOMAIN"      | sed 's/[|&\\]/\\&/g')"
   sp="$(printf '%s' "$TUNNEL_PATH" | sed 's/[|&\\]/\\&/g')"
   sw="$(printf '%s' "$WEBROOT"     | sed 's/[|&\\]/\\&/g')"
-  sed -i "s|__EMAIL__|${se}|g; s|__DOMAIN__|${sd}|g; s|__PATH__|${sp}|g; s|__BACKEND__|${BACKEND_PORT}|g; s|__WEBROOT__|${sw}|g; s|__CADDY_LOCAL__|${CADDY_LOCAL_PORT}|g" "$file"
+  sed -i "s|__EMAIL__|${se}|g; s|__DOMAIN__|${sd}|g; s|__PATH__|${sp}|g; s|__WEBROOT__|${sw}|g; s|__CADDY_LOCAL__|${CADDY_LOCAL_PORT}|g" "$file"
 }
 
 write_caddyfile_reality() {
@@ -438,23 +427,6 @@ __DOMAIN__ {
     respond 404
   }
 
-  @tunnel {
-    path __PATH__*
-    query auth=*
-  }
-  handle @tunnel {
-    rewrite * __PATH__/
-    reverse_proxy 127.0.0.1:__BACKEND__ {
-      flush_interval -1
-      header_up Host {host}
-      header_up X-Real-IP {remote_host}
-      transport http {
-        versions h2c 1.1
-        keepalive_idle_conns 256
-        keepalive 30s
-      }
-    }
-  }
 
   handle {
     root * __WEBROOT__
