@@ -91,6 +91,25 @@ SUMS
           grep -Fq 'restore-hysteria' "$guards"
           grep -Fq 'sync-rkn-watch' "$guards"
 
+      - name: Hysteria2 compatibility guard
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'patch_hysteria_compat(){' full-clean-reinstall.sh
+          grep -Fq 'HYSTERIA_CONGESTION="${HYSTERIA_CONGESTION:-brutal}"' full-clean-reinstall.sh
+          grep -Fq '"settings": {"version": 2, "clients": []}' full-clean-reinstall.sh
+          grep -Fq '"congestion": "$HYSTERIA_CONGESTION"' full-clean-reinstall.sh
+          grep -Fq 'streamOverrides.finalMask' full-clean-reinstall.sh
+          grep -Fq 'backend добавляет settings.clients[].auth' full-clean-reinstall.sh
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          tar -xzf vendor/remna-next-source.tar.gz -C "$tmp"
+          t="$tmp/next-installer/remnawave-transport-manager.sh"
+          grep -Fq '"settings": {"version": 2, "users": []}' "$t"
+          grep -Fq '"network": "hysteria"' "$t"
+          grep -Fq '"security": "tls"' "$t"
+          grep -Fq '"alpn": ["h3"]' "$t"
       - name: NEXT is the primary launcher
         shell: bash
         run: |
