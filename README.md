@@ -64,7 +64,7 @@ Docker и Caddy при необходимости устанавливаются
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/5ed0944801bd533b6034e192445edbdd073aa59e/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/0100f67c3dbd5d0ea57e53c2b0718af85b7b9f56/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -135,7 +135,7 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/787f092d4d9e287d27872a79040b3b8c70f75c7c/full-clean-reinstall.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/2ec61bfee7e17d4746f264b695ca6f07d710fa02/full-clean-reinstall.sh \
   -o /tmp/remna-restore-manager.sh
 
 sudo bash /tmp/remna-restore-manager.sh menu
@@ -143,7 +143,7 @@ sudo bash /tmp/remna-restore-manager.sh menu
 
 Эта команда не делает reinstall: она загружает проверенный manager, восстанавливает его в `/opt/remna-node-scripts/` и открывает меню.
 
-Во всех интерактивных вводах можно использовать `0` / `назад` для отмены текущего действия. Ничего из частично введённых данных при этом не применяется. На финальном подтверждении установки `n` также возвращает в меню. Для destructive clean требуется явное `YES`.
+Во всех интерактивных вводах можно использовать `0` / `назад` для отмены текущего действия. Ничего из частично введённых данных при этом не применяется. На финальном подтверждении установки `n` также открывает/возвращает основное 18-пунктовое меню, даже если мастер был запущен через `install.sh`. Для destructive clean требуется явное `YES`.
 
 В меню доступны:
 
@@ -261,7 +261,7 @@ sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protect-instal
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/5ed0944801bd533b6034e192445edbdd073aa59e/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/0100f67c3dbd5d0ea57e53c2b0718af85b7b9f56/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -369,7 +369,7 @@ install.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/787f092d4d9e287d27872a79040b3b8c70f75c7c/full-clean-reinstall.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/2ec61bfee7e17d4746f264b695ca6f07d710fa02/full-clean-reinstall.sh \
   -o /tmp/remna-restore-manager.sh
 
 sudo bash /tmp/remna-restore-manager.sh menu
