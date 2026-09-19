@@ -25,7 +25,7 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/3d66193f2a98f073a21e034ee1ee38f43a3d79ce/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/4af29bfbff76013a991903294d4982adc5b09c86/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -35,13 +35,13 @@ Safe reinstall:
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/80fae2caf6314d333d74c06fff5cd3f9c3d643ef/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/740bd31057f51125d43ab1da41fb844536a78ec8/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
 ```
 
-Обе команды используют immutable commit SHA. Следующий launcher дополнительно проверяется по Git blob SHA, а recovered NEXT source bundle — по SHA256 и SHA256 каждого входящего в него скрипта.
+Обе команды используют immutable commit SHA. Следующий launcher проверяется по Git blob SHA; recovered NEXT source bundle — по immutable commit + Git blob SHA, а каждый входящий в него скрипт дополнительно проверяется по SHA256.
 
 ## Главное меню
 
