@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-REPO_REF=2a1b129df90e9f9ba672b28d6209f29688318496
+REPO_REF=679db0eac3119e8074e6b9bce9228335d6f1d544
 REPO_RAW="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${REPO_REF}"
-CORE_BLOB_SHA=b092b61be1264ab3797f074836fa06f9930a6263
-PROTECTION_BLOB_SHA=4aeb40236721e92b7e840aa2cb0beb8427e63274
-CADDY_GUARD_BLOB_SHA=fc908882069fe50602c2411a46f4a5db77bddb74
+CORE_BLOB_SHA=553ef9a77f68399cb9f6fe55ae35592f89d31da0
+PROTECTION_BLOB_SHA=550d5e1d6342005355657d129c5c99122fa769d7
+CADDY_GUARD_BLOB_SHA=e5a6c6f03682bbe0551184dfdb35c3f22ca1c62e
 REMNA_NODE_IMAGE="${REMNA_NODE_IMAGE:-remnawave/node:3.4.1}"
 INSTALL_DIR=/opt/remna-node-scripts
 SELF="$INSTALL_DIR/install-caddy-node-reality-stream.sh"
@@ -15,6 +15,9 @@ CADDY_GUARD="$INSTALL_DIR/caddy-resilient-start.sh"
 NODE_DIR=/opt/remnanode
 NODE_COMPOSE="$NODE_DIR/docker-compose.yml"
 NODE_ENV="$NODE_DIR/.env"
+REALITY_SOCKET_DIR=/dev/shm/remna-reality
+REALITY_SOCKET_HOST=$REALITY_SOCKET_DIR/nginx.sock
+REALITY_SOCKET_TARGET=/dev/shm/nginx.sock
 CADDYFILE=/etc/caddy/Caddyfile
 CADDY_PUBLIC=/etc/caddy/Caddyfile.public
 CADDY_REALITY=/etc/caddy/Caddyfile.reality
@@ -132,6 +135,10 @@ container_secret_matches(){
   unset expected actual
 }
 
+container_has_reality_socket_mount(){
+  $SUDO docker inspect remnanode --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}' 2>/dev/null |
+    grep -Fq "$REALITY_SOCKET_DIR -> /dev/shm"
+}
 ensure_node_compose(){
   local compose="$NODE_COMPOSE" envfile="$NODE_ENV"
   local tmp tmpenv inline secret envlen need_recreate=0 backup_done=0 services service_count
@@ -212,6 +219,26 @@ ensure_node_compose(){
     need_recreate=1
   fi
 
+  if ! grep -Fq "$REALITY_SOCKET_DIR:/dev/shm" "$tmp"; then
+    $SUDO install -d -o root -g root -m 0755 "$REALITY_SOCKET_DIR"
+    if grep -qE '^    volumes:[[:space:]]*$' "$tmp"; then
+      awk -v mount="      - $REALITY_SOCKET_DIR:/dev/shm" '
+        {print}
+        /^    volumes:[[:space:]]*$/ && !done {print mount; done=1}
+      ' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
+    else
+      awk -v mount="$REALITY_SOCKET_DIR:/dev/shm" '
+        {print}
+        /^    network_mode:[[:space:]]*host[[:space:]]*$/ && !done {
+          print "    volumes:"
+          print "      - " mount
+          done=1
+        }
+      ' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
+    fi
+    need_recreate=1
+    ok "Добавлен shared /dev/shm mount для REALITY self-steal socket."
+  fi
   if ! cmp -s "$tmp" "$compose"; then
     $SUDO cp -a "$compose" "${compose}.bak.$(date +%Y%m%d-%H%M%S)"
     backup_done=1
@@ -230,6 +257,7 @@ ensure_node_compose(){
   if $SUDO docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx remnanode; then
     container_has_net_admin || need_recreate=1
     container_secret_matches || need_recreate=1
+    container_has_reality_socket_mount || need_recreate=1
   fi
 
   if [ "$need_recreate" = 1 ]; then
@@ -239,6 +267,7 @@ ensure_node_compose(){
 
   container_has_net_admin || die "NET_ADMIN не применился к remnanode."
   container_secret_matches || die "SECRET_KEY внутри remnanode не совпадает с $NODE_ENV. Проверь env_file и пересоздание контейнера."
+  container_has_reality_socket_mount || die "Shared /dev/shm mount для REALITY self-steal не применился к remnanode."
 }
 
 ensure_net_admin(){ ensure_node_compose; }
@@ -246,7 +275,6 @@ ensure_net_admin(){ ensure_node_compose; }
 rw_core_on_443(){ ss -lntp 2>/dev/null | grep -E ':443[[:space:]]' | grep -q 'rw-core'; }
 caddy_local_8443(){ ss -lntp 2>/dev/null | grep -E '127\.0\.0\.1:8443[[:space:]]' | grep -q 'caddy'; }
 caddy_public_443(){ ss -lntp 2>/dev/null | grep -E ':443[[:space:]]' | grep -q 'caddy'; }
-xhttp_on_7443(){ ss -lntp 2>/dev/null | grep -E '127\.0\.0\.1:7443[[:space:]]' | grep -q 'rw-core'; }
 
 node_has_443_conflict(){
   command -v docker >/dev/null 2>&1 || return 1
@@ -386,24 +414,23 @@ runtime_config_count(){ $SUDO docker exec remnanode sh -c 'find /run /tmp /var/l
 wait_for_xray_runtime(){
   local timeout="${XRAY_WAIT_TIMEOUT:-90}" i xs cfg
   $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode || return 1
-  say "[*] Жду runtime-конфиг/Xray до ${timeout} секунд..."
+  say "[*] Жду единый XHTTP+REALITY runtime на :443 до ${timeout} секунд..."
   for ((i=1; i<=timeout; i++)); do
     auto_handoff_once >/dev/null 2>&1 || true
     xs="$(xray_status)"
     cfg="$(runtime_config_count)"
-    if xhttp_on_7443; then
-      ok "XHTTP/runtime появился через ${i} сек."
+    if rw_core_on_443; then
+      ok "XHTTP+REALITY :443 появился через ${i} сек."
       return 0
     fi
     if (( i % 15 == 0 )); then
-      say "    ожидание: ${i}/${timeout} сек; Xray=${xs:-неизвестно}; runtime=${cfg:-?}; 7443=нет"
+      say "    ожидание: ${i}/${timeout} сек; Xray=${xs:-неизвестно}; runtime=${cfg:-?}; :443=не rw-core"
     fi
     sleep 1
   done
-  warn "За ${timeout} сек XHTTP 127.0.0.1:7443 не появился. Если rw-core уже держит :443, назначенный профиль содержит REALITY, но не содержит ожидаемый XHTTP inbound."
+  warn "За ${timeout} сек rw-core не занял :443. Проверь единый XHTTP+REALITY Config Profile."
   return 1
 }
-
 protection(){
   ensure_protection_helper
   local rc=0
@@ -427,106 +454,33 @@ safe_diagnose(){
   echo '────────────────────────────────────────────────────────────'
   echo '  Remna Node — безопасная диагностика'
   echo '────────────────────────────────────────────────────────────'
-
-  # Diagnose is intentionally read-only: it must never rewrite compose/Caddy,
-  # recreate containers, install watchers or perform a REALITY handoff.
-
-  local xs cfgcount caps webcode=none xhttp=no nodeapi=no caddy_state domain secret_storage envlen conflict=no
+  local failed=0 xs cfgcount caddy_state nodeapi=no socket_host=no socket_node=no
   xs="$(xray_status 2>/dev/null)"
   cfgcount="$(runtime_config_count 2>/dev/null)"
-  caps="$($SUDO docker inspect remnanode --format '{{json .HostConfig.CapAdd}}' 2>/dev/null || true)"
-  ss -lntp 2>/dev/null | grep -q ':2222 ' && nodeapi=yes
-  xhttp_on_7443 && xhttp=yes
-  node_has_443_conflict && conflict=yes
   caddy_state="$($SUDO systemctl is-active caddy 2>/dev/null || true)"
-  domain="$(awk '/^[A-Za-z0-9.-]+[[:space:]]*\{/{gsub(/[[:space:]]*\{.*/,"",$0); print $1; exit}' "$CADDYFILE" 2>/dev/null || true)"
-  if caddy_public_443 && [ -n "$domain" ]; then
-    webcode="$(curl -ksS --noproxy '*' --max-time 8 --resolve "${domain}:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://${domain}/" 2>/dev/null || true)"
-  elif rw_core_on_443 && [ -n "$domain" ]; then
-    webcode="$(curl -ksS --noproxy '*' --max-time 8 --resolve "${domain}:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://${domain}/" 2>/dev/null || true)"
-  fi
-  envlen="$(secret_env_len)"
-  if [ "$envlen" -gt 0 ] && grep -qE '^[[:space:]]*env_file:' "$NODE_COMPOSE" 2>/dev/null; then secret_storage='✓ .env/env_file (0600)'; else secret_storage='✗ отсутствует/пуст'; fi
-
-  echo
-  echo '────────────────────────────────────────────────────────────'
-  echo '  [A] Сервисы и порты'
-  echo '────────────────────────────────────────────────────────────'
+  ss -lntp 2>/dev/null | grep -q ':2222 ' && nodeapi=yes
+  [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] && socket_host=yes
+  $SUDO docker exec remnanode test -S "$REALITY_SOCKET_TARGET" >/dev/null 2>&1 && socket_node=yes
   printf '  Caddy       : %s\n' "${caddy_state:-неизвестно}"
-  if [ "$webcode" = 200 ]; then printf '  Web :443    : ✓ HTTP 200\n'; else printf '  Web :443    : %s\n' "${webcode:-нет ответа}"; fi
-  if [ "$nodeapi" = yes ]; then printf '  Node API    : ✓ :2222 слушает\n'; else printf '  Node API    : ✗ :2222 не слушает\n'; fi
-  if [ "$xhttp" = yes ]; then printf '  XHTTP       : ✓ 127.0.0.1:7443 слушает\n'; else printf '  XHTTP       : ✗ 127.0.0.1:7443 не слушает\n'; fi
-  if rw_core_on_443; then printf '  REALITY     : ✓ rw-core :443\n'; else printf '  REALITY     : не запущен\n'; fi
-  if printf '%s' "$caps" | grep -q NET_ADMIN; then printf '  NET_ADMIN   : ✓ есть\n'; else printf '  NET_ADMIN   : ✗ нет\n'; fi
-  printf '  SECRET_KEY  : %s\n' "$secret_storage"
-
-  echo
-  echo '────────────────────────────────────────────────────────────'
-  echo '  [B] Remnanode / Xray'
-  echo '────────────────────────────────────────────────────────────'
-  printf '  Xray service: %s\n' "${xs:-неизвестно}"
+  printf '  Xray        : %s\n' "${xs:-неизвестно}"
   printf '  Runtime cfg : %s файл(ов)\n' "${cfgcount:-?}"
-  if [ "$conflict" = yes ]; then
-    echo '  ДИАГНОЗ     : профиль уже пришёл, но Xray упал из-за занятого :443.'
-    echo '                Для исправления запусти selftest/repair: они освободят :443, дождутся rw-core и запустят Caddy через topology guard.'
-  elif printf '%s' "$xs" | grep -q 'down (not started yet)' && [ "${cfgcount:-?}" = 0 ]; then
-    echo '  ДИАГНОЗ     : Node API поднят, но runtime-конфиг Xray ещё не получен.'
-    [ "$nodeapi" = yes ] && echo '                :2222 слушает — отсутствие 7443 само по себе НЕ означает локальный firewall.'
-    echo '                Если панель пишет "Client network socket disconnected before secure TLS connection was established",'
-    echo '                проверь версию панели: remnawave/backend:2 (2.8.x) несовместим с новым SNI Node 3.3.x; нужен backend 3.x.'
-  elif printf '%s' "$xs" | grep -q '^down'; then
-    echo '  ДИАГНОЗ     : Xray остановлен после попытки старта; смотри docker logs remnanode.'
-  elif printf '%s' "$xs" | grep -q '^up'; then
-    if [ "$xhttp" = yes ]; then
-      echo '  ДИАГНОЗ     : Xray запущен, XHTTP backend доступен.'
-    elif rw_core_on_443; then
-      echo '  ДИАГНОЗ     : REALITY inbound активен на :443, но XHTTP inbound 127.0.0.1:7443 отсутствует.'
-      echo '                Исправь назначенный Config Profile: в нём должны быть ОБА inbound — REALITY и XHTTP.'
-    else
-      echo '  ДИАГНОЗ     : Xray запущен, но inbound 7443 отсутствует в назначенном профиле.'
-    fi
-  else
-    echo '  ДИАГНОЗ     : состояние Xray определить не удалось.'
-  fi
-
-  echo
-  echo '────────────────────────────────────────────────────────────'
-  echo '  [C] Caddy / сайт'
-  echo '────────────────────────────────────────────────────────────'
-  if caddy_local_8443 && rw_core_on_443; then
-    echo '  ✓ Финальная схема: rw-core :443 → Caddy 127.0.0.1:8443.'
+  printf '  Node API    : %s\n' "$([ "$nodeapi" = yes ] && echo "✓ :2222" || echo "✗ :2222")"
+  printf '  Host socket : %s\n' "$socket_host"
+  printf '  Node socket : %s\n' "$socket_node"
+  if rw_core_on_443; then
+    echo '  XHTTP+REALITY: ✓ rw-core 0.0.0.0:443'
+    caddy_local_8443 || { warn "Caddy fallback 127.0.0.1:8443 отсутствует."; failed=1; }
+    [ "$socket_host" = yes ] || { warn "Host self-steal socket отсутствует."; failed=1; }
+    [ "$socket_node" = yes ] || { warn "remnanode не видит /dev/shm/nginx.sock."; failed=1; }
   elif caddy_public_443; then
-    echo '  ✓ Публичный Caddy держит :443 до первого успешного старта REALITY.'
-    [ -s "$CADDY_REALITY" ] && echo '  ✓ Авто-handoff armed: при конфликте :443 watcher освободит порт и запустит Caddy через topology guard.'
-  elif caddy_local_8443; then
-    echo '  ! Caddy на 8443, но rw-core:443 пока отсутствует; watcher попробует завершить handoff или вернёт public.'
+    echo '  XHTTP+REALITY: профиль ещё не активен; Caddy держит :443'
   else
-    echo '  ✗ Не найден ожидаемый listener Caddy.'
+    warn "Ни rw-core, ни Caddy не держат :443."; failed=1
   fi
-
-  echo
-  echo '────────────────────────────────────────────────────────────'
-  echo '  [D] CDN'
-  echo '────────────────────────────────────────────────────────────'
-  if [ "$xhttp" = yes ]; then
-    echo '  XHTTP backend поднят — теперь имеет смысл проверять CDN с внешнего клиента.'
-  else
-    echo '  CDN сейчас не первичная проблема: 127.0.0.1:7443 не слушает.'
-  fi
-
-  echo
-  echo '────────────────────────────────────────────────────────────'
-  echo '  [E] Защита / Node API'
-  echo '────────────────────────────────────────────────────────────'
-  if protection_node_api_readonly; then
-    echo '  ✓ TCP/2222: REMNA_GUARD содержит allow + default DROP.'
-  else
-    echo '  ✗ TCP/2222 не защищён или защита не обнаружена. В меню выбери «Защита ноды» → «Задать IP панели».'
-  fi
+  protection_node_api_readonly || { warn "TCP/2222 не защищён правилом REMNA_GUARD."; failed=1; }
   set -e
-  return 0
+  [ "$failed" -eq 0 ]
 }
-
 selftest_all(){
   local failed=0
   echo
@@ -562,10 +516,9 @@ selftest_all(){
     failed=1
   fi
 
-  if rw_core_on_443 && ! xhttp_on_7443; then
-    warn 'REALITY уже активен, но XHTTP 127.0.0.1:7443 отсутствует — назначенный Config Profile неполный.'
-    warn 'В профиле должны одновременно присутствовать REALITY inbound :443 и XHTTP inbound 127.0.0.1:7443.'
-    failed=1
+  if rw_core_on_443; then
+    [ -S "$REALITY_SOCKET_DIR/nginx.sock" ] || { warn 'Host self-steal socket отсутствует.'; failed=1; }
+    $SUDO docker exec remnanode test -S "$REALITY_SOCKET_TARGET" >/dev/null 2>&1 || { warn 'remnanode не видит /dev/shm/nginx.sock.'; failed=1; }
   fi
   protection_node_api_readonly || { warn 'Финальная проверка защиты TCP/2222 не пройдена.'; failed=1; }
 
@@ -621,7 +574,7 @@ run_core(){
   if [ "$wait_needed" = 1 ]; then
     if ! wait_for_xray_runtime; then
       restore_public_caddy_if_needed || true
-      warn "Node bootstrap завершён, но XHTTP runtime пока не применён. Если REALITY уже поднялся, проверь что назначенный Config Profile содержит оба inbound."
+      warn "Node bootstrap завершён, но XHTTP+REALITY runtime :443 пока не применён. Проверь назначенный Config Profile."
     fi
   else
     auto_handoff_once || true
@@ -645,15 +598,16 @@ Remna Node Manager — safe mode
  [7]  Сводка настроек
  [8]  Диагностика
  [9]  Статус сервисов
- [10] Подготовить REALITY
- [11] Включить REALITY
- [12] Отключить REALITY
- [13] Профили для копипасты (XHTTP / REALITY / оба)
+ [10] Подготовить профиль XHTTP+REALITY
+ [11] Переключить :443 на XHTTP+REALITY
+ [12] Вернуть Caddy на :443
+ [13] Профиль для копипасты (XHTTP + REALITY :443)
  [14] Repair Caddy / XHTTP / REALITY
  [15] Clean Remnanode/Caddy
  [16] Защита ноды (RKN/TSPU/GOV/GeoIP/Allow/Deny)
  [17] Закрыть TCP/2222 только для IP панели
  [18] Полный self-test инфраструктуры
+ [19] РКН защита (TSPU/GOV)
  [0]  Выход
 ────────────────────────────────────────────────────────────
 MENU
@@ -690,6 +644,7 @@ MENU
       16) menu_action protection menu ;;
       17) menu_action protection panel-set ;;
       18) menu_action selftest_all ;;
+      19) menu_action protection rkn ;;
       0|'') exit 0 ;;
       *) warn "Неизвестный пункт: $c" ;;
     esac
@@ -704,7 +659,7 @@ main(){
     diagnose|diag) safe_diagnose ;;
     selftest|self-test|check-all|repair-all) selftest_all ;;
     handoff-check) set +e; auto_handoff_once; exit 0 ;;
-    protect|protection) protection menu ;; protect-install) protection install ;; protect-status) protection status ;; protect-selftest) protection selftest ;;
+    protect|protection) protection menu ;; rkn|rkn-protection) protection rkn ;; protect-install) protection install ;; protect-status) protection status ;; protect-selftest) protection selftest ;;
     panel-set)
       shift
       rc=0

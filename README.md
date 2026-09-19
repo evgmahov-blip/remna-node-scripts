@@ -1,47 +1,89 @@
 # Remna Node Scripts
 
-Установка и обслуживание **Remnawave Node** с двумя вариантами подключения на одном TCP/443:
+Установка и обслуживание **Remnawave Node** с рабочей схемой:
 
-- **VLESS XHTTP** через CDN;
-- **VLESS RAW + REALITY Vision** напрямую.
+```text
+VLESS + XHTTP + REALITY
+0.0.0.0:443
+        |
+      rw-core
+        |
+REALITY xver=1
+target=/dev/shm/nginx.sock
+        |
+ remna-reality-fallback
+     (HAProxy)
+        |
+127.0.0.1:8443
+        |
+      Caddy
+        |
+ маскировочный сайт
+```
 
-Скрипт поднимает Remnanode, Caddy, маскировочный сайт, готовит XHTTP/REALITY inbound-файлы, защищает Node API на TCP/2222 и умеет диагностировать/ремонтировать уже установленную ноду.
+Главный принцип: **один XHTTP+REALITY inbound на TCP/443**.
 
-> Это не установщик панели Remnawave и не настройщик CDN. Панель, Config Profile, Host и CDN-ресурс настраиваются отдельно. После установки скрипт выводит готовые параметры и пути к JSON-файлам.
+Отдельного XHTTP inbound на внутреннем порту здесь нет.
 
 ---
 
-## Что получается после установки
+## Что создаёт скрипт
 
-До включения REALITY:
+После установки/подготовки профиля получается Config Profile Remnawave примерно такого вида:
 
-```text
-Internet / CDN
-      |
-   TCP/443
-      |
-    Caddy
-      |
-127.0.0.1:7443
-      |
- XHTTP / rw-core
+```json
+{
+  "inbounds": [
+    {
+      "tag": "PL-node1-xHTTP",
+      "port": 443,
+      "listen": "0.0.0.0",
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "reality",
+        "xhttpSettings": {
+          "mode": "auto",
+          "path": "/api/example/example.ts",
+          "extra": {
+            "xmux": {
+              "cMaxReuseTimes": 12,
+              "maxConcurrency": 1
+            },
+            "seqKey": "visitor_id",
+            "xPaddingKey": "_r",
+            "seqPlacement": "cookie",
+            "sessionIDKey": "auth_session",
+            "xPaddingBytes": "270-1096",
+            "sessionIDTable": "Base62",
+            "xPaddingHeader": "X-Request-Token",
+            "xPaddingMethod": "tokenish",
+            "sessionIDLength": "16-32",
+            "xPaddingObfsMode": true,
+            "xPaddingPlacement": "queryInHeader",
+            "sessionIDPlacement": "cookie"
+          }
+        },
+        "realitySettings": {
+          "show": false,
+          "xver": 1,
+          "target": "/dev/shm/nginx.sock",
+          "shortIds": ["GENERATED"],
+          "privateKey": "GENERATED",
+          "serverNames": ["node.example.com"],
+          "minClientVer": "1"
+        }
+      }
+    }
+  ]
+}
 ```
 
-После включения REALITY:
-
-```text
-                 TCP/443
-                    |
-                 rw-core
-                /       \
-       REALITY direct    XHTTP
-              |             |
-      127.0.0.1:8443    127.0.0.1:7443
-              |
-            Caddy
-```
-
-Caddy автоматически переключается между публичным `:443` и локальным `127.0.0.1:8443` в зависимости от того, занят ли внешний TCP/443 REALITY-inbound'ом.
+Домен, XHTTP path, private key и short ID генерируются/подставляются автоматически.
 
 ---
 
@@ -49,103 +91,48 @@ Caddy автоматически переключается между публ�
 
 - Debian / Ubuntu;
 - root или `sudo`;
-- домен, A-запись которого указывает на сервер;
-- открытые TCP/80 и TCP/443 для HTTPS/Let's Encrypt;
-- `SECRET_KEY` ноды из панели Remnawave, если Remnanode ставится на этом сервере;
+- домен ноды с A-записью на сервер;
+- TCP/80 и TCP/443;
+- `SECRET_KEY` Remnawave Node;
 - IP сервера панели Remnawave для ограничения TCP/2222.
 
-Docker и Caddy при необходимости устанавливаются скриптом.
+Скрипт при необходимости устанавливает Docker, Caddy и HAProxy.
 
 ---
 
-## Быстрая установка новой ноды
+## Установка
 
-Рекомендуемый запуск — из закреплённого snapshot, а не из изменяемой ветки `main`:
+Закреплённый installer snapshot:
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/e76681801bc2a948c9670657df618ad6a824559e/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/152a2c1898b2404fe1843788a1c7cdfc84b27eed/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
 ```
 
-Во время установки будут запрошены:
+Установщик запросит:
 
 1. email для Let's Encrypt;
 2. домен ноды;
-3. `SECRET_KEY` Remnawave Node;
-4. XHTTP-путь — можно просто нажать Enter и получить случайный;
-5. IP панели Remnawave для закрытия TCP/2222.
+3. `SECRET_KEY`;
+4. XHTTP path — Enter создаёт случайный;
+5. IP панели для защиты TCP/2222.
 
-`SECRET_KEY` читается скрыто и не выводится обратно в терминал.
-
-Если оставить `SECRET_KEY` пустым, будет установлен только Caddy/frontend без Remnanode.
-
----
-
-## После установки
-
-Скрипт создаёт готовые файлы:
-
-```text
-/opt/remnanode/reality/xhttp-inbound.json
-/opt/remnanode/reality/reality-inbound.json
-/opt/remnanode/reality/inbounds-ready.json
-/opt/remnanode/reality/reality.env
-```
-
-Права на файлы с ключами — `0600`.
-
-Дальше нужно:
-
-1. добавить содержимое `inbounds-ready.json` в Config Profile Remnawave;
-2. назначить этот профиль ноде;
-3. создать/обновить Host в панели;
-4. настроить CDN-ресурс и Rewrite с **тем же XHTTP-путём**;
-5. проверить ноду через диагностику/self-test.
-
-Установщик в конце сам выводит подробную сводку **«что и куда вставлять»**.
-
-Повторно показать её:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh summary
-```
+Во время интерактивного ввода `0` / `назад` отменяет текущее действие и возвращает в manager.
 
 ---
 
 ## Главное меню
 
-Пользовательское меню находится **только во внешнем manager**:
-
-```text
-/opt/remna-node-scripts/install-caddy-node-reality-stream.sh
-```
-
-Запуск:
+После установки:
 
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh
 ```
 
-Нормальное меню manager содержит **18 пунктов**. Файл `install-caddy-node-reality-stream-core.sh` — внутренний helper; его меню предназначено для отладки core и вручную его запускать не нужно.
-
-Если вместо 18 пунктов показывается внутреннее меню core на 14 пунктов, восстановите manager проверяемым launcher:
-
-```bash
-curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/e76681801bc2a948c9670657df618ad6a824559e/full-clean-reinstall.sh \
-  -o /tmp/remna-restore-manager.sh
-
-sudo bash /tmp/remna-restore-manager.sh menu
-```
-
-Эта команда не делает reinstall: она загружает проверенный manager, восстанавливает его в `/opt/remna-node-scripts/` и открывает меню.
-
-Во всех интерактивных вводах можно использовать `0` / `назад` для отмены текущего действия. Ничего из частично введённых данных при этом не применяется. На финальном подтверждении установки `n` также открывает/возвращает основное 18-пунктовое меню, даже если мастер был запущен через `install.sh`. Некорректные PANEL_IP, CIDR, GeoIP-коды и списки портов не закрывают manager: выводится ошибка и можно ввести значение заново. Для destructive clean требуется явное `YES`.
-
-В меню доступны:
+Актуальное меню:
 
 ```text
 [1]  Полная установка
@@ -153,124 +140,137 @@ sudo bash /tmp/remna-restore-manager.sh menu
 [3]  Только фронт Caddy
 [4]  Сгенерировать XHTTP-путь
 [5]  Изменить XHTTP-путь
-[6]  Обновить маскировочный сайт
+[6]  Обновить стрим-сайт
 [7]  Сводка настроек
 [8]  Диагностика
 [9]  Статус сервисов
-[10] Подготовить REALITY
-[11] Включить REALITY
-[12] Отключить REALITY
-[13] Профили для копипасты (XHTTP / REALITY / оба)
+[10] Подготовить профиль XHTTP+REALITY
+[11] Переключить :443 на XHTTP+REALITY
+[12] Вернуть Caddy на :443
+[13] Профиль для копипасты (XHTTP + REALITY :443)
 [14] Repair Caddy / XHTTP / REALITY
 [15] Clean Remnanode/Caddy
-[16] Защита ноды
+[16] Защита ноды (RKN/TSPU/GOV/GeoIP/Allow/Deny)
 [17] Закрыть TCP/2222 только для IP панели
 [18] Полный self-test инфраструктуры
+[19] РКН защита (TSPU/GOV)
+[0]  Выход
 ```
-
-Пункты 14 и 18 решают разные задачи:
-
-| Действие | Для чего |
-|---|---|
-| **14 — Repair Caddy / XHTTP / REALITY** | Ремонт рабочего тракта: сайт, Caddy, XHTTP/REALITY-конфиги, TCP/443 и handoff |
-| **18 — Полный self-test инфраструктуры** | Проверка/авторемонт compose, SECRET_KEY, NET_ADMIN, firewall, 2222, ipset, systemd и topology guard |
 
 ---
 
-## Полезные команды
+## Config Profile для копипасты
 
-### Диагностика
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh diagnose
-```
-
-### Полный self-test инфраструктуры
-
-Проверяет и при необходимости восстанавливает инфраструктурные инварианты узла: compose, SECRET_KEY, NET_ADMIN, firewall/ipset, защиту TCP/2222, systemd restore/timer, Caddy topology guard и REALITY handoff watcher. В конце запускает общую диагностику.
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh selftest
-```
-
-### Статус Caddy / Remnanode / портов
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh status
-```
-
-### Подготовить XHTTP + REALITY JSON
+Сначала подготовить профиль:
 
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-prepare
 ```
 
-### Профили для копипасты в Remnawave
-
-Пункт **13** предназначен именно для копирования готовых Config Profile JSON. Он открывает подменю:
-
-```text
-[1] XHTTP — готовый Config Profile
-[2] REALITY — готовый Config Profile
-[3] XHTTP + REALITY — общий Config Profile
-[4] Показать все три
-[0] Назад
-```
-
-Каждый вариант выводит **полный JSON вида `{"inbounds":[...]}`**, который можно выделить и сразу вставить в Remnawave Config Profile. Это не путь к файлу и не отдельный inbound-фрагмент.
-
-Открыть подменю:
+Потом вывести готовый JSON прямо в терминал:
 
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh config-profile
 ```
 
-Можно вывести нужный вариант сразу:
+Или выбрать **пункт 13**.
 
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh config-profile xhttp
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh config-profile reality
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh config-profile both
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh config-profile all
+Вывод — это полный:
+
+```json
+{
+  "inbounds": [
+    ...
+  ]
+}
 ```
 
-Файлы также сохраняются на диске:
+Его можно целиком копировать в Remnawave Config Profile.
+
+Файл на диске:
 
 ```text
-/opt/remnanode/reality/xhttp-inbound.json
-/opt/remnanode/reality/reality-inbound.json
 /opt/remnanode/reality/inbounds-ready.json
 ```
 
-**Важно:** REALITY-профиль содержит `privateKey`. Пункт 13 показывает его намеренно, потому что он нужен серверному inbound. Не публикуйте этот JSON в issue/чатах.
+Внутренний объект:
 
-### Включить REALITY после назначения профиля
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-enable
+```text
+/opt/remnanode/reality/xhttp-reality-inbound.json
 ```
 
-### Вернуть Caddy на публичный TCP/443
-
-Сначала отключите/удалите REALITY inbound в Config Profile, затем:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reality-disable
-```
-
-### Repair Caddy / XHTTP / REALITY
-
-Чинит именно рабочий тракт трафика: Caddy, маскировочный сайт и права, XHTTP/REALITY JSON, конфликт за TCP/443 и переключение Caddy между публичным :443 и локальным 127.0.0.1:8443. Это не тот же механизм, что полный инфраструктурный self-test.
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh repair
-```
+**Важно:** JSON содержит REALITY private key. Не публикуйте его.
 
 ---
 
-## Защита TCP/2222 и firewall
+## Как работает self-steal
 
-Node API Remnawave слушает TCP/2222. Для всех адресов, кроме сервера панели, порт должен быть закрыт.
+В Config Profile используется:
+
+```text
+"target": "/dev/shm/nginx.sock"
+"xver": 1
+```
+
+Для этого скрипт создаёт host socket:
+
+```text
+/dev/shm/remna-reality/nginx.sock
+```
+
+Каталог `/dev/shm/remna-reality` bind-mount'ится в контейнер Remnanode как `/dev/shm`, поэтому для rw-core тот же socket виден как:
+
+```text
+/dev/shm/nginx.sock
+```
+
+Отдельный systemd unit:
+
+```text
+remna-reality-fallback.service
+```
+
+запускает HAProxy. Он принимает PROXY protocol от REALITY `xver=1` на Unix socket и передаёт TLS в Caddy:
+
+```text
+127.0.0.1:8443
+```
+
+До активации профиля Caddy держит публичный TCP/443. После того как rw-core занимает TCP/443, topology guard переводит Caddy на локальный 8443.
+
+---
+
+## РКН защита
+
+В главное меню вынесен отдельный пункт:
+
+```text
+[19] РКН защита (TSPU/GOV)
+```
+
+Подменю:
+
+```text
+[1] Включить / установить RKN-защиту
+[2] Обновить TSPU/GOV списки сейчас
+[3] Статус RKN-защиты
+[4] Выключить TSPU/GOV фильтрацию
+[0] Назад
+```
+
+CLI:
+
+```bash
+sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh rkn
+```
+
+По умолчанию TSPU/GOV применяются к TCP/443. Выключение RKN-фильтрации не удаляет отдельную защиту Node API TCP/2222.
+
+---
+
+## Защита Node API TCP/2222
+
+Порт 2222 должен быть разрешён только серверу панели.
 
 Задать IP панели:
 
@@ -278,163 +278,108 @@ Node API Remnawave слушает TCP/2222. Для всех адресов, кр
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh panel-set 203.0.113.10
 ```
 
-Проверить:
+Полное меню firewall:
 
 ```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protect-status
+sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protection
 ```
-
-Установить полный protection-модуль с TSPU/GOV blocklists и systemd timer:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh protect-install
-```
-
-По умолчанию дополнительные blocklists применяются к TCP/443. GeoIP allow-list выключен, пока его явно не включат.
 
 Подробности: [PROTECTION.md](./PROTECTION.md).
 
 ---
 
-## Переустановка с нуля
+## Диагностика
+
+Статус:
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/e76681801bc2a948c9670657df618ad6a824559e/clean-install.sh \
-  -o /tmp/remna-clean-install.sh
-
-sudo bash /tmp/remna-clean-install.sh
+sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh status
 ```
 
-Или на уже установленной машине:
-
-```bash
-sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh reinstall
-```
-
-**Важно:** reinstall удаляет локальный контейнер Remnanode, `/opt/remnanode`, текущий Caddyfile и маскировочный сайт, после чего создаёт новую установку и новый XHTTP-путь.
-
-Firewall целиком не сбрасывается, пакет Caddy не удаляется, SSH/DNS/default route не трогаются.
-
----
-
-## Маскировочный сайт
-
-По умолчанию используется встроенная статическая страница без внешнего JavaScript и сторонних ресурсов.
-
-Каталог:
-
-```text
-/var/www/mstream
-```
-
-Если нужно установить свой HTML/архив, удалённый источник принимается только вместе с явно заданным `STREAM_SITE_SHA256`.
-
----
-
-## Порты
-
-| Порт | Назначение |
-|---|---|
-| TCP/80 | Let's Encrypt / HTTP |
-| TCP/443 | Caddy до REALITY, затем REALITY/rw-core |
-| TCP/2222 | Remnawave Node API — только IP панели |
-| 127.0.0.1:7443 | XHTTP backend |
-| 127.0.0.1:8443 | Caddy за REALITY |
-
-Никакие 3x-ui/Telemt-сервисы этим репозиторием не устанавливаются.
-
----
-
-## Файлы
-
-| Файл | Назначение |
-|---|---|
-| `install.sh` | простая установка новой ноды |
-| `clean-install.sh` | clean reinstall |
-| `full-clean-reinstall.sh` | проверяемый launcher |
-| `install-caddy-node-reality-stream.sh` | основной manager, меню, repair/self-test |
-| `install-caddy-node-reality-stream-core.sh` | установка Caddy/Remnanode, XHTTP/REALITY |
-| `protection-manager.sh` | firewall, TCP/2222, blocklists, GeoIP |
-| `caddy-resilient-start.sh` | topology guard Caddy ↔ REALITY |
-| `PROTECTION.md` | подробности firewall-защиты |
-
----
-
-## Supply-chain и безопасность
-
-Исполняемые helper-скрипты не загружаются вслепую из `main`.
-
-Цепочка выглядит так:
-
-```text
-install.sh
-  -> pinned full-clean-reinstall.sh + Git blob SHA
-      -> pinned manager + Git blob SHA
-          -> pinned core / protection / Caddy guard + Git blob SHA
-```
-
-Дополнительно:
-
-- Docker installer закреплён на конкретном commit и проверяется по Git blob SHA;
-- Remnawave Node image закреплён на конкретной версии;
-- TSPU/GOV источники закреплены на commit + blob SHA;
-- GeoIP использует immutable commit и fail-closed обновление;
-- Caddyfile валидируется до применения;
-- конфиги и ключи REALITY хранятся с ограниченными правами;
-- логи с потенциальными секретами редактируются перед выводом;
-- CI проверяет Bash syntax, shellcheck, запрещённые mutable endpoints и невидимые zero-width символы.
-
-`bash -n` — **только проверка синтаксиса**, а не проверка безопасности.
-
----
-
-## Что репозиторий намеренно не делает
-
-- не устанавливает Remnawave Panel;
-- не создаёт CDN-ресурс через API;
-- не меняет DNS;
-- не содержит 3x-ui;
-- не содержит Telemt;
-- не делает глобальный `ufw reset`;
-- не удаляет чужие Docker-сервисы;
-- не печатает `SECRET_KEY` или REALITY private key.
-
----
-
-## Если установка оборвалась на `HTTP 000`
-
-Не делайте reinstall. Если Remnanode уже запущен и JSON-файлы созданы, сначала восстановите актуальный manager и запустите Repair:
-
-```bash
-curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/e76681801bc2a948c9670657df618ad6a824559e/full-clean-reinstall.sh \
-  -o /tmp/remna-restore-manager.sh
-
-sudo bash /tmp/remna-restore-manager.sh menu
-```
-
-В меню выберите **14 — Repair Caddy / XHTTP / REALITY**.
-
-Актуальный локальный HTTPS-probe не использует `HTTP_PROXY` / `HTTPS_PROXY`. Если ответ всё равно `000`, скрипт автоматически показывает владельца портов, состояние Caddy и последние строки журнала Caddy/ACME.
-
-## Если что-то не работает
-
-Начните с:
+Read-only диагностика:
 
 ```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh diagnose
+```
+
+Полный self-test:
+
+```bash
 sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh selftest
 ```
 
-Для ручной проверки:
+Repair трафикового тракта:
 
 ```bash
-docker ps
-ss -lntp
-sudo caddy validate --config /etc/caddy/Caddyfile
-sudo journalctl -u caddy -n 50 --no-pager
-sudo docker logs --tail 50 remnanode
+sudo /opt/remna-node-scripts/install-caddy-node-reality-stream.sh repair
 ```
 
-Не публикуйте в issue/чатах `SECRET_KEY`, содержимое `reality.env`, REALITY private key и другие токены.
+Repair и self-test — разные механизмы:
+
+| Команда | Назначение |
+|---|---|
+| `repair` | Caddy, сайт, профиль XHTTP+REALITY, TCP/443, self-steal |
+| `selftest` | compose, SECRET_KEY, NET_ADMIN, firewall, TCP/2222, systemd, topology |
+
+---
+
+## Порты и endpoints
+
+| Endpoint | Назначение |
+|---|---|
+| TCP/80 | ACME / HTTP |
+| TCP/443 | единый rw-core XHTTP+REALITY inbound после активации |
+| TCP/2222 | Remnawave Node API, только IP панели |
+| 127.0.0.1:8443 | Caddy fallback за REALITY |
+| /dev/shm/nginx.sock | REALITY self-steal target внутри Remnanode |
+
+**Отдельного XHTTP backend-порта в этой схеме нет.**
+
+---
+
+## Основные файлы
+
+| Файл | Назначение |
+|---|---|
+| `install.sh` | установка |
+| `clean-install.sh` | clean reinstall |
+| `full-clean-reinstall.sh` | проверяемый launcher |
+| `install-caddy-node-reality-stream.sh` | основной manager |
+| `install-caddy-node-reality-stream-core.sh` | установка и генерация профиля |
+| `protection-manager.sh` | TCP/2222, RKN/TSPU/GOV, GeoIP, allow/deny |
+| `caddy-resilient-start.sh` | Caddy topology guard |
+
+---
+
+## Supply-chain
+
+Launcher-цепочка использует immutable commit SHA + Git blob SHA:
+
+```text
+install.sh / clean-install.sh
+  -> pinned full-clean-reinstall.sh
+      -> pinned manager
+          -> pinned core / protection / Caddy guard
+```
+
+CI дополнительно проверяет:
+
+- Bash syntax;
+- shellcheck;
+- pin-chain;
+- отсутствие старой схемы с отдельным XHTTP backend-портом;
+- обязательный XHTTP+REALITY профиль на `0.0.0.0:443`;
+- `mode:auto`;
+- `target=/dev/shm/nginx.sock`;
+- наличие RKN-пункта в основном меню;
+- защиту manager от перезаписи core.
+
+---
+
+## Что репозиторий не устанавливает
+
+- Remnawave Panel;
+- 3x-ui;
+- Telemt.
+
+Также скрипт не делает глобальный `ufw reset` и не должен трогать чужие Docker-сервисы.
