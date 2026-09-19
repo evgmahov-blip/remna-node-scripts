@@ -46,6 +46,11 @@ network_status(){
   echo '======================================================'
 }
 
+bbr_available(){
+  modprobe tcp_bbr >/dev/null 2>&1 || true
+  sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | tr ' ' '\n' | grep -qx bbr
+}
+
 backup_network_state(){
   local stamp dir
   stamp="$(date +%Y%m%d-%H%M%S)"
@@ -62,12 +67,16 @@ backup_network_state(){
 
 apply_bbr_tune(){
   need_root
+  if ! bbr_available; then
+    warn 'Текущее ядро не предоставляет TCP BBR. BBR TUNE пропущен; можно использовать пункт BBR3 отдельно.'
+    return 1
+  fi
   backup_network_state
+  rm -f "$SYSCTL_BBR3"
 
   local ram_kb ram_gb
   ram_kb="$(awk '/MemTotal/{print $2; exit}' /proc/meminfo)"
   ram_gb=$((ram_kb / 1024 / 1024))
-  modprobe tcp_bbr >/dev/null 2>&1 || true
 
   if (( ram_gb >= 2 )); then
     cat > "$SYSCTL_TUNE" <<'EOF'
@@ -117,9 +126,34 @@ EOF
     ok "BBR TUNE: SAFE профиль выбран автоматически (RAM=${ram_gb} GB)."
   fi
 
-  sysctl --system >/dev/null
+  if ! sysctl -p "$SYSCTL_TUNE" >/dev/null; then
+    warn "Не удалось применить $SYSCTL_TUNE"
+    return 1
+  fi
   ok "BBR TUNE применён → $SYSCTL_TUNE"
   network_status
+}
+
+ensure_default_tune(){
+  need_root
+
+  if [[ -s "$SYSCTL_BBR3" ]]; then
+    ok 'BBR3 profile уже установлен — стандартный BBR TUNE поверх него не применяю.'
+    return 0
+  fi
+
+  if [[ -s "$SYSCTL_TUNE" ]]; then
+    if bbr_available && sysctl -p "$SYSCTL_TUNE" >/dev/null 2>&1; then
+      if [[ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)" == bbr ]] &&
+         [[ "$(sysctl -n net.core.default_qdisc 2>/dev/null || true)" == fq ]]; then
+        ok 'BBR TUNE уже установлен и активен.'
+        return 0
+      fi
+    fi
+    warn 'Сохранённый BBR TUNE есть, но runtime не совпал — применяю заново.'
+  fi
+
+  apply_bbr_tune
 }
 
 install_bbr3(){
@@ -153,6 +187,7 @@ install_bbr3(){
 
   bash "$tmp" --no
 
+  rm -f "$SYSCTL_TUNE"
   cat > "$SYSCTL_BBR3" <<'EOF'
 # REMNANODE BBR3 profile
 net.core.default_qdisc = fq_codel
@@ -164,7 +199,7 @@ net.core.wmem_max = 33554432
 net.ipv4.tcp_rmem = 4096 87380 33554432
 net.ipv4.tcp_wmem = 4096 65536 33554432
 EOF
-  sysctl --system >/dev/null 2>&1 || true
+  sysctl -p "$SYSCTL_BBR3" >/dev/null 2>&1 || true
 
   echo
   ok 'BBR3 kernel package установлен. Для фактического перехода на новое ядро нужен reboot.'
@@ -200,7 +235,7 @@ menu(){
 
 ================ СЕТЬ / BBR / BBR3 =================
  [1] ПОКАЗАТЬ ТЕКУЩЕЕ СОСТОЯНИЕ
- [2] BBR TUNE — SAFE/HIGHLOAD, БЕЗ ЗАМЕНЫ ЯДРА
+ [2] BBR TUNE — DEFAULT, SAFE/HIGHLOAD, БЕЗ ЗАМЕНЫ ЯДРА
      SOURCE: $BALBUTO_REPO
      RUN:    sudo remnanode-next bbr-tune
 
@@ -234,9 +269,10 @@ main(){
     menu|'') menu ;;
     status) network_status ;;
     tune|bbr-tune) apply_bbr_tune ;;
+    ensure|ensure-default) ensure_default_tune ;;
     bbr3) install_bbr3 ;;
     sources|links) show_sources ;;
-    *) die 'Использование: network-tuning-manager.sh [menu|status|tune|bbr3|sources]' ;;
+    *) die 'Использование: network-tuning-manager.sh [menu|status|tune|ensure-default|bbr3|sources]' ;;
   esac
 }
 

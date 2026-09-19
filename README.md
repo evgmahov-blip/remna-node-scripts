@@ -14,9 +14,10 @@ NEXT восстановлен из source snapshot реально работаю
 - комбинированный профиль **XHTTP + Hysteria2**: TCP/443 + UDP/443;
 - генерация Config Profile и Host для Remnawave;
 - стабильная per-node XHTTP signature;
-- RKN SAFE scanner guard с rollback и self-heal;
+- RKN SAFE scanner guard с rollback и self-heal — **ставится автоматически по умолчанию**;
 - runtime repair для Hysteria cert mount / RKN;
 - маскировочный SelfSteal-сайт;
+- BBR TUNE (SAFE/HIGHLOAD, без замены ядра) — **ставится автоматически по умолчанию**;
 - безопасный backup / clean / reinstall без глобального `ufw reset`;
 - **NEXT V2 для существующей/legacy-ноды**: recovery backup → адресная зачистка старых Remnanode/Caddy/Hysteria/RKN хвостов → свежая установка NEXT.
 
@@ -26,7 +27,7 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/c7c14df65c1164682a866f428b07ea6d6ec84f09/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/f08d953d59e0b0ffdc629e475790f81b805b8f07/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -36,7 +37,7 @@ sudo bash /tmp/remna-install.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/3f9756a6fc9237626f4ee3f986cf9c660abfce54/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/faadb3e777aba2ffcd6b345e47a0263151a0df15/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -66,7 +67,7 @@ CLI:  sudo remnanode-next
  [3]  Профили для копипасты в Remnawave
  [4]  SelfSteal / маскировочный сайт
  [5]  XHTTP signature
- [6]  РКН защита — SAFE scanner guard
+ [6]  РКН защита — SAFE scanner guard (DEFAULT)
  [7]  Runtime repair / guards
  [8]  Базовое управление Remnanode
  [9]  Статус
@@ -74,7 +75,7 @@ CLI:  sudo remnanode-next
  [11] Safe reinstall текущей NEXT-ноды
  [12] NEXT V2 — существующая/legacy нода → очистка хвостов → NEXT
 
- [13] СЕТЬ / BBR TUNE / BBR3
+ [13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
       RUN:    sudo remnanode-next network
       TUNE:   https://github.com/Balbuto/safe-remnanode-setup
       BBR3:   https://github.com/ivan-nginx/bbr3
@@ -234,9 +235,9 @@ sudo remnanode-next network
     RUN:    sudo remnanode-next bbr3
 ```
 
-Рекомендация для обычной production-ноды — сначала **BBR TUNE**: он оставляет текущее ядро, включает BBR + `fq` и автоматически выбирает SAFE/HIGHLOAD по RAM.
+**BBR TUNE теперь включается автоматически при обычной установке и при NEXT V2 migration**, так же как RKN SAFE scanner guard. Он оставляет текущее ядро, включает BBR + `fq` и автоматически выбирает SAFE/HIGHLOAD по RAM. Повторный запуск идемпотентен: если профиль уже активен, он не переустанавливается.
 
-**BBR3** оставлен отдельной осознанной опцией: он устанавливает другое kernel package и требует reboot. Installer закреплён по immutable commit + Git blob SHA. В контейнерах/LXC/OpenVZ BBR3-установка блокируется.
+**BBR3 не ставится автоматически**: он меняет kernel package и требует reboot. Installer закреплён по immutable commit + Git blob SHA. В контейнерах/LXC/OpenVZ BBR3-установка блокируется.
 
 Важно: Hysteria2 использует QUIC и собственный `finalmask.quicParams.congestion=brutal`; TCP BBR/BBR3 не заменяет этот алгоритм. BBR/BBR3 в первую очередь влияет на TCP/XHTTP и общую host-side сетевую очередь.
 
