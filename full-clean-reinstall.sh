@@ -7,8 +7,8 @@ REPO="evgmahov-blip/remna-node-scripts"
 SOURCE_REF="721269e2c48e31b7cac86e04bc14c46b33e31e72"
 SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"
 SOURCE_URL="https://raw.githubusercontent.com/${REPO}/${SOURCE_REF}/vendor/remna-next-source.tar.gz"
-HYSTERIA_OVERLAY_REF="10923927b647881e1ad778835a99ef15b286e85f"
-HYSTERIA_OVERLAY_BLOB_SHA="ad66559279bc77732cac34048526a5cad99a4950"
+HYSTERIA_OVERLAY_REF="89c977baa162c11e6316a0c750c7cdbd5c0b551f"
+HYSTERIA_OVERLAY_BLOB_SHA="ee7f33ab33363e09421688d152e73065320d67c1"
 HYSTERIA_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${HYSTERIA_OVERLAY_REF}/next-installer/remnawave-transport-manager.sh"
 V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"
 V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
@@ -109,12 +109,17 @@ FILES
   [[ "$(git_blob_sha "$overlay")" == "$HYSTERIA_OVERLAY_BLOB_SHA" ]] || die 'Hysteria2 transport overlay не прошёл Git blob SHA.'
   bash -n "$overlay" || die 'Hysteria2 transport overlay не прошёл bash -n.'
   install -m 0700 "$overlay" "$tmp/next-installer/remnawave-transport-manager.sh"
-  grep -Fq '"settings": {"version": 2, "clients": []}' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: clients[] отсутствует.'
-  grep -Fq '"congestion": "$HYSTERIA_CONGESTION"' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: finalmask congestion отсутствует.'
+  grep -Fq '"clients": []' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: clients[] отсутствует.'
+  grep -Fq '"routeOnly": true' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: sniffing/routeOnly отсутствует.'
+  grep -Fq '"minVersion": "1.2"' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: TLS minVersion 1.2 отсутствует.'
+  grep -Fq '"maxVersion": "1.3"' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: TLS maxVersion 1.3 отсутствует.'
+  grep -Fq '"rejectUnknownSni": true' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: rejectUnknownSni отсутствует.'
+  grep -Fq '"enableSessionResumption": true' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: session resumption отсутствует.'
+  grep -Fq 'Final Mask: ПУСТО / DEFAULT' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: Host final-mask guidance отсутствует.'
   grep -Fq 'verify_hysteria_profile_shape' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Hysteria2 overlay: profile guard отсутствует.'
   grep -Fq 'Mapper: ПУСТО.' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Transport overlay: Remnawave VLESS mapper guard отсутствует.'
   grep -Fq 'settings.vnext ДОЛЖЕН содержать РОВНО 1 endpoint' "$tmp/next-installer/remnawave-transport-manager.sh" || die 'Transport overlay: VLESS vnext guard отсутствует.'
-  ok 'Hysteria2 transport overlay применён: Remnawave clients[] + finalmask brutal + profile guard.'
+  ok 'Hysteria2 transport overlay применён: Remnawave clients[] + mobile-compatible TLS/sniffing + profile guard.'
 
   verify_source_file "$tmp/next-installer/rkn-watcher-manager.sh" "$EXPECTED_RKN"
   verify_source_file "$tmp/next-installer/selfsteal-site-manager.sh" "$EXPECTED_SELFSTEAL"
@@ -414,6 +419,37 @@ show_status(){
   fi
 }
 
+hysteria_diag(){
+  sync_next_sources
+  local domain
+  domain="$(cat "$APP_DIR/.node_domain" 2>/dev/null || true)"
+
+  echo '================ HYSTERIA2 DIAGNOSTICS ================'
+  printf 'Domain      : %s\n' "${domain:-unknown}"
+  echo 'UDP/443 listener:'
+  ss -lunp 2>/dev/null | grep -E '(:443[[:space:]]|:443$)' || echo '  НЕТ UDP/443 LISTENER'
+
+  echo
+  echo 'DNS addresses:'
+  if [[ -n "$domain" ]]; then
+    getent ahosts "$domain" 2>/dev/null | awk '!seen[$1]++{print "  " $1}' || true
+  fi
+
+  echo
+  echo 'RKN UDP/443 DROP rule + counters:'
+  if command -v iptables >/dev/null 2>&1 && iptables -nL REMNA_RKN_SCANNERS >/dev/null 2>&1; then
+    iptables -nvxL REMNA_RKN_SCANNERS --line-numbers 2>/dev/null | grep -E 'udp.*dpt:443|udp.*443' || echo '  UDP/443 DROP rule не найден'
+  else
+    echo '  REMNA_RKN_SCANNERS chain не найден'
+  fi
+
+  echo
+  echo 'Подсказка: если UDP/443 слушает, но DROP counter растёт именно при попытке через LTE,'
+  echo 'проблема не в Config Profile, а в RKN scanner guard / IP мобильного оператора.'
+  echo 'Если UDP/443 вообще не слушает — Hysteria inbound не применён в runtime Remnawave.'
+  echo '========================================================='
+}
+
 backup_current(){
   [[ -d "$APP_DIR" ]] || return 0
   local stamp dst rel paths=()
@@ -634,6 +670,7 @@ CLI:  sudo remnanode-next
  [12] NEXT V2 — существующая/legacy нода → очистка хвостов → NEXT
 
  [13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
+ [14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters
       RUN:    sudo remnanode-next network
       TUNE:   https://github.com/Balbuto/safe-remnanode-setup
       BBR3:   https://github.com/ivan-nginx/bbr3
@@ -656,6 +693,7 @@ MENU
       11) run_reinstall; pause ;;
       12) run_existing_node_v2; pause ;;
       13) network_menu ;;
+      14) hysteria_diag; pause ;;
       0|'') return 0 ;;
       *) warn 'Неверный пункт.' ;;
     esac
@@ -685,8 +723,9 @@ main(){
     network-status) sync_next_sources; "$NETWORK" status ;;
     bbr-tune) sync_next_sources; "$NETWORK" tune ;;
     bbr3) sync_next_sources; "$NETWORK" bbr3 ;;
+    hysteria-diag|hy2-diag) hysteria_diag ;;
     sync-source) sync_next_sources ;;
-    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|sync-source]' ;;
+    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|sync-source]' ;;
   esac
 }
 
