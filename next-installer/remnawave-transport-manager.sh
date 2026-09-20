@@ -23,7 +23,6 @@ SELFSTEAL_SOCKET="${SELFSTEAL_SOCKET:-/dev/shm/nginx.sock}"
 REALITY_MIN_CLIENT_VER="${REALITY_MIN_CLIENT_VER:-}"
 XHTTP_SIGNATURE_MODE="${XHTTP_SIGNATURE_MODE:-preserve}"
 HYSTERIA_CERT_MOUNT_ACTION="${HYSTERIA_CERT_MOUNT_ACTION:-}"
-HYSTERIA_CONGESTION="${HYSTERIA_CONGESTION:-brutal}"
 
 mkdir -p "$APP_DIR" "$PROFILE_DIR"
 
@@ -553,40 +552,42 @@ ensure_hysteria_cert_mount(){
 
 verify_hysteria_profile_shape(){
   local file="$1"
-  jq -e --arg congestion "$HYSTERIA_CONGESTION" '
+  jq -e '
     (.inbounds | length) == 1 and
     .inbounds[0].protocol == "hysteria" and
     .inbounds[0].settings.version == 2 and
     (.inbounds[0].settings.clients | type) == "array" and
+    (.inbounds[0].settings | has("users") | not) and
+    .inbounds[0].sniffing.enabled == true and
+    .inbounds[0].sniffing.routeOnly == true and
+    (.inbounds[0].sniffing.destOverride | index("http")) != null and
+    (.inbounds[0].sniffing.destOverride | index("tls")) != null and
+    (.inbounds[0].sniffing.destOverride | index("quic")) != null and
     .inbounds[0].streamSettings.network == "hysteria" and
     .inbounds[0].streamSettings.security == "tls" and
-    .inbounds[0].streamSettings.finalmask.quicParams.congestion == $congestion and
-    (.inbounds[0].streamSettings.tlsSettings.alpn | index("h3")) != null and
+    (.inbounds[0].streamSettings | has("finalmask") | not) and
     .inbounds[0].streamSettings.hysteriaSettings.version == 2 and
-    (.inbounds[0].streamSettings.hysteriaSettings | has("auth") | not)
+    .inbounds[0].streamSettings.hysteriaSettings.udpIdleTimeout == 60 and
+    (.inbounds[0].streamSettings.hysteriaSettings | has("auth") | not) and
+    (.inbounds[0].streamSettings.hysteriaSettings | has("masquerade") | not) and
+    .inbounds[0].streamSettings.tlsSettings.serverName != "" and
+    .inbounds[0].streamSettings.tlsSettings.minVersion == "1.2" and
+    .inbounds[0].streamSettings.tlsSettings.maxVersion == "1.3" and
+    .inbounds[0].streamSettings.tlsSettings.rejectUnknownSni == true and
+    .inbounds[0].streamSettings.tlsSettings.enableSessionResumption == true and
+    (.inbounds[0].streamSettings.tlsSettings.alpn | index("h3")) != null and
+    (.inbounds[0].streamSettings.tlsSettings.certificates | length) == 1
   ' "$file" >/dev/null || {
-    fail "Сгенерированный Hysteria2 профиль не соответствует Remnawave/Xray схеме"
+    fail "Сгенерированный Hysteria2 профиль не соответствует эталонной Remnawave/Xray схеме"
     return 1
   }
 }
 
-hysteria_masquerade_json(){
-  local sz
-  if [[ -s "$WWW_DIR/index.html" ]]; then
-    sz="$(stat -c%s "$WWW_DIR/index.html")"
-    (( sz <= 262144 )) || { fail "index.html слишком велик для Hysteria masquerade ($sz байт; максимум 262144)"; return 1; }
-    jq -Rs '{type:"string",content:.,headers:{"content-type":"text/html; charset=utf-8"},statusCode:200}' < "$WWW_DIR/index.html"
-  else
-    printf '%s\n' '{"type":"string","content":"<!doctype html><html><body><h1>Welcome</h1></body></html>","headers":{"content-type":"text/html; charset=utf-8"},"statusCode":200}'
-  fi
-}
-
 write_hysteria_profile(){
-  local f="$PROFILE_DIR/hysteria2-tls.json" masq tmp inbound
+  local f="$PROFILE_DIR/hysteria2-tls.json" tmp inbound
   inbound="$(inbound_name hysteria)" || return 1
   [[ -s "$CERTS_DIR/fullchain.pem" && -s "$CERTS_DIR/privkey.pem" ]] || { fail "Для Hysteria2 нужны $CERTS_DIR/fullchain.pem и privkey.pem"; return 1; }
   ensure_hysteria_cert_mount
-  masq="$(hysteria_masquerade_json)" || return 1
   tmp="$(mktemp "$PROFILE_DIR/.hysteria2-tls.XXXXXX.json")"
   {
     base_profile_prefix
@@ -596,28 +597,41 @@ write_hysteria_profile(){
       "listen": "$LISTEN_ADDR",
       "port": $PUBLIC_PORT,
       "protocol": "hysteria",
-      "settings": {"version": 2, "clients": []},
+      "settings": {
+        "clients": [],
+        "version": 2
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "routeOnly": true
+      },
       "streamSettings": {
         "network": "hysteria",
         "security": "tls",
-        "finalmask": {
-          "quicParams": {
-            "debug": false,
-            "congestion": "$HYSTERIA_CONGESTION"
-          }
-        },
         "hysteriaSettings": {
           "version": 2,
-          "udpIdleTimeout": 60,
-          "masquerade": $masq
+          "udpIdleTimeout": 60
         },
         "tlsSettings": {
           "serverName": "$(node_domain)",
-          "minVersion": "1.3",
-          "alpn": ["h3"],
+          "minVersion": "1.2",
+          "maxVersion": "1.3",
+          "cipherSuites": "",
+          "rejectUnknownSni": true,
+          "disableSystemRoot": false,
+          "enableSessionResumption": true,
           "certificates": [
-            {"certificateFile": "/etc/xray/certs/fullchain.pem", "keyFile": "/etc/xray/certs/privkey.pem"}
-          ]
+            {
+              "certificateFile": "/etc/xray/certs/fullchain.pem",
+              "keyFile": "/etc/xray/certs/privkey.pem",
+              "ocspStapling": 0,
+              "oneTimeLoading": false,
+              "usage": "encipherment",
+              "buildChain": false
+            }
+          ],
+          "alpn": ["h3"]
         }
       }
     }
@@ -703,9 +717,11 @@ SNI: $d
 Take SNI from address: ON
 ALPN: h3
 Auth: автоматически = UUID пользователя Remnawave; вручную не задавать
-Final Mask JSON: {"quicParams":{"debug":false,"congestion":"$HYSTERIA_CONGESTION"}}
-Ожидаемый Xray outbound: protocol=hysteria; settings.address=$d; settings.port=$PUBLIC_PORT; settings.version=2; hysteriaSettings.auth=<UUID пользователя>; finalmask.quicParams.congestion=$HYSTERIA_CONGESTION
-Masquerade: встроенная копия текущего SelfSteal index.html
+Xray JSON Template override: DEFAULT / пусто
+Mapper: ПУСТО / DEFAULT
+Final Mask: ПУСТО / DEFAULT (Hysteria сам использует brutal по умолчанию)
+Ожидаемый Xray outbound: protocol=hysteria; settings.address=$d; settings.port=$PUBLIC_PORT; settings.version=2; hysteriaSettings.auth=<UUID пользователя>; network=hysteria; security=tls; ALPN=h3
+Server profile: sniffing=http,tls,quic + routeOnly; TLS 1.2..1.3; rejectUnknownSni=true; sessionResumption=true
 HOST
       ;;
   esac
