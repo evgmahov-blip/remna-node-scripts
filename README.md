@@ -139,7 +139,9 @@ SNI: <node-domain>
 Take SNI from address: ON
 ALPN: h3
 Auth: автоматически = UUID пользователя Remnawave
-Final Mask JSON: {"quicParams":{"debug":false,"congestion":"brutal"}}
+Xray JSON Template override: DEFAULT / пусто
+Mapper: ПУСТО / DEFAULT
+Final Mask: ПУСТО / DEFAULT
 ```
 
 Быстрые команды без меню:
@@ -301,7 +303,7 @@ sudo remnanode-next network
 
 **BBR3 не ставится автоматически**: он меняет kernel package и требует reboot. Installer закреплён по immutable commit + Git blob SHA. В контейнерах/LXC/OpenVZ BBR3-установка блокируется.
 
-Важно: Hysteria2 использует QUIC и собственный `finalmask.quicParams.congestion=brutal`; TCP BBR/BBR3 не заменяет этот алгоритм. BBR/BBR3 в первую очередь влияет на TCP/XHTTP и общую host-side сетевую очередь.
+Важно: Hysteria2 использует QUIC и собственный штатный congestion control; отдельный server-side `finalmask` для него теперь не навязывается. TCP BBR/BBR3 не заменяет QUIC congestion control Hysteria2 и в первую очередь влияет на TCP/XHTTP и общую host-side сетевую очередь.
 
 Быстрые команды:
 
