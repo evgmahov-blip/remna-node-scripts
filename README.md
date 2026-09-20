@@ -27,7 +27,7 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/cca781a6377e437b0a41aef9e3b5cb9ed6d18a3a/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/dace560671bfb45e688ac627d8dcca92f08492a7/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -37,7 +37,7 @@ sudo bash /tmp/remna-install.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/fa45a65c478e81b73e8e12788f5bc09c77892e25/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/0786c456738dbf7ab99ab9aab785b72933e6b633/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -64,7 +64,7 @@ CLI:  sudo remnanode-next
 
  [1]  Установка / продолжить настройку NEXT
  [2]  Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)
- [3]  Профили + HOST SETTINGS для копипасты в Remnawave
+ [3]  Config Profile + НАСТРОЙКИ HOST REMNAWAVE
  [4]  SelfSteal / маскировочный сайт
  [5]  XHTTP signature
  [6]  РКН защита — SAFE scanner guard (DEFAULT)
