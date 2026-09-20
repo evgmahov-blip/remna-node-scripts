@@ -84,16 +84,21 @@ jobs:
           set -Eeuo pipefail
 
           t=next-installer/remnawave-transport-manager.sh
-          test "$(git rev-parse HEAD:$t)" = "ad66559279bc77732cac34048526a5cad99a4950"
-          test "$(git rev-parse 10923927b647881e1ad778835a99ef15b286e85f:$t)" = "ad66559279bc77732cac34048526a5cad99a4950"
+          test "$(git rev-parse HEAD:$t)" = "ee7f33ab33363e09421688d152e73065320d67c1"
+          test "$(git rev-parse 89c977baa162c11e6316a0c750c7cdbd5c0b551f:$t)" = "ee7f33ab33363e09421688d152e73065320d67c1"
 
-          grep -Fq 'HYSTERIA_CONGESTION="${HYSTERIA_CONGESTION:-brutal}"' "$t"
-          grep -Fq '"settings": {"version": 2, "clients": []}' "$t"
-          grep -Fq '"congestion": "$HYSTERIA_CONGESTION"' "$t"
+          grep -Fq '"clients": []' "$t"
+          grep -Fq '"routeOnly": true' "$t"
+          grep -Fq '"destOverride": ["http", "tls", "quic"]' "$t"
+          grep -Fq '"minVersion": "1.2"' "$t"
+          grep -Fq '"maxVersion": "1.3"' "$t"
+          grep -Fq '"rejectUnknownSni": true' "$t"
+          grep -Fq '"enableSessionResumption": true' "$t"
           grep -Fq 'verify_hysteria_profile_shape(){' "$t"
           grep -Fq 'hysteriaSettings.auth=<UUID пользователя>' "$t"
-          grep -Fq 'Final Mask JSON:' "$t"
+          grep -Fq 'Final Mask: ПУСТО / DEFAULT' "$t"
           grep -Fq 'Mapper: ПУСТО.' "$t"
+          ! grep -Fq 'HYSTERIA_CONGESTION=' "$t"
           grep -Fq 'settings.vnext ДОЛЖЕН содержать РОВНО 1 endpoint' "$t"
           grep -Fq 'vnext should have one and only one member' "$t"
 
@@ -152,7 +157,9 @@ jobs:
           grep -Fq '"network": "hysteria"' "$t"
           grep -Fq '"security": "tls"' "$t"
           grep -Fq '"alpn": ["h3"]' "$t"
-          grep -Fq '"finalmask": {' "$t"
+          grep -Fq '"routeOnly": true' "$t"
+          grep -Fq '"minVersion": "1.2"' "$t"
+          grep -Fq '"maxVersion": "1.3"' "$t"
           grep -Fq 'xhttp-hysteria2.json' "$t"
 
           grep -Fq 'remnawave-nginx:' "$base"
@@ -211,6 +218,9 @@ jobs:
           grep -Fq '[6] ТОЛЬКО HOST HYSTERIA2' full-clean-reinstall.sh
           grep -Fq 'host-hysteria2|host-hysteria)' full-clean-reinstall.sh
           grep -Fq '[13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)' full-clean-reinstall.sh
+          grep -Fq '[14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters' full-clean-reinstall.sh
+          grep -Fq 'hysteria-diag|hy2-diag)' full-clean-reinstall.sh
+          grep -Fq 'RKN UDP/443 DROP rule + counters:' full-clean-reinstall.sh
           grep -Fq 'https://github.com/Balbuto/safe-remnanode-setup' full-clean-reinstall.sh
           grep -Fq 'https://github.com/ivan-nginx/bbr3' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next network' full-clean-reinstall.sh
@@ -240,8 +250,8 @@ jobs:
           grep -Fq 'TASK_NAME="REMNA NODE NEXT"' full-clean-reinstall.sh
           grep -Fq 'SOURCE_REF="721269e2c48e31b7cac86e04bc14c46b33e31e72"' full-clean-reinstall.sh
           grep -Fq 'SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"' full-clean-reinstall.sh
-          grep -Fq 'HYSTERIA_OVERLAY_REF="10923927b647881e1ad778835a99ef15b286e85f"' full-clean-reinstall.sh
-          grep -Fq 'HYSTERIA_OVERLAY_BLOB_SHA="ad66559279bc77732cac34048526a5cad99a4950"' full-clean-reinstall.sh
+          grep -Fq 'HYSTERIA_OVERLAY_REF="89c977baa162c11e6316a0c750c7cdbd5c0b551f"' full-clean-reinstall.sh
+          grep -Fq 'HYSTERIA_OVERLAY_BLOB_SHA="ee7f33ab33363e09421688d152e73065320d67c1"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
           grep -Fq 'REMNANODE NEXT — MAIN' full-clean-reinstall.sh
@@ -254,7 +264,7 @@ jobs:
           overlay_ref="$(sed -n 's/^HYSTERIA_OVERLAY_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           v2_ref="$(sed -n 's/^V2_CLEANUP_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
-          test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "ad66559279bc77732cac34048526a5cad99a4950"
+          test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "ee7f33ab33363e09421688d152e73065320d67c1"
           test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
 
           for launcher in install.sh clean-install.sh; do
@@ -272,7 +282,10 @@ jobs:
           grep -Fq 'XHTTP + Hysteria2' README.md
           grep -Fq 'SAFE scanner guard' README.md
           grep -Fq 'settings.clients: []' README.md
-          grep -Fq 'finalmask.quicParams.congestion: brutal' README.md
+          grep -Fq 'Final Mask: ПУСТО / DEFAULT' README.md
+          grep -Fq 'sniffing.routeOnly: true' README.md
+          grep -Fq 'rejectUnknownSni: true' README.md
+          grep -Fq 'sudo remnanode-next hysteria-diag' README.md
           grep -Fq 'Они **не являются main installer**' README.md
           grep -Fq 'Installer их из bundle **не устанавливает**' README.md
           grep -Fq 'NEXT V2 migration' README.md
@@ -286,7 +299,7 @@ jobs:
           grep -Fq 'ровно один' README.md
           grep -Fq 'ТОЛЬКО HOST HYSTERIA2' README.md
           grep -Fq 'sudo remnanode-next host-hysteria2' README.md
-          grep -Fq 'Final Mask JSON:' README.md
+          grep -Fq 'HOST HYSTERIA2' README.md
 
       - name: Legacy safety guard
         shell: bash
