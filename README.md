@@ -27,7 +27,7 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/dace560671bfb45e688ac627d8dcca92f08492a7/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/b3779b0bcf9e50d6423478cb29fbc8f57f1c4d2f/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -37,7 +37,7 @@ sudo bash /tmp/remna-install.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/0786c456738dbf7ab99ab9aab785b72933e6b633/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/93c28cc0489c03beb9c32ea0573bca774be7c652/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -76,7 +76,10 @@ CLI:  sudo remnanode-next
  [12] NEXT V2 — существующая/legacy нода → очистка хвостов → NEXT
 
  [13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
-      RUN:    sudo remnanode-next network
+ [14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters
+      RUN:    sudo remnanode-next hysteria-diag
+
+      NETWORK: sudo remnanode-next network
       TUNE:   https://github.com/Balbuto/safe-remnanode-setup
       BBR3:   https://github.com/ivan-nginx/bbr3
 
@@ -136,7 +139,9 @@ SNI: <node-domain>
 Take SNI from address: ON
 ALPN: h3
 Auth: автоматически = UUID пользователя Remnawave
-Final Mask JSON: {"quicParams":{"debug":false,"congestion":"brutal"}}
+Xray JSON Template override: DEFAULT / пусто
+Mapper: ПУСТО / DEFAULT
+Final Mask: ПУСТО / DEFAULT
 ```
 
 Быстрые команды без меню:
@@ -161,62 +166,58 @@ sudo remnanode-next current-profile
 
 JSON XHTTP/REALITY содержит private key — не публикуйте его.
 
-### Hysteria2: совместимость с рабочим Xray/Remnawave профилем
+### Hysteria2: нормальный Remnawave/Xray профиль
 
-Эталонный recovered bundle оставлен **байт-в-байт неизменным**. Исправленный transport-manager хранится отдельно в репозитории как immutable overlay:
+Hysteria2 profile собран из трёх источников: восстановленного NEXT generator, реально сгенерированного Remnawave profile и проверенного рабочего Hysteria2 inbound.
 
-```text
-next-installer/remnawave-transport-manager.sh
-```
-
-NEXT launcher проверяет overlay по commit SHA + Git blob SHA и только после этого ставит его поверх recovered transport-manager.
-
-Исправленный Hysteria2 server profile:
+В Remnawave оставляется только то, что нужно Xray и панели:
 
 - `protocol: hysteria`;
+- `settings.clients: []` — Remnawave сам добавляет пользователей и `auth`;
 - `settings.version: 2`;
-- `settings.clients: []` — Remnawave сам добавляет каждому пользователю `auth = UUID`;
+- `sniffing.enabled: true`;
+- `sniffing.destOverride: [http, tls, quic]`;
+- `sniffing.routeOnly: true`;
 - `network: hysteria`;
 - `security: tls`;
-- ALPN `h3`;
-- `finalmask.quicParams.congestion: brutal`;
 - `hysteriaSettings.version: 2`;
-- `hysteriaSettings.auth` на сервере **не хардкодится**;
-- перед сохранением профиль проходит отдельный shape-check и затем штатный `rw-core/Xray run -test`.
+- `hysteriaSettings.udpIdleTimeout: 60`;
+- TLS `minVersion: 1.2`, `maxVersion: 1.3`;
+- `rejectUnknownSni: true`;
+- `enableSessionResumption: true`;
+- ALPN `h3`;
+- сертификат и ключ из `/etc/xray/certs`.
 
-Ключевая часть рабочего клиентского outbound, который должен получить пользователь из Remnawave:
+По умолчанию **не добавляются**:
 
-```json
-{
-  "protocol": "hysteria",
-  "settings": {
-    "address": "<node-domain>",
-    "port": 443,
-    "version": 2
-  },
-  "streamSettings": {
-    "finalmask": {
-      "quicParams": {
-        "congestion": "brutal"
-      }
-    },
-    "hysteriaSettings": {
-      "auth": "<UUID-пользователя>",
-      "version": 2
-    },
-    "network": "hysteria",
-    "security": "tls",
-    "tlsSettings": {
-      "alpn": ["h3"],
-      "serverName": "<node-domain>"
-    }
-  }
-}
+- `settings.users` — Remnawave использует `clients`;
+- server-side `finalmask` — Hysteria и без него использует свой штатный congestion control;
+- `masquerade` — он не нужен для рабочего authenticated Hysteria2 и только усложняет профиль;
+- `hysteriaSettings.auth` — auth добавляет Remnawave per-user.
+
+Host Hysteria2:
+
+```text
+Address: <node-domain>
+Port: 443
+Transport: Hysteria2 / UDP
+Security Layer: DEFAULT
+SNI: <node-domain>
+Take SNI from address: ON
+ALPN: h3
+Auth: автоматически = UUID пользователя Remnawave
+Xray JSON Template override: DEFAULT / пусто
+Mapper: ПУСТО / DEFAULT
+Final Mask: ПУСТО / DEFAULT
 ```
 
-Поля DNS, SOCKS/HTTP local inbounds, metrics, routing и mux в полном клиентском JSON относятся к шаблону клиента и **не являются частью server Config Profile**.
+Быстрая диагностика Hysteria2:
 
-`masquerade` остаётся серверной настройкой и не обязан присутствовать в клиентском JSON.
+```bash
+sudo remnanode-next hysteria-diag
+```
+
+Она показывает UDP/443 listener, DNS адреса ноды и counters правила RKN scanner guard для UDP/443. Если UDP/443 слушает, но DROP counter растёт именно во время попытки через LTE, проблема уже не в Config Profile, а в firewall/RKN path для IP мобильного оператора.
 
 ## Рабочая архитектура
 
@@ -302,7 +303,7 @@ sudo remnanode-next network
 
 **BBR3 не ставится автоматически**: он меняет kernel package и требует reboot. Installer закреплён по immutable commit + Git blob SHA. В контейнерах/LXC/OpenVZ BBR3-установка блокируется.
 
-Важно: Hysteria2 использует QUIC и собственный `finalmask.quicParams.congestion=brutal`; TCP BBR/BBR3 не заменяет этот алгоритм. BBR/BBR3 в первую очередь влияет на TCP/XHTTP и общую host-side сетевую очередь.
+Важно: Hysteria2 использует QUIC и собственный штатный congestion control; отдельный server-side `finalmask` для него теперь не навязывается. TCP BBR/BBR3 не заменяет QUIC congestion control Hysteria2 и в первую очередь влияет на TCP/XHTTP и общую host-side сетевую очередь.
 
 Быстрые команды:
 

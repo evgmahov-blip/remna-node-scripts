@@ -30,13 +30,17 @@ A corrected transport manager is stored as:
 `next-installer/remnawave-transport-manager.sh`
 
 Pinned overlay:
-- source commit: `5d022cef3efd046844445c06a1d1ba387359c2c8`
-- Git blob SHA: `dbb3a99a9c2a1f442c9e0e19fbebf3ec9d6d871f`
+- source commit: `89c977baa162c11e6316a0c750c7cdbd5c0b551f`
+- Git blob SHA: `ee7f33ab33363e09421688d152e73065320d67c1`
 
-The overlay keeps the recovered NEXT transport logic but fixes the Hysteria2 profile shape to match current Remnawave/Xray behavior:
-- server `settings.clients: []`, which Remnawave populates with per-user `auth`;
-- `streamSettings.finalmask.quicParams.congestion = brutal`;
-- Hysteria transport version 2, TLS, ALPN `h3`;
-- a local shape guard rejects a generated Hysteria profile if these fields drift.
+The overlay keeps the recovered NEXT transport logic but normalizes Hysteria2 for current Remnawave/Xray and the supplied known-working inbound:
+- server `settings.clients: []`, populated by Remnawave with per-user `auth`;
+- no legacy `settings.users`;
+- sniffing enabled for `http,tls,quic` with `routeOnly=true`;
+- Hysteria transport version 2 with `udpIdleTimeout=60`;
+- TLS `1.2..1.3`, ALPN `h3`, SNI validation and session resumption;
+- no forced server-side `finalmask`;
+- no embedded `masquerade` page;
+- a local shape guard rejects drift before profile installation.
 
 The original recovered transport SHA256 remains listed above for provenance; the overlay is intentionally a maintained derivative.
