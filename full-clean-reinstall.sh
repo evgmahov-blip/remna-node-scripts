@@ -214,7 +214,7 @@ copy_profile_menu(){
     cat <<'MENU'
 
 ────────────────────────────────────────────────────────────
-REMNAWAVE — CONFIG PROFILE + HOST SETTINGS
+REMNAWAVE — CONFIG PROFILE + НАСТРОЙКИ HOST
 ────────────────────────────────────────────────────────────
  [1] XHTTP + REALITY         (TCP/443)
      → JSON Config Profile + HOST XHTTP
@@ -622,7 +622,7 @@ CLI:  sudo remnanode-next
 ────────────────────────────────────────────────────────────
  [1]  Установка / продолжить настройку NEXT
  [2]  Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)
- [3]  Профили + HOST SETTINGS для копипасты в Remnawave
+ [3]  Config Profile + НАСТРОЙКИ HOST REMNAWAVE
  [4]  SelfSteal / маскировочный сайт
  [5]  XHTTP signature
  [6]  РКН защита — SAFE scanner guard (DEFAULT)
