@@ -16,8 +16,8 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"
 NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="dc0309629c96e686939405213e1e0cd3490fdb61"
-TESTER_BLOB_SHA="686019ebd5cdb343798fa715a898f05ca841e0a3"
+TESTER_REF="6deb731d83d3558368300fc4bbb2c44674797c1f"
+TESTER_BLOB_SHA="cd60f918443794a5e29197f18870a344f1b4878d"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 APP_DIR="/opt/remnanode"
@@ -172,6 +172,10 @@ FILES
   grep -Fq 'NEXTTRACE_VERSION="v1.7.3"' "$tester" || die 'Server Multitest: NextTrace version pin отсутствует.'
   grep -Fq 'aa75440fcdee46c16d941f48f9dabee1eb4c35bea6b739b0960fcf8307088c29' "$tester" || die 'Server Multitest: NextTrace amd64 SHA256 pin отсутствует.'
   grep -Fq 'Автоматический режим: все тесты идут подряд без подтверждений.' "$tester" || die 'Server Multitest: automatic all mode отсутствует.'
+  grep -Fq 'AI_REPORT.txt' "$tester" || die 'Server Multitest: AI report отсутствует.'
+  grep -Fq 'summary.tsv' "$tester" || die 'Server Multitest: summary.tsv отсутствует.'
+  grep -Fq 'show_latest_analysis(){' "$tester" || die 'Server Multitest: analyze command отсутствует.'
+  grep -Fq '98) Анализ последнего прогона' "$tester" || die 'Server Multitest: analysis menu item отсутствует.'
   ! sed -n '/run_all(){/,/^}/p' "$tester" | grep -Fq 'read -r action' || die 'Server Multitest: all mode снова требует Enter.'
   if grep -Eq '(^|[^[:alnum:]])http://' "$tester"; then
     die 'Server Multitest содержит небезопасный HTTP URL.'

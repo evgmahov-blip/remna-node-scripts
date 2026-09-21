@@ -246,6 +246,25 @@ sudo remnanode-next multitest 12
 
 В режиме `99/all` **ничего дополнительно нажимать не нужно**: после выбора режима все тесты запускаются автоматически один за другим. Ctrl+C во время конкретного теста прерывает только его и переводит к следующему. В конце выводится PASS/FAIL/SKIP/TOTAL.
 
+Каждый полный прогон автоматически сохраняется в `/var/log/remnanode-next/multitest/<UTC-run-id>/`:
+
+- `summary.tsv` — test/name/status/duration/rc;
+- отдельный `*.log` для каждого теста;
+- `analysis.txt` — локальная детерминированная выжимка;
+- `AI_REPORT.txt` — компактный отчёт для дальнейшего анализа в ChatGPT/другой модели;
+- `latest.path` указывает на последний прогон.
+
+Команды:
+
+```bash
+sudo remnanode-next multitest analyze
+sudo remnanode-next multitest report
+```
+
+`analyze` повторно строит и показывает анализ последнего прогона. `report` показывает каталог и пути к `analysis.txt`, `AI_REPORT.txt` и raw logs. В меню также есть пункт `98) Анализ последнего прогона`.
+
+Локальный анализ намеренно осторожный: он выделяет FAIL/timeout, длительность, Cloudflare throughput и ключевые строки из geo/IP-quality/fio/CPU/MTR/PMTU/Globalping. FAIL означает ошибку/timeout теста, а не автоматически плохую ноду; geo/risk базы и скорости нужно оценивать вместе.
+
 Tester не меняет firewall, sysctl, Docker или конфигурацию Remnawave. Он может доустановить только утилиту, необходимую выбранному тесту (`iperf3`, `sysbench`, `traceroute`, `jq` и т.п.).
 
 После отдельного аудита tester дополнительно исправлен:
