@@ -245,7 +245,7 @@ sudo remnanode-next multitest 17
 14  Ping yandex.ru
 15  NextTrace Route/MTR — loss/jitter/ASN/geo
 16  NextTrace Path MTU — UDP PMTU
-17  NextTrace Globalping — внешние точки → эта нода
+17  NextTrace Globalping — внешние TCP/443 точки → эта нода
 99  все тесты автоматически
 ```
 
@@ -265,7 +265,7 @@ Tester не меняет firewall, sysctl, Docker или конфигураци�
 - NextTrace не добавляет внешний APT repository: full binary скачивается из официального GitHub release, проверяется закреплённым SHA256 и кешируется вне PATH;
 - NextTrace MTR проверяет TCP/443 с 10 пробами на hop и показывает loss/jitter/ASN/geo;
 - Path MTU делает отдельный UDP PMTU discovery;
-- Globalping запускает внешние traceroute к домену ноды из Europe, North America и Asia; target берётся из `/opt/remnanode/.node_domain` или `NODE_TEST_TARGET`.
+- Globalping запускает внешние TCP/443 traceroute к домену ноды из Europe, North America и Asia; target берётся из `/opt/remnanode/.node_domain` или `NODE_TEST_TARGET`.
 
 GitHub-hosted entry scripts Censorcheck, RU iPerf3, YABS, RegionRestrictionCheck и IPQuality закреплены конкретными commit + Git blob SHA и проверяются перед запуском. `bench.tlab.pw` остаётся динамическим HTTPS entry script и явно помечается предупреждением. Некоторые сами тестеры после старта обращаются к собственным внешним API/data-файлам, поэтому pin entry script не означает pin всех сетевых данных.
 
