@@ -476,7 +476,7 @@ hysteria_diag(){
       check_runtime 'sniffing http,tls,quic + routeOnly' '([.inbounds[]? | select(.protocol=="hysteria")][0].sniffing.enabled == true) and ([.inbounds[]? | select(.protocol=="hysteria")][0].sniffing.routeOnly == true) and (([.inbounds[]? | select(.protocol=="hysteria")][0].sniffing.destOverride // []) | index("http") != null) and (([.inbounds[]? | select(.protocol=="hysteria")][0].sniffing.destOverride // []) | index("tls") != null) and (([.inbounds[]? | select(.protocol=="hysteria")][0].sniffing.destOverride // []) | index("quic") != null)'
       check_runtime 'server-side masquerade отсутствует' '([.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.hysteriaSettings | has("masquerade")) | not'
       check_runtime 'server-side finalmask отсутствует' '([.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings | has("finalmask")) | not'
-      check_runtime 'TLS SNI совпадает с node domain' --arg d "$domain" '[.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.tlsSettings.serverName == $d'
+      check_runtime 'TLS SNI совпадает с node domain' "[.inbounds[]? | select(.protocol==\"hysteria\")][0].streamSettings.tlsSettings.serverName == \"$domain\""
       check_runtime 'TLS 1.2..1.3' '([.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.tlsSettings.minVersion == "1.2") and ([.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.tlsSettings.maxVersion == "1.3")'
       check_runtime 'rejectUnknownSni=true' '[.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.tlsSettings.rejectUnknownSni == true'
       check_runtime 'enableSessionResumption=true' '[.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.tlsSettings.enableSessionResumption == true'
