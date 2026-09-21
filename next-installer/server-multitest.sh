@@ -389,7 +389,7 @@ test_nexttrace_globalping(){
   for from in Europe "North America" Asia; do
     echo
     printf '%s--- from %s ---%s\n' "$C_CYAN" "$from" "$C_RESET"
-    if timeout 120 "$NEXTTRACE_BIN" "$target" --from "$from" --language en --no-color; then
+    if timeout 120 "$NEXTTRACE_BIN" "$target" --from "$from" --tcp --port 443 --language en --no-color; then
       ok_count=$((ok_count+1))
     else
       warn "Globalping from $from завершился ошибкой."
@@ -456,7 +456,7 @@ print_list(){
 14) Ping yandex.ru
 15) NextTrace Route/MTR — loss/jitter/ASN/geo
 16) NextTrace Path MTU — UDP PMTU
-17) NextTrace Globalping — внешние точки → эта нода
+17) NextTrace Globalping — внешние TCP/443 точки → эта нода
 99) Мультитест: все тесты автоматически
 EOF
 }
@@ -535,7 +535,6 @@ menu(){
         ;;
       99)
         run_all || true
-        pause
         ;;
       0|'')
         return 0
