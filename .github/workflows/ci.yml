@@ -116,14 +116,16 @@ jobs:
           set -Eeuo pipefail
 
           t=next-installer/server-multitest.sh
-          test "$(git rev-parse HEAD:$t)" = "2cc4cba0df9176fa169b4d4caec7f2511fdc4559"
-          test "$(git rev-parse bb2597c8da6c7476a9d42f3c403b67511ca5a2b1:$t)" = "2cc4cba0df9176fa169b4d4caec7f2511fdc4559"
+          test "$(git rev-parse HEAD:$t)" = "03b001e5c233d36e79cffae5de537ebb7e2d4c75"
+          test "$(git rev-parse db7fa654d97c57d2dbab5f2335a9f50c5b9e5a91:$t)" = "03b001e5c233d36e79cffae5de537ebb7e2d4c75"
 
           grep -Fq 'Balbuto/safe-remnanode-setup' "$t"
           grep -Fq '274d84d9daa3b4d4a33264ba77992210aedd9b32' "$t"
           grep -Fq 'Censorcheck — DPI' "$t"
           grep -Fq 'iPerf3 — bench.tlab.pw' "$t"
-          grep -Fq 'YABS' "$t"
+          grep -Fq 'YABS — disk/network, Geekbench OFF' "$t"
+          grep -Fq 'run_external_script_timeout 600 "YABS' "$t"
+          grep -Fq '"$YABS_URL" "$YABS_BLOB_SHA" -g' "$t"
           grep -Fq 'Geo/Media Unlock — RegionRestrictionCheck' "$t"
           grep -Fq 'IPQuality — ASN / risk / blacklist / media / mail' "$t"
           grep -Fq 'CENSOR_BLOB_SHA=' "$t"
@@ -151,8 +153,8 @@ jobs:
           bash "$t" list | grep -Fq '17) NextTrace Globalping'
           ! grep -Eq '(^|[^[:alnum:]])http://' "$t"
 
-          grep -Fq 'TESTER_REF="bb2597c8da6c7476a9d42f3c403b67511ca5a2b1"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="2cc4cba0df9176fa169b4d4caec7f2511fdc4559"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="db7fa654d97c57d2dbab5f2335a9f50c5b9e5a91"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="03b001e5c233d36e79cffae5de537ebb7e2d4c75"' full-clean-reinstall.sh
           grep -Fq 'server-multitest.sh' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next multitest' full-clean-reinstall.sh
           grep -Fq 'multitest|server-test|tests)' full-clean-reinstall.sh
@@ -243,8 +245,8 @@ jobs:
           grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_REF="bb2597c8da6c7476a9d42f3c403b67511ca5a2b1"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="2cc4cba0df9176fa169b4d4caec7f2511fdc4559"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="db7fa654d97c57d2dbab5f2335a9f50c5b9e5a91"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="03b001e5c233d36e79cffae5de537ebb7e2d4c75"' full-clean-reinstall.sh
           grep -Fq 'run_existing_node_v2(){' full-clean-reinstall.sh
           grep -Fq 'NEXT V2 — существующая/legacy нода' full-clean-reinstall.sh
           grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
@@ -323,7 +325,7 @@ jobs:
           test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
           test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "62ff1364c26d88f357968422d5591b3d2b8d9e78"
           test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
-          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "2cc4cba0df9176fa169b4d4caec7f2511fdc4559"
+          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "03b001e5c233d36e79cffae5de537ebb7e2d4c75"
 
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
@@ -368,6 +370,8 @@ jobs:
           grep -Fq 'Geo/Media Unlock — RegionRestrictionCheck' README.md
           grep -Fq 'Geekbench 4' README.md
           grep -Fq 'PASS/FAIL/SKIP' README.md
+          grep -Fq 'Geekbench OFF' README.md
+          grep -Fq 'hard timeout 600 секунд' README.md
           grep -Fq 'NextTrace Route/MTR' README.md
           grep -Fq 'NextTrace Path MTU' README.md
           grep -Fq 'NextTrace Globalping' README.md
