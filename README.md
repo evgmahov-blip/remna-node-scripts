@@ -261,6 +261,8 @@ Tester не меняет firewall, sysctl, Docker или конфигураци�
 - дублирующий IP-quality пункт заменён на `RegionRestrictionCheck` для geo/media unlock;
 - ошибки выбранных тестов больше не скрываются через `|| true`; режим `99/all` показывает PASS/FAIL/SKIP;
 - Network Bench выводит Mbit/s и использует только HTTPS;
+- в `99/all` YABS запускается в быстром режиме `-g -r`: Geekbench отключён как дублирующий sysbench CPU, число iperf-точек сокращено; YABS ограничен 15 минутами;
+- при ручном запуске теста 6 YABS остаётся полным, включая Geekbench.
 - добавлен официальный **NextTrace v1.7.3**: Route/MTR, Path MTU и Globalping;
 - NextTrace не добавляет внешний APT repository: full binary скачивается из официального GitHub release, проверяется закреплённым SHA256 и кешируется вне PATH;
 - NextTrace MTR проверяет TCP/443 с 10 пробами на hop и показывает loss/jitter/ASN/geo;
