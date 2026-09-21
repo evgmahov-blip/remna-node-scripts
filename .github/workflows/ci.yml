@@ -116,14 +116,21 @@ jobs:
           set -Eeuo pipefail
 
           t=next-installer/server-multitest.sh
-          test "$(git rev-parse HEAD:$t)" = "2cc4cba0df9176fa169b4d4caec7f2511fdc4559"
-          test "$(git rev-parse bb2597c8da6c7476a9d42f3c403b67511ca5a2b1:$t)" = "2cc4cba0df9176fa169b4d4caec7f2511fdc4559"
+          test "$(git rev-parse HEAD:$t)" = "686019ebd5cdb343798fa715a898f05ca841e0a3"
+          test "$(git rev-parse dc0309629c96e686939405213e1e0cd3490fdb61:$t)" = "686019ebd5cdb343798fa715a898f05ca841e0a3"
 
           grep -Fq 'Balbuto/safe-remnanode-setup' "$t"
           grep -Fq '274d84d9daa3b4d4a33264ba77992210aedd9b32' "$t"
           grep -Fq 'Censorcheck — DPI' "$t"
-          grep -Fq 'iPerf3 — bench.tlab.pw' "$t"
-          grep -Fq 'YABS' "$t"
+          grep -Fq 'YABS — disk fio only' "$t"
+          grep -Fq 'run_external_script_timeout 420 "YABS' "$t"
+          grep -Fq '"$YABS_URL" "$YABS_BLOB_SHA" -ign' "$t"
+          ! grep -Fq 'TLAB_URL=' "$t"
+          ! grep -Fq 'test_iperf_tlab(){' "$t"
+          ! grep -Fq 'test_sysbench_memory(){' "$t"
+          ! grep -Fq 'test_tls(){' "$t"
+          ! grep -Fq 'test_traceroute(){' "$t"
+          ! grep -Fq 'test_ping(){' "$t"
           grep -Fq 'Geo/Media Unlock — RegionRestrictionCheck' "$t"
           grep -Fq 'IPQuality — ASN / risk / blacklist / media / mail' "$t"
           grep -Fq 'CENSOR_BLOB_SHA=' "$t"
@@ -136,7 +143,7 @@ jobs:
           grep -Fq "IFS=' ' read -r bytes speed seconds" "$t"
           grep -Fq 'Итог:' "$t"
           ! grep -Fq '"$YABS_URL" "$YABS_BLOB_SHA" -4' "$t"
-          grep -Fq 'Network Bench (HTTPS 100MB)' "$t"
+          grep -Fq 'Network Bench — HTTPS 100MB' "$t"
           grep -Fq 'https://speed.cloudflare.com/__down?bytes=100000000' "$t"
           grep -Fq 'NEXTTRACE_VERSION="v1.7.3"' "$t"
           grep -Fq 'NEXTTRACE_AMD64_SHA256="aa75440fcdee46c16d941f48f9dabee1eb4c35bea6b739b0960fcf8307088c29"' "$t"
@@ -148,11 +155,16 @@ jobs:
           ! sed -n '/run_all(){/,/^}/p' "$t" | grep -Fq 'read -r action'
           ! sed -n '/99)/,/;;/p' "$t" | grep -Fq 'pause'
           grep -Fq '"$target" --from "$from" --tcp --port 443' "$t"
-          bash "$t" list | grep -Fq '17) NextTrace Globalping'
+          bash "$t" list | grep -Fq '12) NextTrace Globalping'
+          ! bash "$t" list | grep -Fq 'bench.tlab'
+          ! bash "$t" list | grep -Fq 'sysbench Memory'
+          ! bash "$t" list | grep -Fq 'SSL/TLS check'
+          ! bash "$t" list | grep -Fq 'Traceroute yandex'
+          ! bash "$t" list | grep -Fq 'Ping yandex'
           ! grep -Eq '(^|[^[:alnum:]])http://' "$t"
 
-          grep -Fq 'TESTER_REF="bb2597c8da6c7476a9d42f3c403b67511ca5a2b1"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="2cc4cba0df9176fa169b4d4caec7f2511fdc4559"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="dc0309629c96e686939405213e1e0cd3490fdb61"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="686019ebd5cdb343798fa715a898f05ca841e0a3"' full-clean-reinstall.sh
           grep -Fq 'server-multitest.sh' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next multitest' full-clean-reinstall.sh
           grep -Fq 'multitest|server-test|tests)' full-clean-reinstall.sh
@@ -243,8 +255,8 @@ jobs:
           grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_REF="bb2597c8da6c7476a9d42f3c403b67511ca5a2b1"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="2cc4cba0df9176fa169b4d4caec7f2511fdc4559"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="dc0309629c96e686939405213e1e0cd3490fdb61"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="686019ebd5cdb343798fa715a898f05ca841e0a3"' full-clean-reinstall.sh
           grep -Fq 'run_existing_node_v2(){' full-clean-reinstall.sh
           grep -Fq 'NEXT V2 — существующая/legacy нода' full-clean-reinstall.sh
           grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
@@ -270,7 +282,7 @@ jobs:
           grep -Fq '[13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)' full-clean-reinstall.sh
           grep -Fq '[14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters' full-clean-reinstall.sh
           grep -Fq '[15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА — Balbuto Module D' full-clean-reinstall.sh
-          grep -Fq 'sudo remnanode-next multitest 1..17' full-clean-reinstall.sh
+          grep -Fq 'sudo remnanode-next multitest 1..12' full-clean-reinstall.sh
           grep -Fq 'hysteria-diag|hy2-diag)' full-clean-reinstall.sh
           grep -Fq 'RKN UDP/443 DROP rule + counters:' full-clean-reinstall.sh
           grep -Fq 'cli --dump-config-raw' full-clean-reinstall.sh
@@ -323,7 +335,7 @@ jobs:
           test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
           test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "62ff1364c26d88f357968422d5591b3d2b8d9e78"
           test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
-          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "2cc4cba0df9176fa169b4d4caec7f2511fdc4559"
+          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "686019ebd5cdb343798fa715a898f05ca841e0a3"
 
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
@@ -368,6 +380,10 @@ jobs:
           grep -Fq 'Geo/Media Unlock — RegionRestrictionCheck' README.md
           grep -Fq 'Geekbench 4' README.md
           grep -Fq 'PASS/FAIL/SKIP' README.md
+          grep -Fq 'YABS — disk fio only' README.md
+          grep -Fq 'hard timeout — 420 секунд' README.md
+          grep -Fq 'bench.tlab' README.md
+          grep -Fq 'sysbench Memory' README.md
           grep -Fq 'NextTrace Route/MTR' README.md
           grep -Fq 'NextTrace Path MTU' README.md
           grep -Fq 'NextTrace Globalping' README.md

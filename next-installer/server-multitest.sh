@@ -16,7 +16,7 @@ IFS=$'\n\t'
 # - dependencies are installed only when the selected test needs them;
 # - failed tests propagate a non-zero result instead of being silently hidden;
 # - duplicate IP-quality test replaced with a geo/media unlock test;
-# - YABS is run without the incorrect "-4" flag ("-4" means Geekbench 4, not IPv4).
+# - YABS is disk-only (-ign): iperf/Geekbench/network-info are covered elsewhere.
 # - NextTrace full binary v1.7.3 is downloaded from the official GitHub release,
 #   pinned by upstream SHA256, and cached outside PATH for MTR/PMTU/Globalping tests.
 # - all/99 runs every test automatically without per-test Enter prompts.
@@ -45,7 +45,6 @@ IPQUALITY_REF="2384a67c756eb35231f5982b34731e522be3653e"
 IPQUALITY_BLOB_SHA="086792f3be803fa0b1c0af6eb9247207abb7e182"
 IPQUALITY_URL="https://raw.githubusercontent.com/xykt/IPQuality/${IPQUALITY_REF}/ip.sh"
 
-TLAB_URL="https://bench.tlab.pw"
 NETWORK_BENCH_URL="https://speed.cloudflare.com/__down?bytes=100000000"
 
 NEXTTRACE_VERSION="v1.7.3"
@@ -167,6 +166,35 @@ run_external_script(){
   return "$rc"
 }
 
+run_external_script_timeout(){
+  local seconds="$1" name="$2" url="$3" expected_blob="${4:-}"
+  shift 4
+  local tmp rc=0
+  need_cmd timeout coreutils || return 1
+  tmp="$(mktemp "/tmp/remna-multitest.XXXXXX.sh")"
+  echo
+  printf '%s================ %s ================%s\n' "$C_CYAN" "$name" "$C_RESET"
+  say "Execution timeout: ${seconds}s"
+  if [[ -n "$expected_blob" ]]; then
+    say "Entry script pinned: $expected_blob"
+  else
+    warn 'Этот внешний entry script не имеет закреплённого upstream SHA.'
+  fi
+  if download_external_script "$name" "$url" "$tmp" "$expected_blob"; then
+    set +e
+    timeout --signal=INT --kill-after=30 "${seconds}s" bash "$tmp" "$@"
+    rc=$?
+    set -e
+    if (( rc == 124 )); then
+      warn "$name превысил лимит ${seconds}s и остановлен."
+    fi
+  else
+    rc=1
+  fi
+  rm -f "$tmp"
+  return "$rc"
+}
+
 prepare_censorcheck(){
   need_cmd curl curl ca-certificates
   need_cmd dig dnsutils
@@ -273,14 +301,11 @@ test_iperf_ru(){
   run_external_script     "iPerf3 — RU сервера"     "$IPERF_RU_URL"     "$IPERF_RU_BLOB_SHA"
 }
 
-test_iperf_tlab(){
-  need_cmd iperf3 iperf3
-  run_external_script     "iPerf3 — bench.tlab.pw"     "$TLAB_URL"     ""
-}
 
 test_yabs(){
-  # В YABS -4 = Geekbench 4, а не IPv4. Запускаем обычный актуальный профиль.
-  run_external_script     "YABS"     "$YABS_URL"     "$YABS_BLOB_SHA"
+  # Сеть отдельно измеряется iPerf3 + Cloudflare, CPU — sysbench.
+  # YABS оставляем только для fio disk I/O: -i отключает iperf, -g Geekbench, -n network info.
+  run_external_script_timeout 420 "YABS — disk fio only" "$YABS_URL" "$YABS_BLOB_SHA" -ign
 }
 
 test_geo_unlock(){
@@ -301,10 +326,6 @@ test_sysbench_cpu(){
   sysbench cpu --cpu-max-prime=20000 run
 }
 
-test_sysbench_memory(){
-  need_cmd sysbench sysbench
-  sysbench memory run
-}
 
 test_network_100mb(){
   need_cmd curl curl ca-certificates
@@ -321,36 +342,8 @@ test_network_100mb(){
   '
 }
 
-test_tls(){
-  need_cmd openssl openssl
-  local failed=0 out
-  out="$(openssl s_client -brief -connect google.com:443 -servername google.com -tls1_2 </dev/null 2>&1)" || failed=1
-  if grep -Eq 'Protocol version: TLSv1\.2|Protocol[[:space:]]*:[[:space:]]*TLSv1\.2' <<<"$out"; then
-    say 'TLS 1.2 OK'
-  else
-    say 'TLS 1.2 недоступен'
-    failed=1
-  fi
 
-  out="$(openssl s_client -brief -connect google.com:443 -servername google.com -tls1_3 </dev/null 2>&1)" || failed=1
-  if grep -Eq 'Protocol version: TLSv1\.3|Protocol[[:space:]]*:[[:space:]]*TLSv1\.3' <<<"$out"; then
-    say 'TLS 1.3 OK'
-  else
-    say 'TLS 1.3 недоступен'
-    failed=1
-  fi
-  return "$failed"
-}
 
-test_traceroute(){
-  need_cmd traceroute traceroute
-  traceroute -n yandex.ru
-}
-
-test_ping(){
-  need_cmd ping iputils-ping
-  ping -c 4 yandex.ru
-}
 
 test_nexttrace_mtr(){
   ensure_nexttrace
@@ -407,19 +400,14 @@ run_one(){
     2) test_censor_geoblock ;;
     3) test_censor_dpi ;;
     4) test_iperf_ru ;;
-    5) test_iperf_tlab ;;
-    6) test_yabs ;;
-    7) test_geo_unlock ;;
-    8) test_ipquality ;;
-    9) test_sysbench_cpu ;;
-    10) test_sysbench_memory ;;
-    11) test_network_100mb ;;
-    12) test_tls ;;
-    13) test_traceroute ;;
-    14) test_ping ;;
-    15) test_nexttrace_mtr ;;
-    16) test_nexttrace_mtu ;;
-    17) test_nexttrace_globalping ;;
+    5) test_yabs ;;
+    6) test_geo_unlock ;;
+    7) test_ipquality ;;
+    8) test_sysbench_cpu ;;
+    9) test_network_100mb ;;
+    10) test_nexttrace_mtr ;;
+    11) test_nexttrace_mtu ;;
+    12) test_nexttrace_globalping ;;
     *) fail "Неизвестный тест: ${1:-пусто}"; return 2 ;;
   esac
 }
@@ -444,19 +432,14 @@ print_list(){
  2) Censorcheck — геоблок
  3) Censorcheck — DPI
  4) iPerf3 — RU сервера
- 5) iPerf3 — bench.tlab.pw (РФ)
- 6) YABS
- 7) Geo/Media Unlock — RegionRestrictionCheck
- 8) IPQuality — ASN / risk / blacklist / media / mail
- 9) sysbench CPU
-10) sysbench Memory
-11) Network Bench (HTTPS 100MB)
-12) SSL/TLS check
-13) Traceroute yandex.ru
-14) Ping yandex.ru
-15) NextTrace Route/MTR — loss/jitter/ASN/geo
-16) NextTrace Path MTU — UDP PMTU
-17) NextTrace Globalping — внешние TCP/443 точки → эта нода
+ 5) YABS — disk fio only
+ 6) Geo/Media Unlock — RegionRestrictionCheck
+ 7) IPQuality — ASN / risk / blacklist / media / mail
+ 8) sysbench CPU
+ 9) Network Bench — HTTPS 100MB
+10) NextTrace Route/MTR — loss/jitter/ASN/geo
+11) NextTrace Path MTU — UDP PMTU
+12) NextTrace Globalping — внешние TCP/443 точки → эта нода
 99) Мультитест: все тесты автоматически
 EOF
 }
@@ -467,16 +450,11 @@ run_all(){
     "Censorcheck — проверка геоблока"
     "Censorcheck — DPI"
     "iPerf3 — российские серверы"
-    "iPerf3 — bench.tlab.pw"
-    "YABS — benchmark"
+    "YABS — disk fio only"
     "Geo/Media Unlock — RegionRestrictionCheck"
     "IPQuality"
     "sysbench CPU"
-    "sysbench Memory"
     "Network Bench — HTTPS 100MB"
-    "SSL/TLS check"
-    "Traceroute yandex.ru"
-    "Ping yandex.ru"
     "NextTrace Route/MTR"
     "NextTrace Path MTU"
     "NextTrace Globalping"
@@ -527,7 +505,7 @@ menu(){
     printf 'Выбор: '
     read -r choice < "$TTY" || choice=0
     case "$choice" in
-      1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17)
+      1|2|3|4|5|6|7|8|9|10|11|12)
         rc=0
         run_interruptible "$choice" || rc=$?
         (( rc == 0 || rc == 130 )) || warn "Тест завершился с rc=$rc"
@@ -552,7 +530,7 @@ Usage:
   server-multitest.sh menu
   server-multitest.sh list
   server-multitest.sh all
-  server-multitest.sh 1..17
+  server-multitest.sh 1..12
 EOF
 }
 
@@ -562,7 +540,7 @@ main(){
     -h|--help|help) usage ;;
     menu|'') need_root; menu ;;
     all|99) need_root; run_all ;;
-    1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17) need_root; run_interruptible "$1" ;;
+    1|2|3|4|5|6|7|8|9|10|11|12) need_root; run_interruptible "$1" ;;
     *) usage; exit 2 ;;
   esac
 }
