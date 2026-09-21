@@ -778,13 +778,14 @@ CLI:  sudo remnanode-next
  [12] NEXT V2 — существующая/legacy нода → очистка хвостов → NEXT
 
  [13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
+      RUN:    sudo remnanode-next network
+      TUNE:   https://github.com/Balbuto/safe-remnanode-setup
+      BBR3:   https://github.com/ivan-nginx/bbr3
  [14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters
  [15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА — Balbuto Module D
       RUN:    sudo remnanode-next multitest
       TEST:   sudo remnanode-next multitest 1..14
-      RUN:    sudo remnanode-next network
-      TUNE:   https://github.com/Balbuto/safe-remnanode-setup
-      BBR3:   https://github.com/ivan-nginx/bbr3
+      SOURCE: https://github.com/Balbuto/safe-remnanode-setup
 
  [0]  Выход
 ────────────────────────────────────────────────────────────
