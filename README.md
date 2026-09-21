@@ -213,6 +213,45 @@ Mapper: ПУСТО / DEFAULT
 Final Mask: ПУСТО / DEFAULT
 ```
 
+### Мульти-тесты сервера
+
+В NEXT встроен отдельный tester-модуль, адаптированный из **Module D** проекта `Balbuto/safe-remnanode-setup` (source commit `274d84d9daa3b4d4a33264ba77992210aedd9b32`, source script blob `58a85a9baa4f36648d6587c5d6c4ac347096963d`). Upstream указывает, что модуль актуализирован по `saveksme/multitest v1.1`.
+
+Запуск:
+
+```bash
+sudo remnanode-next multitest
+sudo remnanode-next multitest all
+sudo remnanode-next multitest 1
+sudo remnanode-next multitest 14
+```
+
+Тесты:
+
+```text
+ 1  IP Region / геолокация
+ 2  Censorcheck — геоблок
+ 3  Censorcheck — DPI
+ 4  iPerf3 — RU сервера
+ 5  iPerf3 — bench.tlab.pw
+ 6  YABS
+ 7  IP Check Place
+ 8  IPQuality
+ 9  sysbench CPU
+10  sysbench Memory
+11  Network Bench — HTTPS 100MB
+12  SSL/TLS check
+13  Traceroute yandex.ru
+14  Ping yandex.ru
+99  все тесты по очереди
+```
+
+В режиме `99/all`: Enter запускает текущий тест, `s` пропускает, `q` завершает; Ctrl+C во время конкретного теста прерывает только его и позволяет продолжить.
+
+Tester не меняет firewall, sysctl, Docker или конфигурацию Remnawave. Он может доустановить только утилиту, необходимую выбранному тесту (`iperf3`, `sysbench`, `traceroute`, `jq` и т.п.).
+
+В отличие от upstream Module D, где 100MB Network Bench использовал HTTP URL, NEXT-адаптация блокирует `http://` и использует HTTPS для всех загрузок. Внешние тестовые скрипты (Censorcheck/YABS/IPQuality и т.п.) остаются динамическими upstream-скриптами: перед запуском показываются URL, SHA256 скачанного файла и выполняется `bash -n`; их upstream SHA не закреплён.
+
 Быстрая диагностика Hysteria2:
 
 ```bash
