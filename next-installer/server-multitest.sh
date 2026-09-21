@@ -17,6 +17,9 @@ IFS=$'\n\t'
 # - failed tests propagate a non-zero result instead of being silently hidden;
 # - duplicate IP-quality test replaced with a geo/media unlock test;
 # - YABS is run without the incorrect "-4" flag ("-4" means Geekbench 4, not IPv4).
+# - NextTrace full binary v1.7.3 is downloaded from the official GitHub release,
+#   pinned by upstream SHA256, and cached outside PATH for MTR/PMTU/Globalping tests.
+# - all/99 runs every test automatically without per-test Enter prompts.
 
 SOURCE_REPO="Balbuto/safe-remnanode-setup"
 SOURCE_REF="274d84d9daa3b4d4a33264ba77992210aedd9b32"
@@ -44,6 +47,13 @@ IPQUALITY_URL="https://raw.githubusercontent.com/xykt/IPQuality/${IPQUALITY_REF}
 
 TLAB_URL="https://bench.tlab.pw"
 NETWORK_BENCH_URL="https://speed.cloudflare.com/__down?bytes=100000000"
+
+NEXTTRACE_VERSION="v1.7.3"
+NEXTTRACE_AMD64_SHA256="aa75440fcdee46c16d941f48f9dabee1eb4c35bea6b739b0960fcf8307088c29"
+NEXTTRACE_ARM64_SHA256="4fbf436e2d4737e4a491e71ce3cd140a7a268d43ec94fb9ac9497aec7eda080e"
+NEXTTRACE_BASE_URL="https://github.com/nxtrace/NTrace-core/releases/download/${NEXTTRACE_VERSION}"
+NEXTTRACE_TOOL_DIR="/usr/local/libexec/remnanode-next-tools"
+NEXTTRACE_BIN=""
 
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
@@ -179,6 +189,58 @@ prepare_regioncheck(){
   need_cmd dig dnsutils
 }
 
+ensure_nexttrace(){
+  need_cmd curl curl ca-certificates
+  need_cmd sha256sum coreutils
+  need_cmd timeout coreutils
+
+  local arch asset expected tmp got
+  case "$(uname -m)" in
+    x86_64|amd64)
+      arch="amd64"
+      expected="$NEXTTRACE_AMD64_SHA256"
+      ;;
+    aarch64|arm64)
+      arch="arm64"
+      expected="$NEXTTRACE_ARM64_SHA256"
+      ;;
+    *)
+      fail "NextTrace: неподдерживаемая архитектура $(uname -m); поддерживаются amd64/arm64."
+      return 1
+      ;;
+  esac
+
+  asset="nexttrace_linux_${arch}"
+  NEXTTRACE_BIN="$NEXTTRACE_TOOL_DIR/nexttrace-${NEXTTRACE_VERSION}-${arch}"
+  install -d -m 0755 "$NEXTTRACE_TOOL_DIR"
+
+  if [[ -x "$NEXTTRACE_BIN" ]]; then
+    got="$(sha256sum "$NEXTTRACE_BIN" | awk '{print $1}')"
+    if [[ "$got" == "$expected" ]]; then
+      return 0
+    fi
+    warn "Cached NextTrace checksum mismatch; файл будет заменён."
+  fi
+
+  tmp="$(mktemp "/tmp/nexttrace.XXXXXX")"
+  if ! curl -fsSL --proto '=https' --tlsv1.2       --connect-timeout 10 --max-time 180 --retry 2       -o "$tmp" "$NEXTTRACE_BASE_URL/$asset"; then
+    rm -f "$tmp"
+    fail "Не удалось скачать NextTrace $NEXTTRACE_VERSION ($arch)."
+    return 1
+  fi
+
+  got="$(sha256sum "$tmp" | awk '{print $1}')"
+  if [[ "$got" != "$expected" ]]; then
+    rm -f "$tmp"
+    fail "NextTrace SHA256 mismatch: $got != $expected"
+    return 1
+  fi
+
+  install -m 0755 "$tmp" "$NEXTTRACE_BIN"
+  rm -f "$tmp"
+  say "NextTrace $NEXTTRACE_VERSION установлен в $NEXTTRACE_BIN"
+}
+
 test_ip_region(){
   need_cmd curl curl ca-certificates
   need_cmd jq jq
@@ -290,6 +352,55 @@ test_ping(){
   ping -c 4 yandex.ru
 }
 
+test_nexttrace_mtr(){
+  ensure_nexttrace
+  say 'NextTrace MTR: TCP/443, 10 probes/hop, wide report with route/ASN/geo'
+  timeout 180 "$NEXTTRACE_BIN" -w --tcp --port 443 -q 10 --language en --no-color 1.1.1.1
+}
+
+test_nexttrace_mtu(){
+  ensure_nexttrace
+  say 'NextTrace Path MTU: UDP PMTU discovery to 1.1.1.1'
+  timeout 120 "$NEXTTRACE_BIN" --mtu --language en --no-color 1.1.1.1
+}
+
+node_test_target(){
+  local target=""
+  if [[ -s /opt/remnanode/.node_domain ]]; then
+    target="$(tr -d '[:space:]' </opt/remnanode/.node_domain)"
+  fi
+  if [[ -z "$target" ]]; then
+    target="${NODE_TEST_TARGET:-}"
+  fi
+  [[ -n "$target" ]] || {
+    fail 'Globalping: не найден /opt/remnanode/.node_domain. Можно задать NODE_TEST_TARGET.'
+    return 1
+  }
+  printf '%s\n' "$target"
+}
+
+test_nexttrace_globalping(){
+  ensure_nexttrace
+  local target from rc=0 ok_count=0
+  target="$(node_test_target)" || return 1
+  say "Globalping: внешние traceroute к ноде $target"
+  say 'Anonymous Globalping limit: до 250 tests/hour; GLOBALPING_TOKEN может увеличить лимит.'
+
+  for from in Europe "North America" Asia; do
+    echo
+    printf '%s--- from %s ---%s\n' "$C_CYAN" "$from" "$C_RESET"
+    if timeout 120 "$NEXTTRACE_BIN" "$target" --from "$from" --tcp --port 443 --language en --no-color; then
+      ok_count=$((ok_count+1))
+    else
+      warn "Globalping from $from завершился ошибкой."
+      rc=1
+    fi
+  done
+
+  (( ok_count > 0 )) || return 1
+  return "$rc"
+}
+
 run_one(){
   case "${1:-}" in
     1) test_ip_region ;;
@@ -306,6 +417,9 @@ run_one(){
     12) test_tls ;;
     13) test_traceroute ;;
     14) test_ping ;;
+    15) test_nexttrace_mtr ;;
+    16) test_nexttrace_mtu ;;
+    17) test_nexttrace_globalping ;;
     *) fail "Неизвестный тест: ${1:-пусто}"; return 2 ;;
   esac
 }
@@ -340,7 +454,10 @@ print_list(){
 12) SSL/TLS check
 13) Traceroute yandex.ru
 14) Ping yandex.ru
-99) Мультитест: все тесты по очереди
+15) NextTrace Route/MTR — loss/jitter/ASN/geo
+16) NextTrace Path MTU — UDP PMTU
+17) NextTrace Globalping — внешние TCP/443 точки → эта нода
+99) Мультитест: все тесты автоматически
 EOF
 }
 
@@ -360,30 +477,20 @@ run_all(){
     "SSL/TLS check"
     "Traceroute yandex.ru"
     "Ping yandex.ru"
+    "NextTrace Route/MTR"
+    "NextTrace Path MTU"
+    "NextTrace Globalping"
   )
-  local total="${#names[@]}" i num action rc
+  local total="${#names[@]}" i num rc
   local passed=0 failed=0 skipped=0
 
-  printf '%sEnter%s — запустить | %ss%s — пропустить | %sq%s — выход\n'     "$C_YELLOW" "$C_RESET" "$C_YELLOW" "$C_RESET" "$C_YELLOW" "$C_RESET"
-  printf '%sCtrl+C во время теста — пропустить только текущий%s\n' "$C_GRAY" "$C_RESET"
+  say 'Автоматический режим: все тесты идут подряд без подтверждений.'
+  printf '%sCtrl+C во время теста — пропустить только текущий и перейти дальше.%s\n' "$C_GRAY" "$C_RESET"
 
   for ((i=0; i<total; i++)); do
     num=$((i+1))
     echo
     printf '%s============ [%s/%s] %s ============ %s\n'       "$C_CYAN" "$num" "$total" "${names[$i]}" "$C_RESET"
-    printf 'Enter — запустить | s — пропустить | q — выход: '
-    read -r action < "$TTY" || action=q
-    case "$action" in
-      s|S)
-        say 'Пропущено.'
-        skipped=$((skipped+1))
-        continue
-        ;;
-      q|Q)
-        say "Мультитест остановлен."
-        break
-        ;;
-    esac
 
     rc=0
     run_interruptible "$num" || rc=$?
@@ -402,7 +509,7 @@ run_all(){
   done
 
   echo
-  printf '%sИтог:%s PASS=%s FAIL=%s SKIP=%s\n'     "$C_GREEN" "$C_RESET" "$passed" "$failed" "$skipped"
+  printf '%sИтог:%s PASS=%s FAIL=%s SKIP=%s TOTAL=%s\n'     "$C_GREEN" "$C_RESET" "$passed" "$failed" "$skipped" "$total"
   (( failed == 0 ))
 }
 
@@ -420,7 +527,7 @@ menu(){
     printf 'Выбор: '
     read -r choice < "$TTY" || choice=0
     case "$choice" in
-      1|2|3|4|5|6|7|8|9|10|11|12|13|14)
+      1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17)
         rc=0
         run_interruptible "$choice" || rc=$?
         (( rc == 0 || rc == 130 )) || warn "Тест завершился с rc=$rc"
@@ -428,7 +535,6 @@ menu(){
         ;;
       99)
         run_all || true
-        pause
         ;;
       0|'')
         return 0
@@ -446,7 +552,7 @@ Usage:
   server-multitest.sh menu
   server-multitest.sh list
   server-multitest.sh all
-  server-multitest.sh 1..14
+  server-multitest.sh 1..17
 EOF
 }
 
@@ -456,7 +562,7 @@ main(){
     -h|--help|help) usage ;;
     menu|'') need_root; menu ;;
     all|99) need_root; run_all ;;
-    1|2|3|4|5|6|7|8|9|10|11|12|13|14) need_root; run_interruptible "$1" ;;
+    1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17) need_root; run_interruptible "$1" ;;
     *) usage; exit 2 ;;
   esac
 }
