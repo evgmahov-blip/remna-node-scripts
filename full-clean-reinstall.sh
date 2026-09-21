@@ -16,8 +16,8 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"
 NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="bb2597c8da6c7476a9d42f3c403b67511ca5a2b1"
-TESTER_BLOB_SHA="2cc4cba0df9176fa169b4d4caec7f2511fdc4559"
+TESTER_REF="db63f4d4e5e6269326c49188aa26fb9358f790bb"
+TESTER_BLOB_SHA="753a3a9442e66d4eda1a4f40bda0ea5997e6e3d7"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 APP_DIR="/opt/remnanode"
@@ -160,6 +160,8 @@ FILES
   grep -Fq 'Geo/Media Unlock — RegionRestrictionCheck' "$tester" || die 'Server Multitest: geo/media unlock отсутствует.'
   grep -Fq 'IPQUALITY_BLOB_SHA=' "$tester" || die 'Server Multitest: IPQuality pin отсутствует.'
   grep -Fq 'YABS_BLOB_SHA=' "$tester" || die 'Server Multitest: YABS pin отсутствует.'
+  grep -Fq 'YABS (FAST ALL MODE)' "$tester" || die 'Server Multitest: YABS fast all mode отсутствует.'
+  grep -Fq 'timeout 900 bash "$tmp" -g -r' "$tester" || die 'Server Multitest: YABS all timeout/flags отсутствуют.'
   ! grep -Fq '"$YABS_URL" "$YABS_BLOB_SHA" -4' "$tester" || die 'Server Multitest: ошибочный YABS -4 вернулся.'
   grep -Fq 'prepare_censorcheck(){' "$tester" || die 'Server Multitest: Censorcheck dependency guard отсутствует.'
   grep -Fq 'prepare_iperf_ru(){' "$tester" || die 'Server Multitest: iPerf dependency guard отсутствует.'
