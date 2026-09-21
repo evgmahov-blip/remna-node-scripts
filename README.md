@@ -223,7 +223,7 @@ Final Mask: ПУСТО / DEFAULT
 sudo remnanode-next multitest
 sudo remnanode-next multitest all
 sudo remnanode-next multitest 1
-sudo remnanode-next multitest 14
+sudo remnanode-next multitest 17
 ```
 
 Тесты:
@@ -243,10 +243,13 @@ sudo remnanode-next multitest 14
 12  SSL/TLS check
 13  Traceroute yandex.ru
 14  Ping yandex.ru
-99  все тесты по очереди
+15  NextTrace Route/MTR — loss/jitter/ASN/geo
+16  NextTrace Path MTU — UDP PMTU
+17  NextTrace Globalping — внешние точки → эта нода
+99  все тесты автоматически
 ```
 
-В режиме `99/all`: Enter запускает текущий тест, `s` пропускает, `q` завершает; Ctrl+C во время конкретного теста прерывает только его и позволяет продолжить.
+В режиме `99/all` **ничего дополнительно нажимать не нужно**: после выбора режима все тесты запускаются автоматически один за другим. Ctrl+C во время конкретного теста прерывает только его и переводит к следующему. В конце выводится PASS/FAIL/SKIP/TOTAL.
 
 Tester не меняет firewall, sysctl, Docker или конфигурацию Remnawave. Он может доустановить только утилиту, необходимую выбранному тесту (`iperf3`, `sysbench`, `traceroute`, `jq` и т.п.).
 
@@ -257,9 +260,16 @@ Tester не меняет firewall, sysctl, Docker или конфигураци�
 - iPerf3 RU заранее получает `iperf3/jq/ping/awk/timeout`;
 - дублирующий IP-quality пункт заменён на `RegionRestrictionCheck` для geo/media unlock;
 - ошибки выбранных тестов больше не скрываются через `|| true`; режим `99/all` показывает PASS/FAIL/SKIP;
-- Network Bench выводит Mbit/s и использует только HTTPS.
+- Network Bench выводит Mbit/s и использует только HTTPS;
+- добавлен официальный **NextTrace v1.7.3**: Route/MTR, Path MTU и Globalping;
+- NextTrace не добавляет внешний APT repository: full binary скачивается из официального GitHub release, проверяется закреплённым SHA256 и кешируется вне PATH;
+- NextTrace MTR проверяет TCP/443 с 10 пробами на hop и показывает loss/jitter/ASN/geo;
+- Path MTU делает отдельный UDP PMTU discovery;
+- Globalping запускает внешние traceroute к домену ноды из Europe, North America и Asia; target берётся из `/opt/remnanode/.node_domain` или `NODE_TEST_TARGET`.
 
 GitHub-hosted entry scripts Censorcheck, RU iPerf3, YABS, RegionRestrictionCheck и IPQuality закреплены конкретными commit + Git blob SHA и проверяются перед запуском. `bench.tlab.pw` остаётся динамическим HTTPS entry script и явно помечается предупреждением. Некоторые сами тестеры после старта обращаются к собственным внешним API/data-файлам, поэтому pin entry script не означает pin всех сетевых данных.
+
+NextTrace закреплён отдельно: release `v1.7.3`, SHA256 для Linux amd64 `aa75440fcdee46c16d941f48f9dabee1eb4c35bea6b739b0960fcf8307088c29`, для Linux arm64 `4fbf436e2d4737e4a491e71ce3cd140a7a268d43ec94fb9ac9497aec7eda080e`. Globalping допускает anonymous quota upstream; при наличии `GLOBALPING_TOKEN` NextTrace использует его автоматически.
 
 Быстрая диагностика Hysteria2:
 
