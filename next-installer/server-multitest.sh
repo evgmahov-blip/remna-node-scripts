@@ -17,6 +17,9 @@ IFS=$'\n\t'
 # - failed tests propagate a non-zero result instead of being silently hidden;
 # - duplicate IP-quality test replaced with a geo/media unlock test;
 # - YABS is run without the incorrect "-4" flag ("-4" means Geekbench 4, not IPv4).
+# - NextTrace full binary v1.7.3 is downloaded from the official GitHub release,
+#   pinned by upstream SHA256, and cached outside PATH for MTR/PMTU/Globalping tests.
+# - all/99 runs every test automatically without per-test Enter prompts.
 
 SOURCE_REPO="Balbuto/safe-remnanode-setup"
 SOURCE_REF="274d84d9daa3b4d4a33264ba77992210aedd9b32"
@@ -189,6 +192,7 @@ prepare_regioncheck(){
 ensure_nexttrace(){
   need_cmd curl curl ca-certificates
   need_cmd sha256sum coreutils
+  need_cmd timeout coreutils
 
   local arch asset expected tmp got
   case "$(uname -m)" in
@@ -351,13 +355,13 @@ test_ping(){
 test_nexttrace_mtr(){
   ensure_nexttrace
   say 'NextTrace MTR: TCP/443, 10 probes/hop, wide report with route/ASN/geo'
-  "$NEXTTRACE_BIN" -w --tcp --port 443 -q 10 --language en --no-color 1.1.1.1
+  timeout 180 "$NEXTTRACE_BIN" -w --tcp --port 443 -q 10 --language en --no-color 1.1.1.1
 }
 
 test_nexttrace_mtu(){
   ensure_nexttrace
   say 'NextTrace Path MTU: UDP PMTU discovery to 1.1.1.1'
-  "$NEXTTRACE_BIN" --mtu --language en --no-color 1.1.1.1
+  timeout 120 "$NEXTTRACE_BIN" --mtu --language en --no-color 1.1.1.1
 }
 
 node_test_target(){
@@ -385,7 +389,7 @@ test_nexttrace_globalping(){
   for from in Europe "North America" Asia; do
     echo
     printf '%s--- from %s ---%s\n' "$C_CYAN" "$from" "$C_RESET"
-    if "$NEXTTRACE_BIN" "$target" --from "$from" --language en --no-color; then
+    if timeout 120 "$NEXTTRACE_BIN" "$target" --from "$from" --language en --no-color; then
       ok_count=$((ok_count+1))
     else
       warn "Globalping from $from завершился ошибкой."
