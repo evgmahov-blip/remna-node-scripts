@@ -717,9 +717,10 @@ SNI: $d
 Take SNI from address: ON
 ALPN: h3
 Auth: автоматически = UUID пользователя Remnawave; вручную не задавать
+Vless Route ID: ПУСТО / DEFAULT (ненулевое значение меняет Hysteria auth)
 Xray JSON Template override: DEFAULT / пусто
 Mapper: ПУСТО / DEFAULT
-Final Mask: ПУСТО / DEFAULT (Hysteria сам использует brutal по умолчанию)
+Final Mask: ПУСТО / DEFAULT
 Ожидаемый Xray outbound: protocol=hysteria; settings.address=$d; settings.port=$PUBLIC_PORT; settings.version=2; hysteriaSettings.auth=<UUID пользователя>; network=hysteria; security=tls; ALPN=h3
 Server profile: sniffing=http,tls,quic + routeOnly; TLS 1.2..1.3; rejectUnknownSni=true; sessionResumption=true
 HOST
