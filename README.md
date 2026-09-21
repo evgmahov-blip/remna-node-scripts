@@ -139,6 +139,7 @@ SNI: <node-domain>
 Take SNI from address: ON
 ALPN: h3
 Auth: автоматически = UUID пользователя Remnawave
+Vless Route ID: ПУСТО / DEFAULT
 Xray JSON Template override: DEFAULT / пусто
 Mapper: ПУСТО / DEFAULT
 Final Mask: ПУСТО / DEFAULT
@@ -206,6 +207,7 @@ SNI: <node-domain>
 Take SNI from address: ON
 ALPN: h3
 Auth: автоматически = UUID пользователя Remnawave
+Vless Route ID: ПУСТО / DEFAULT
 Xray JSON Template override: DEFAULT / пусто
 Mapper: ПУСТО / DEFAULT
 Final Mask: ПУСТО / DEFAULT
@@ -217,7 +219,13 @@ Final Mask: ПУСТО / DEFAULT
 sudo remnanode-next hysteria-diag
 ```
 
-Она показывает UDP/443 listener, DNS адреса ноды и counters правила RKN scanner guard для UDP/443. Если UDP/443 слушает, но DROP counter растёт именно во время попытки через LTE, проблема уже не в Config Profile, а в firewall/RKN path для IP мобильного оператора.
+Команда read-only: она не синхронизирует файлы и ничего не меняет. Она показывает UDP/443 listener, DNS адреса, counters RKN scanner guard и читает фактический Remnawave runtime через `docker exec remnanode cli --dump-config-raw`.
+
+Runtime guard проверяет Hysteria2 version/network/TLS/sniffing, отсутствие server-side `masquerade` и `finalmask`, совпадение `auth == id` без вывода UUID, а также семантически сравнивает активный runtime с локальным `remnawave-profiles/hysteria2-tls.json`. Из сравнения исключаются только динамические `clients`, tag и `metadataOnly=false`. При drift команда завершается с FAIL/non-zero и прямо указывает, что активный Config Profile/Host Remnawave расходится с NEXT.
+
+Для Host Hysteria2 `Vless Route ID` должен быть пустым/default: ненулевое значение меняет Hysteria auth в клиентском конфиге, тогда как Node принимает исходный UUID пользователя.
+
+Если runtime PASS, UDP/443 слушает, но DROP counter растёт именно во время попытки через LTE, проблема уже не в Config Profile, а в firewall/RKN path для IP мобильного оператора.
 
 ## Рабочая архитектура
 
