@@ -279,8 +279,28 @@ test_iperf_tlab(){
 }
 
 test_yabs(){
-  # В YABS -4 = Geekbench 4, а не IPv4. Запускаем обычный актуальный профиль.
-  run_external_script     "YABS"     "$YABS_URL"     "$YABS_BLOB_SHA"
+  # В YABS -4 = Geekbench 4, а не IPv4.
+  # В all-режиме Geekbench пропускаем: CPU отдельно меряется sysbench,
+  # а GB6 на слабых VPS может молчать много минут.
+  if [[ "${MULTITEST_ALL_MODE:-0}" == "1" ]]; then
+    local tmp rc=0
+    tmp="$(mktemp "/tmp/remna-yabs.XXXXXX.sh")"
+    echo
+    printf '%s================ YABS (FAST ALL MODE) ================%s\n' "$C_CYAN" "$C_RESET"
+    say 'Flags: -g (skip Geekbench), -r (reduced iperf locations), timeout 15 min'
+    if download_external_script "YABS" "$YABS_URL" "$tmp" "$YABS_BLOB_SHA"; then
+      set +e
+      timeout 900 bash "$tmp" -g -r
+      rc=$?
+      set -e
+    else
+      rc=1
+    fi
+    rm -f "$tmp"
+    return "$rc"
+  fi
+
+  run_external_script "YABS" "$YABS_URL" "$YABS_BLOB_SHA"
 }
 
 test_geo_unlock(){
@@ -493,7 +513,11 @@ run_all(){
     printf '%s============ [%s/%s] %s ============ %s\n'       "$C_CYAN" "$num" "$total" "${names[$i]}" "$C_RESET"
 
     rc=0
-    run_interruptible "$num" || rc=$?
+    if (( num == 6 )); then
+      MULTITEST_ALL_MODE=1 run_interruptible "$num" || rc=$?
+    else
+      run_interruptible "$num" || rc=$?
+    fi
     case "$rc" in
       0)
         passed=$((passed+1))
