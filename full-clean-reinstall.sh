@@ -165,7 +165,7 @@ FILES
   ! grep -Fq '"$YABS_URL" "$YABS_BLOB_SHA" -4' "$tester" || die 'Server Multitest: ошибочный YABS -4 вернулся.'
   grep -Fq 'prepare_censorcheck(){' "$tester" || die 'Server Multitest: Censorcheck dependency guard отсутствует.'
   grep -Fq 'prepare_iperf_ru(){' "$tester" || die 'Server Multitest: iPerf dependency guard отсутствует.'
-  grep -Fq 'Network Bench (HTTPS 100MB)' "$tester" || die 'Server Multitest: HTTPS network bench отсутствует.'
+  grep -Fq 'Network Bench — HTTPS 100MB' "$tester" || die 'Server Multitest: HTTPS network bench отсутствует.'
   grep -Fq 'NextTrace Route/MTR' "$tester" || die 'Server Multitest: NextTrace MTR отсутствует.'
   grep -Fq 'NextTrace Path MTU' "$tester" || die 'Server Multitest: NextTrace PMTU отсутствует.'
   grep -Fq 'NextTrace Globalping' "$tester" || die 'Server Multitest: NextTrace Globalping отсутствует.'
