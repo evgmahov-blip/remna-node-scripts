@@ -223,7 +223,7 @@ Final Mask: ПУСТО / DEFAULT
 sudo remnanode-next multitest
 sudo remnanode-next multitest all
 sudo remnanode-next multitest 1
-sudo remnanode-next multitest 17
+sudo remnanode-next multitest 12
 ```
 
 Тесты:
@@ -233,19 +233,14 @@ sudo remnanode-next multitest 17
  2  Censorcheck — геоблок
  3  Censorcheck — DPI
  4  iPerf3 — RU сервера
- 5  iPerf3 — bench.tlab.pw
- 6  YABS — disk/network, Geekbench OFF
- 7  Geo/Media Unlock — RegionRestrictionCheck
- 8  IPQuality — ASN / risk / blacklist / media / mail
- 9  sysbench CPU
-10  sysbench Memory
-11  Network Bench — HTTPS 100MB
-12  SSL/TLS check
-13  Traceroute yandex.ru
-14  Ping yandex.ru
-15  NextTrace Route/MTR — loss/jitter/ASN/geo
-16  NextTrace Path MTU — UDP PMTU
-17  NextTrace Globalping — внешние TCP/443 точки → эта нода
+ 5  YABS — disk fio only
+ 6  Geo/Media Unlock — RegionRestrictionCheck
+ 7  IPQuality — ASN / risk / blacklist / media / mail
+ 8  sysbench CPU
+ 9  Network Bench — HTTPS 100MB
+10  NextTrace Route/MTR — loss/jitter/ASN/geo
+11  NextTrace Path MTU — UDP PMTU
+12  NextTrace Globalping — внешние TCP/443 точки → эта нода
 99  все тесты автоматически
 ```
 
@@ -256,11 +251,12 @@ Tester не меняет firewall, sysctl, Docker или конфигураци�
 После отдельного аудита tester дополнительно исправлен:
 
 - upstream YABS больше не запускается с `-4`: у YABS этот флаг означает **Geekbench 4**, а не IPv4;
-- в составе REMNANODE multitest YABS запускается с `-g`: Geekbench отключён, потому что CPU/RAM уже отдельно проверяются sysbench; на YABS действует hard timeout 600 секунд, чтобы автоматический прогон не зависал;
+- в составе REMNANODE multitest YABS запускается с `-ign`: остаётся только fio disk I/O; iperf, Geekbench и network-info отключены, потому что сеть/CPU проверяются отдельными тестами; hard timeout — 420 секунд;
 - Censorcheck заранее получает обязательные `dig/jq/column`;
 - iPerf3 RU заранее получает `iperf3/jq/ping/awk/timeout`;
 - дублирующий IP-quality пункт заменён на `RegionRestrictionCheck` для geo/media unlock;
 - ошибки выбранных тестов больше не скрываются через `|| true`; режим `99/all` показывает PASS/FAIL/SKIP;
+- удалены дублирующие/низкоценные пункты: второй iPerf (bench.tlab), sysbench Memory, TLS к google.com, обычные traceroute/ping;
 - Network Bench выводит Mbit/s и использует только HTTPS;
 - добавлен официальный **NextTrace v1.7.3**: Route/MTR, Path MTU и Globalping;
 - NextTrace не добавляет внешний APT repository: full binary скачивается из официального GitHub release, проверяется закреплённым SHA256 и кешируется вне PATH;
@@ -268,7 +264,7 @@ Tester не меняет firewall, sysctl, Docker или конфигураци�
 - Path MTU делает отдельный UDP PMTU discovery;
 - Globalping запускает внешние TCP/443 traceroute к домену ноды из Europe, North America и Asia; target берётся из `/opt/remnanode/.node_domain` или `NODE_TEST_TARGET`.
 
-GitHub-hosted entry scripts Censorcheck, RU iPerf3, YABS, RegionRestrictionCheck и IPQuality закреплены конкретными commit + Git blob SHA и проверяются перед запуском. `bench.tlab.pw` остаётся динамическим HTTPS entry script и явно помечается предупреждением. Некоторые сами тестеры после старта обращаются к собственным внешним API/data-файлам, поэтому pin entry script не означает pin всех сетевых данных.
+GitHub-hosted entry scripts Censorcheck, RU iPerf3, YABS, RegionRestrictionCheck и IPQuality закреплены конкретными commit + Git blob SHA и проверяются перед запуском. Некоторые сами тестеры после старта обращаются к собственным внешним API/data-файлам, поэтому pin entry script не означает pin всех сетевых данных.
 
 NextTrace закреплён отдельно: release `v1.7.3`, SHA256 для Linux amd64 `aa75440fcdee46c16d941f48f9dabee1eb4c35bea6b739b0960fcf8307088c29`, для Linux arm64 `4fbf436e2d4737e4a491e71ce3cd140a7a268d43ec94fb9ac9497aec7eda080e`. Globalping допускает anonymous quota upstream; при наличии `GLOBALPING_TOKEN` NextTrace использует его автоматически.
 
