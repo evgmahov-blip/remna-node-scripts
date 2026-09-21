@@ -7,8 +7,8 @@ REPO="evgmahov-blip/remna-node-scripts"
 SOURCE_REF="721269e2c48e31b7cac86e04bc14c46b33e31e72"
 SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"
 SOURCE_URL="https://raw.githubusercontent.com/${REPO}/${SOURCE_REF}/vendor/remna-next-source.tar.gz"
-HYSTERIA_OVERLAY_REF="89c977baa162c11e6316a0c750c7cdbd5c0b551f"
-HYSTERIA_OVERLAY_BLOB_SHA="ee7f33ab33363e09421688d152e73065320d67c1"
+HYSTERIA_OVERLAY_REF="6f02c87c10d1d47fb4abcb234755823d1a1067bf"
+HYSTERIA_OVERLAY_BLOB_SHA="62ff1364c26d88f357968422d5591b3d2b8d9e78"
 HYSTERIA_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${HYSTERIA_OVERLAY_REF}/next-installer/remnawave-transport-manager.sh"
 V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"
 V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
@@ -420,8 +420,7 @@ show_status(){
 }
 
 hysteria_diag(){
-  sync_next_sources
-  local domain
+  local domain runtime_tmp="" runtime_ok=0 drift=0
   domain="$(cat "$APP_DIR/.node_domain" 2>/dev/null || true)"
 
   echo '================ HYSTERIA2 DIAGNOSTICS ================'
@@ -444,9 +443,71 @@ hysteria_diag(){
   fi
 
   echo
-  echo 'Подсказка: если UDP/443 слушает, но DROP counter растёт именно при попытке через LTE,'
-  echo 'проблема не в Config Profile, а в RKN scanner guard / IP мобильного оператора.'
-  echo 'Если UDP/443 вообще не слушает — Hysteria inbound не применён в runtime Remnawave.'
+  echo 'Effective Remnawave runtime:'
+  if ! command -v jq >/dev/null 2>&1; then
+    echo '  [WARN] jq отсутствует — runtime drift check пропущен'
+  elif ! command -v docker >/dev/null 2>&1 || ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode; then
+    echo '  [WARN] remnanode не запущен — runtime drift check пропущен'
+  else
+    runtime_tmp="$(mktemp)"
+    if docker exec remnanode cli --dump-config-raw >"$runtime_tmp" 2>/dev/null; then
+      runtime_ok=1
+      local hy_count clients_count auth_bad
+      hy_count="$(jq '[.inbounds[]? | select(.protocol=="hysteria")] | length' "$runtime_tmp" 2>/dev/null || echo 0)"
+      clients_count="$(jq '[.inbounds[]? | select(.protocol=="hysteria") | (.settings.clients // [])[]?] | length' "$runtime_tmp" 2>/dev/null || echo 0)"
+      auth_bad="$(jq '[.inbounds[]? | select(.protocol=="hysteria") | (.settings.clients // [])[]? | select((.auth // "") != (.id // ""))] | length' "$runtime_tmp" 2>/dev/null || echo 0)"
+      printf '  Hysteria inbounds : %s\n' "$hy_count"
+      printf '  Runtime clients   : %s\n' "$clients_count"
+      printf '  auth != id        : %s\n' "$auth_bad"
+
+      check_runtime(){
+        local label="$1" filter="$2"
+        if jq -e "$filter" "$runtime_tmp" >/dev/null 2>&1; then
+          printf '  [PASS] %s\n' "$label"
+        else
+          printf '  [FAIL] %s\n' "$label"
+          drift=1
+        fi
+      }
+
+      check_runtime 'ровно один Hysteria inbound' '[.inbounds[]? | select(.protocol=="hysteria")] | length == 1'
+      check_runtime 'version=2' '[.inbounds[]? | select(.protocol=="hysteria")][0].settings.version == 2'
+      check_runtime 'network=hysteria + security=tls' '([.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.network == "hysteria") and ([.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.security == "tls")'
+      check_runtime 'sniffing http,tls,quic + routeOnly' '([.inbounds[]? | select(.protocol=="hysteria")][0].sniffing.enabled == true) and ([.inbounds[]? | select(.protocol=="hysteria")][0].sniffing.routeOnly == true) and (([.inbounds[]? | select(.protocol=="hysteria")][0].sniffing.destOverride // []) | index("http") != null) and (([.inbounds[]? | select(.protocol=="hysteria")][0].sniffing.destOverride // []) | index("tls") != null) and (([.inbounds[]? | select(.protocol=="hysteria")][0].sniffing.destOverride // []) | index("quic") != null)'
+      check_runtime 'server-side masquerade отсутствует' '([.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.hysteriaSettings | has("masquerade")) | not'
+      check_runtime 'server-side finalmask отсутствует' '([.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings | has("finalmask")) | not'
+      check_runtime 'TLS SNI совпадает с node domain' --arg d "$domain" '[.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.tlsSettings.serverName == $d'
+      check_runtime 'TLS 1.2..1.3' '([.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.tlsSettings.minVersion == "1.2") and ([.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.tlsSettings.maxVersion == "1.3")'
+      check_runtime 'rejectUnknownSni=true' '[.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.tlsSettings.rejectUnknownSni == true'
+      check_runtime 'enableSessionResumption=true' '[.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.tlsSettings.enableSessionResumption == true'
+      check_runtime 'ALPN h3' '([.inbounds[]? | select(.protocol=="hysteria")][0].streamSettings.tlsSettings.alpn // []) | index("h3") != null'
+      if [[ "$auth_bad" != "0" ]]; then
+        printf '  [FAIL] runtime auth отличается от client id у %s пользователей\n' "$auth_bad"
+        drift=1
+      else
+        echo '  [PASS] runtime auth совпадает с client id'
+      fi
+    else
+      echo '  [WARN] cli --dump-config-raw не вернул конфигурацию'
+    fi
+    rm -f "$runtime_tmp"
+  fi
+
+  echo
+  if (( runtime_ok )) && (( drift )); then
+    echo '[FAIL] HYSTERIA2 RUNTIME DRIFT: активный Config Profile Remnawave не соответствует NEXT.'
+    echo 'Исправь Hysteria Config Profile/Host в панели; ноду переустанавливать не нужно.'
+    echo 'Host guard: Vless Route ID = ПУСТО / DEFAULT; Final Mask = ПУСТО / DEFAULT.'
+    echo '========================================================='
+    return 1
+  elif (( runtime_ok )); then
+    echo '[PASS] HYSTERIA2 RUNTIME MATCH: активный Remnawave profile соответствует NEXT.'
+  else
+    echo '[WARN] Runtime profile не удалось проверить; сетевые проверки выше остаются валидными.'
+  fi
+
+  echo 'Подсказка: если runtime PASS, UDP/443 слушает, но RKN DROP counter растёт при попытке через LTE,'
+  echo 'проблема уже в firewall/RKN path / IP мобильного оператора.'
   echo '========================================================='
 }
 
