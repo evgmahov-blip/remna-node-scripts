@@ -110,6 +110,31 @@ jobs:
           grep -Fq '"settings": {"version": 2, "users": []}' "$raw"
           ! grep -Fq 'verify_hysteria_profile_shape(){' "$raw"
 
+      - name: Verify Server Multitest
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          t=next-installer/server-multitest.sh
+          test "$(git rev-parse HEAD:$t)" = "bddab73a3b427b80fef222dc65b15852c93e7b55"
+          test "$(git rev-parse c01a37bd29f4da3da270972f44ae799f177aeadd:$t)" = "bddab73a3b427b80fef222dc65b15852c93e7b55"
+
+          grep -Fq 'Balbuto/safe-remnanode-setup' "$t"
+          grep -Fq '274d84d9daa3b4d4a33264ba77992210aedd9b32' "$t"
+          grep -Fq 'Censorcheck — DPI' "$t"
+          grep -Fq 'iPerf3 — bench.tlab.pw' "$t"
+          grep -Fq 'YABS' "$t"
+          grep -Fq 'IPQuality' "$t"
+          grep -Fq 'Network Bench (HTTPS 100MB)' "$t"
+          grep -Fq 'https://speed.cloudflare.com/__down?bytes=100000000' "$t"
+          ! grep -Eq '(^|[^[:alnum:]])http://' "$t"
+
+          grep -Fq 'TESTER_REF="c01a37bd29f4da3da270972f44ae799f177aeadd"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="bddab73a3b427b80fef222dc65b15852c93e7b55"' full-clean-reinstall.sh
+          grep -Fq 'server-multitest.sh' full-clean-reinstall.sh
+          grep -Fq 'sudo remnanode-next multitest' full-clean-reinstall.sh
+          grep -Fq 'multitest|server-test|tests)' full-clean-reinstall.sh
+
       - name: Working-node topology provenance
         shell: bash
         run: |
@@ -196,6 +221,8 @@ jobs:
           grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="c01a37bd29f4da3da270972f44ae799f177aeadd"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="bddab73a3b427b80fef222dc65b15852c93e7b55"' full-clean-reinstall.sh
           grep -Fq 'run_existing_node_v2(){' full-clean-reinstall.sh
           grep -Fq 'NEXT V2 — существующая/legacy нода' full-clean-reinstall.sh
           grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
@@ -220,6 +247,8 @@ jobs:
           grep -Fq 'host-hysteria2|host-hysteria)' full-clean-reinstall.sh
           grep -Fq '[13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)' full-clean-reinstall.sh
           grep -Fq '[14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters' full-clean-reinstall.sh
+          grep -Fq '[15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА — Balbuto Module D' full-clean-reinstall.sh
+          grep -Fq 'sudo remnanode-next multitest 1..14' full-clean-reinstall.sh
           grep -Fq 'hysteria-diag|hy2-diag)' full-clean-reinstall.sh
           grep -Fq 'RKN UDP/443 DROP rule + counters:' full-clean-reinstall.sh
           grep -Fq 'cli --dump-config-raw' full-clean-reinstall.sh
@@ -268,9 +297,11 @@ jobs:
           source_ref="$(sed -n 's/^SOURCE_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           overlay_ref="$(sed -n 's/^HYSTERIA_OVERLAY_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           v2_ref="$(sed -n 's/^V2_CLEANUP_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          tester_ref="$(sed -n 's/^TESTER_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
           test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "62ff1364c26d88f357968422d5591b3d2b8d9e78"
           test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
+          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "bddab73a3b427b80fef222dc65b15852c93e7b55"
 
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
@@ -308,6 +339,10 @@ jobs:
           grep -Fq 'ТОЛЬКО HOST HYSTERIA2' README.md
           grep -Fq 'sudo remnanode-next host-hysteria2' README.md
           grep -Fq 'HOST HYSTERIA2' README.md
+          grep -Fq '### Мульти-тесты сервера' README.md
+          grep -Fq 'Balbuto/safe-remnanode-setup' README.md
+          grep -Fq 'sudo remnanode-next multitest all' README.md
+          grep -Fq 'Network Bench — HTTPS 100MB' README.md
 
       - name: Legacy safety guard
         shell: bash
