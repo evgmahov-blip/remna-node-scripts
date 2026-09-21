@@ -16,6 +16,9 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"
 NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
+TESTER_REF="c01a37bd29f4da3da270972f44ae799f177aeadd"
+TESTER_BLOB_SHA="bddab73a3b427b80fef222dc65b15852c93e7b55"
+TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 APP_DIR="/opt/remnanode"
 NEXT_DIR="$APP_DIR/next-installer"
@@ -29,6 +32,7 @@ GUARDS="$NEXT_DIR/next-runtime-guards.sh"
 SIGNATURE="$NEXT_DIR/xhttp-signature-manager.sh"
 V2_CLEANER="$NEXT_DIR/existing-node-v2-cleanup.sh"
 NETWORK="$NEXT_DIR/network-tuning-manager.sh"
+TESTER="$NEXT_DIR/server-multitest.sh"
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
 
@@ -143,6 +147,20 @@ FILES
   grep -Fq 'sudo remnanode-next bbr-tune' "$network" || die 'Network/BBR manager: CLI hint отсутствует.'
   grep -Fq 'https://github.com/ivan-nginx/bbr3' "$network" || die 'Network/BBR manager: BBR3 source link отсутствует.'
   grep -Fq 'https://github.com/Balbuto/safe-remnanode-setup' "$network" || die 'Network/BBR manager: BBR tune source link отсутствует.'
+
+  local tester
+  tester="$tmp/next-installer/server-multitest.sh"
+  curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 3 \
+    "$TESTER_URL" -o "$tester" || die 'Не удалось скачать Server Multitest.'
+  [[ "$(git_blob_sha "$tester")" == "$TESTER_BLOB_SHA" ]] || die 'Server Multitest не прошёл Git blob SHA.'
+  bash -n "$tester" || die 'Server Multitest не прошёл bash -n.'
+  grep -Fq 'Balbuto/safe-remnanode-setup' "$tester" || die 'Server Multitest: provenance marker отсутствует.'
+  grep -Fq 'Censorcheck — DPI' "$tester" || die 'Server Multitest: Censorcheck DPI отсутствует.'
+  grep -Fq 'iPerf3 — bench.tlab.pw' "$tester" || die 'Server Multitest: iPerf3 tlab отсутствует.'
+  grep -Fq 'Network Bench (HTTPS 100MB)' "$tester" || die 'Server Multitest: HTTPS network bench отсутствует.'
+  if grep -Eq '(^|[^[:alnum:]])http://' "$tester"; then
+    die 'Server Multitest содержит небезопасный HTTP URL.'
+  fi
 
   install -d -m 0700 "$NEXT_DIR" /usr/local/libexec
   install -m 0700 "$tmp/next-installer/"*.sh "$NEXT_DIR/"
@@ -391,7 +409,7 @@ MENU
       6) fn=diagnose_and_logs ;;
       7) fn=manage_xray_ports ;;
       8) fn=change_decoy_template_menu ;;
-      9) fn=run_server_multitests ;;
+      9) "$TESTER" menu; continue ;;
       0|'') return 0 ;;
       *) warn 'Неверный пункт.'; continue ;;
     esac
@@ -761,6 +779,9 @@ CLI:  sudo remnanode-next
 
  [13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
  [14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters
+ [15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА — Balbuto Module D
+      RUN:    sudo remnanode-next multitest
+      TEST:   sudo remnanode-next multitest 1..14
       RUN:    sudo remnanode-next network
       TUNE:   https://github.com/Balbuto/safe-remnanode-setup
       BBR3:   https://github.com/ivan-nginx/bbr3
@@ -784,6 +805,7 @@ MENU
       12) run_existing_node_v2; pause ;;
       13) network_menu ;;
       14) hysteria_diag; pause ;;
+      15) "$TESTER" menu ;;
       0|'') return 0 ;;
       *) warn 'Неверный пункт.' ;;
     esac
@@ -814,8 +836,9 @@ main(){
     bbr-tune) sync_next_sources; "$NETWORK" tune ;;
     bbr3) sync_next_sources; "$NETWORK" bbr3 ;;
     hysteria-diag|hy2-diag) hysteria_diag ;;
+    multitest|server-test|tests) sync_next_sources; shift; "$TESTER" "${1:-menu}" ;;
     sync-source) sync_next_sources ;;
-    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|sync-source]' ;;
+    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|sync-source]' ;;
   esac
 }
 
