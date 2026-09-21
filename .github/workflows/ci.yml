@@ -293,7 +293,7 @@ jobs:
           grep -Fq 'sudo remnanode-next hysteria-diag' README.md
           grep -Fq 'Vless Route ID: ПУСТО / DEFAULT' README.md
           grep -Fq 'cli --dump-config-raw' README.md
-          grep -Fq 'semantic compare' README.md
+          grep -Fq 'семантически сравнивает активный runtime' README.md
           grep -Fq 'Они **не являются main installer**' README.md
           grep -Fq 'Installer их из bundle **не устанавливает**' README.md
           grep -Fq 'NEXT V2 migration' README.md
