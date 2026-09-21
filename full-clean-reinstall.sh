@@ -16,8 +16,8 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"
 NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="77bae9053ec222652ca543eec4463b5d9d824a74"
-TESTER_BLOB_SHA="0f5d592c0b3302d2b2c67b6e6938b46cc6cb4c82"
+TESTER_REF="c85b4c59aff7ce7e911834ab44b1a446731fd2d3"
+TESTER_BLOB_SHA="f4026bbb54f51f359ef8c584199077d1f5a4074e"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 APP_DIR="/opt/remnanode"
@@ -164,6 +164,13 @@ FILES
   grep -Fq 'prepare_censorcheck(){' "$tester" || die 'Server Multitest: Censorcheck dependency guard отсутствует.'
   grep -Fq 'prepare_iperf_ru(){' "$tester" || die 'Server Multitest: iPerf dependency guard отсутствует.'
   grep -Fq 'Network Bench (HTTPS 100MB)' "$tester" || die 'Server Multitest: HTTPS network bench отсутствует.'
+  grep -Fq 'NextTrace Route/MTR' "$tester" || die 'Server Multitest: NextTrace MTR отсутствует.'
+  grep -Fq 'NextTrace Path MTU' "$tester" || die 'Server Multitest: NextTrace PMTU отсутствует.'
+  grep -Fq 'NextTrace Globalping' "$tester" || die 'Server Multitest: NextTrace Globalping отсутствует.'
+  grep -Fq 'NEXTTRACE_VERSION="v1.7.3"' "$tester" || die 'Server Multitest: NextTrace version pin отсутствует.'
+  grep -Fq 'aa75440fcdee46c16d941f48f9dabee1eb4c35bea6b739b0960fcf8307088c29' "$tester" || die 'Server Multitest: NextTrace amd64 SHA256 pin отсутствует.'
+  grep -Fq 'Автоматический режим: все тесты идут подряд без подтверждений.' "$tester" || die 'Server Multitest: automatic all mode отсутствует.'
+  ! sed -n '/run_all(){/,/^}/p' "$tester" | grep -Fq 'read -r action' || die 'Server Multitest: all mode снова требует Enter.'
   if grep -Eq '(^|[^[:alnum:]])http://' "$tester"; then
     die 'Server Multitest содержит небезопасный HTTP URL.'
   fi
@@ -790,7 +797,7 @@ CLI:  sudo remnanode-next
  [14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters
  [15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА — Balbuto Module D
       RUN:    sudo remnanode-next multitest
-      TEST:   sudo remnanode-next multitest 1..14
+      TEST:   sudo remnanode-next multitest 1..17
       SOURCE: https://github.com/Balbuto/safe-remnanode-setup
 
  [0]  Выход
