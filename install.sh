@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PINNED_REF="f08ee074dd405ee7a352a1aef3231bc335ffbb23"
-EXPECTED_BLOB_SHA="fc575def3f40a4aa2283072e8bd05d0adba64adc"
+PINNED_REF="3f0fc86aaecd7149c05e5a1f67cf8b2a80dff5dc"
+EXPECTED_BLOB_SHA="723b064ab7f36dc41b66cbdf3b19a726b8c3eb6a"
 URL="https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/${PINNED_REF}/full-clean-reinstall.sh"
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
