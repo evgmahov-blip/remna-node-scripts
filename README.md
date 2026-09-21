@@ -234,7 +234,7 @@ sudo remnanode-next multitest 17
  3  Censorcheck — DPI
  4  iPerf3 — RU сервера
  5  iPerf3 — bench.tlab.pw
- 6  YABS
+ 6  YABS — disk/network, Geekbench OFF
  7  Geo/Media Unlock — RegionRestrictionCheck
  8  IPQuality — ASN / risk / blacklist / media / mail
  9  sysbench CPU
@@ -256,6 +256,7 @@ Tester не меняет firewall, sysctl, Docker или конфигураци�
 После отдельного аудита tester дополнительно исправлен:
 
 - upstream YABS больше не запускается с `-4`: у YABS этот флаг означает **Geekbench 4**, а не IPv4;
+- в составе REMNANODE multitest YABS запускается с `-g`: Geekbench отключён, потому что CPU/RAM уже отдельно проверяются sysbench; на YABS действует hard timeout 600 секунд, чтобы автоматический прогон не зависал;
 - Censorcheck заранее получает обязательные `dig/jq/column`;
 - iPerf3 RU заранее получает `iperf3/jq/ping/awk/timeout`;
 - дублирующий IP-quality пункт заменён на `RegionRestrictionCheck` для geo/media unlock;
