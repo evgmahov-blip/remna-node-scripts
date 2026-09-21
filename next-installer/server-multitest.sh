@@ -167,6 +167,35 @@ run_external_script(){
   return "$rc"
 }
 
+run_external_script_timeout(){
+  local seconds="$1" name="$2" url="$3" expected_blob="${4:-}"
+  shift 4
+  local tmp rc=0
+  need_cmd timeout coreutils || return 1
+  tmp="$(mktemp "/tmp/remna-multitest.XXXXXX.sh")"
+  echo
+  printf '%s================ %s ================%s\n' "$C_CYAN" "$name" "$C_RESET"
+  say "Execution timeout: ${seconds}s"
+  if [[ -n "$expected_blob" ]]; then
+    say "Entry script pinned: $expected_blob"
+  else
+    warn 'Этот внешний entry script не имеет закреплённого upstream SHA.'
+  fi
+  if download_external_script "$name" "$url" "$tmp" "$expected_blob"; then
+    set +e
+    timeout --signal=INT --kill-after=30 "${seconds}s" bash "$tmp" "$@"
+    rc=$?
+    set -e
+    if (( rc == 124 )); then
+      warn "$name превысил лимит ${seconds}s и остановлен."
+    fi
+  else
+    rc=1
+  fi
+  rm -f "$tmp"
+  return "$rc"
+}
+
 prepare_censorcheck(){
   need_cmd curl curl ca-certificates
   need_cmd dig dnsutils
@@ -279,8 +308,10 @@ test_iperf_tlab(){
 }
 
 test_yabs(){
-  # В YABS -4 = Geekbench 4, а не IPv4. Запускаем обычный актуальный профиль.
-  run_external_script     "YABS"     "$YABS_URL"     "$YABS_BLOB_SHA"
+  # CPU/RAM уже измеряются отдельными sysbench тестами 9-10.
+  # YABS -g отключает Geekbench, который на VPS может долго молчать/зависать.
+  # Оставляем fio + iperf и ставим hard timeout на весь запуск.
+  run_external_script_timeout 600 "YABS — disk/network, Geekbench OFF" "$YABS_URL" "$YABS_BLOB_SHA" -g
 }
 
 test_geo_unlock(){
@@ -445,7 +476,7 @@ print_list(){
  3) Censorcheck — DPI
  4) iPerf3 — RU сервера
  5) iPerf3 — bench.tlab.pw (РФ)
- 6) YABS
+ 6) YABS — disk/network, Geekbench OFF
  7) Geo/Media Unlock — RegionRestrictionCheck
  8) IPQuality — ASN / risk / blacklist / media / mail
  9) sysbench CPU
@@ -468,7 +499,7 @@ run_all(){
     "Censorcheck — DPI"
     "iPerf3 — российские серверы"
     "iPerf3 — bench.tlab.pw"
-    "YABS — benchmark"
+    "YABS — disk/network, Geekbench OFF"
     "Geo/Media Unlock — RegionRestrictionCheck"
     "IPQuality"
     "sysbench CPU"
