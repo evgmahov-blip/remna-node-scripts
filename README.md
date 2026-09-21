@@ -235,8 +235,8 @@ sudo remnanode-next multitest 14
  4  iPerf3 — RU сервера
  5  iPerf3 — bench.tlab.pw
  6  YABS
- 7  IP Check Place
- 8  IPQuality
+ 7  Geo/Media Unlock — RegionRestrictionCheck
+ 8  IPQuality — ASN / risk / blacklist / media / mail
  9  sysbench CPU
 10  sysbench Memory
 11  Network Bench — HTTPS 100MB
@@ -250,7 +250,16 @@ sudo remnanode-next multitest 14
 
 Tester не меняет firewall, sysctl, Docker или конфигурацию Remnawave. Он может доустановить только утилиту, необходимую выбранному тесту (`iperf3`, `sysbench`, `traceroute`, `jq` и т.п.).
 
-В отличие от upstream Module D, где 100MB Network Bench использовал HTTP URL, NEXT-адаптация блокирует `http://` и использует HTTPS для всех загрузок. Внешние тестовые скрипты (Censorcheck/YABS/IPQuality и т.п.) остаются динамическими upstream-скриптами: перед запуском показываются URL, SHA256 скачанного файла и выполняется `bash -n`; их upstream SHA не закреплён.
+После отдельного аудита tester дополнительно исправлен:
+
+- upstream YABS больше не запускается с `-4`: у YABS этот флаг означает **Geekbench 4**, а не IPv4;
+- Censorcheck заранее получает обязательные `dig/jq/column`;
+- iPerf3 RU заранее получает `iperf3/jq/ping/awk/timeout`;
+- дублирующий IP-quality пункт заменён на `RegionRestrictionCheck` для geo/media unlock;
+- ошибки выбранных тестов больше не скрываются через `|| true`; режим `99/all` показывает PASS/FAIL/SKIP;
+- Network Bench выводит Mbit/s и использует только HTTPS.
+
+GitHub-hosted entry scripts Censorcheck, RU iPerf3, YABS, RegionRestrictionCheck и IPQuality закреплены конкретными commit + Git blob SHA и проверяются перед запуском. `bench.tlab.pw` остаётся динамическим HTTPS entry script и явно помечается предупреждением. Некоторые сами тестеры после старта обращаются к собственным внешним API/data-файлам, поэтому pin entry script не означает pin всех сетевых данных.
 
 Быстрая диагностика Hysteria2:
 

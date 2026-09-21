@@ -16,8 +16,8 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"
 NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="c01a37bd29f4da3da270972f44ae799f177aeadd"
-TESTER_BLOB_SHA="bddab73a3b427b80fef222dc65b15852c93e7b55"
+TESTER_REF="77bae9053ec222652ca543eec4463b5d9d824a74"
+TESTER_BLOB_SHA="0f5d592c0b3302d2b2c67b6e6938b46cc6cb4c82"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 APP_DIR="/opt/remnanode"
@@ -157,6 +157,12 @@ FILES
   grep -Fq 'Balbuto/safe-remnanode-setup' "$tester" || die 'Server Multitest: provenance marker отсутствует.'
   grep -Fq 'Censorcheck — DPI' "$tester" || die 'Server Multitest: Censorcheck DPI отсутствует.'
   grep -Fq 'iPerf3 — bench.tlab.pw' "$tester" || die 'Server Multitest: iPerf3 tlab отсутствует.'
+  grep -Fq 'Geo/Media Unlock — RegionRestrictionCheck' "$tester" || die 'Server Multitest: geo/media unlock отсутствует.'
+  grep -Fq 'IPQUALITY_BLOB_SHA=' "$tester" || die 'Server Multitest: IPQuality pin отсутствует.'
+  grep -Fq 'YABS_BLOB_SHA=' "$tester" || die 'Server Multitest: YABS pin отсутствует.'
+  ! grep -Fq '"$YABS_URL" "$YABS_BLOB_SHA" -4' "$tester" || die 'Server Multitest: ошибочный YABS -4 вернулся.'
+  grep -Fq 'prepare_censorcheck(){' "$tester" || die 'Server Multitest: Censorcheck dependency guard отсутствует.'
+  grep -Fq 'prepare_iperf_ru(){' "$tester" || die 'Server Multitest: iPerf dependency guard отсутствует.'
   grep -Fq 'Network Bench (HTTPS 100MB)' "$tester" || die 'Server Multitest: HTTPS network bench отсутствует.'
   if grep -Eq '(^|[^[:alnum:]])http://' "$tester"; then
     die 'Server Multitest содержит небезопасный HTTP URL.'

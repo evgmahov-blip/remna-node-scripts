@@ -116,21 +116,32 @@ jobs:
           set -Eeuo pipefail
 
           t=next-installer/server-multitest.sh
-          test "$(git rev-parse HEAD:$t)" = "bddab73a3b427b80fef222dc65b15852c93e7b55"
-          test "$(git rev-parse c01a37bd29f4da3da270972f44ae799f177aeadd:$t)" = "bddab73a3b427b80fef222dc65b15852c93e7b55"
+          test "$(git rev-parse HEAD:$t)" = "0f5d592c0b3302d2b2c67b6e6938b46cc6cb4c82"
+          test "$(git rev-parse 77bae9053ec222652ca543eec4463b5d9d824a74:$t)" = "0f5d592c0b3302d2b2c67b6e6938b46cc6cb4c82"
 
           grep -Fq 'Balbuto/safe-remnanode-setup' "$t"
           grep -Fq '274d84d9daa3b4d4a33264ba77992210aedd9b32' "$t"
           grep -Fq 'Censorcheck — DPI' "$t"
           grep -Fq 'iPerf3 — bench.tlab.pw' "$t"
           grep -Fq 'YABS' "$t"
-          grep -Fq 'IPQuality' "$t"
+          grep -Fq 'Geo/Media Unlock — RegionRestrictionCheck' "$t"
+          grep -Fq 'IPQuality — ASN / risk / blacklist / media / mail' "$t"
+          grep -Fq 'CENSOR_BLOB_SHA=' "$t"
+          grep -Fq 'IPERF_RU_BLOB_SHA=' "$t"
+          grep -Fq 'YABS_BLOB_SHA=' "$t"
+          grep -Fq 'REGION_BLOB_SHA=' "$t"
+          grep -Fq 'IPQUALITY_BLOB_SHA=' "$t"
+          grep -Fq 'prepare_censorcheck(){' "$t"
+          grep -Fq 'prepare_iperf_ru(){' "$t"
+          grep -Fq "IFS=' ' read -r bytes speed seconds" "$t"
+          grep -Fq 'Итог:' "$t"
+          ! grep -Fq '"$YABS_URL" "$YABS_BLOB_SHA" -4' "$t"
           grep -Fq 'Network Bench (HTTPS 100MB)' "$t"
           grep -Fq 'https://speed.cloudflare.com/__down?bytes=100000000' "$t"
           ! grep -Eq '(^|[^[:alnum:]])http://' "$t"
 
-          grep -Fq 'TESTER_REF="c01a37bd29f4da3da270972f44ae799f177aeadd"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="bddab73a3b427b80fef222dc65b15852c93e7b55"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="77bae9053ec222652ca543eec4463b5d9d824a74"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="0f5d592c0b3302d2b2c67b6e6938b46cc6cb4c82"' full-clean-reinstall.sh
           grep -Fq 'server-multitest.sh' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next multitest' full-clean-reinstall.sh
           grep -Fq 'multitest|server-test|tests)' full-clean-reinstall.sh
@@ -221,8 +232,8 @@ jobs:
           grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_REF="c01a37bd29f4da3da270972f44ae799f177aeadd"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="bddab73a3b427b80fef222dc65b15852c93e7b55"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="77bae9053ec222652ca543eec4463b5d9d824a74"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="0f5d592c0b3302d2b2c67b6e6938b46cc6cb4c82"' full-clean-reinstall.sh
           grep -Fq 'run_existing_node_v2(){' full-clean-reinstall.sh
           grep -Fq 'NEXT V2 — существующая/legacy нода' full-clean-reinstall.sh
           grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
@@ -301,7 +312,7 @@ jobs:
           test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
           test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "62ff1364c26d88f357968422d5591b3d2b8d9e78"
           test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
-          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "bddab73a3b427b80fef222dc65b15852c93e7b55"
+          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "0f5d592c0b3302d2b2c67b6e6938b46cc6cb4c82"
 
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
@@ -343,6 +354,9 @@ jobs:
           grep -Fq 'Balbuto/safe-remnanode-setup' README.md
           grep -Fq 'sudo remnanode-next multitest all' README.md
           grep -Fq 'Network Bench — HTTPS 100MB' README.md
+          grep -Fq 'Geo/Media Unlock — RegionRestrictionCheck' README.md
+          grep -Fq 'Geekbench 4' README.md
+          grep -Fq 'PASS/FAIL/SKIP' README.md
 
       - name: Legacy safety guard
         shell: bash
