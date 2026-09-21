@@ -249,7 +249,7 @@ test_network_100mb(){
   local result bytes speed seconds
   say 'Network Bench: HTTPS download 100 MB via Cloudflare speed endpoint'
   result="$(curl -4 -fsSL --proto '=https' --tlsv1.2     --connect-timeout 10 --max-time 180     -o /dev/null     -w '%{size_download} %{speed_download} %{time_total}'     "$NETWORK_BENCH_URL")" || return 1
-  read -r bytes speed seconds <<<"$result"
+  IFS=' ' read -r bytes speed seconds <<<"$result"
   awk -v b="$bytes" -v s="$speed" -v t="$seconds" '
     BEGIN {
       printf "Downloaded: %.2f MB\n", b / 1000000
@@ -451,13 +451,12 @@ EOF
 }
 
 main(){
-  need_root
   case "${1:-menu}" in
-    menu|'') menu ;;
     list) print_list ;;
-    all|99) run_all ;;
-    1|2|3|4|5|6|7|8|9|10|11|12|13|14) run_interruptible "$1" ;;
     -h|--help|help) usage ;;
+    menu|'') need_root; menu ;;
+    all|99) need_root; run_all ;;
+    1|2|3|4|5|6|7|8|9|10|11|12|13|14) need_root; run_interruptible "$1" ;;
     *) usage; exit 2 ;;
   esac
 }
