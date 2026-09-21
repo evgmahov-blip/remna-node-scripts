@@ -487,6 +487,35 @@ hysteria_diag(){
       else
         echo '  [PASS] runtime auth совпадает с client id'
       fi
+
+      local expected_profile expected_norm runtime_norm
+      expected_profile="$APP_DIR/remnawave-profiles/hysteria2-tls.json"
+      if [[ -s "$expected_profile" ]]; then
+        expected_norm="$(mktemp)"
+        runtime_norm="$(mktemp)"
+        jq -S '
+          [.inbounds[]? | select(.protocol=="hysteria")][0]
+          | .settings.clients = []
+          | del(.tag)
+          | if .sniffing.metadataOnly == false then del(.sniffing.metadataOnly) else . end
+        ' "$expected_profile" >"$expected_norm" 2>/dev/null || true
+        jq -S '
+          [.inbounds[]? | select(.protocol=="hysteria")][0]
+          | .settings.clients = []
+          | del(.tag)
+          | if .sniffing.metadataOnly == false then del(.sniffing.metadataOnly) else . end
+        ' "$runtime_tmp" >"$runtime_norm" 2>/dev/null || true
+        if [[ -s "$expected_norm" && -s "$runtime_norm" ]] && cmp -s "$expected_norm" "$runtime_norm"; then
+          echo '  [PASS] runtime семантически совпадает с локальным hysteria2-tls.json'
+        else
+          echo '  [FAIL] runtime отличается от локального hysteria2-tls.json'
+          echo '         Сравнение игнорирует только tag, динамические clients и metadataOnly=false.'
+          drift=1
+        fi
+        rm -f "$expected_norm" "$runtime_norm"
+      else
+        echo '  [WARN] локальный hysteria2-tls.json отсутствует — semantic compare пропущен'
+      fi
     else
       echo '  [WARN] cli --dump-config-raw не вернул конфигурацию'
     fi
