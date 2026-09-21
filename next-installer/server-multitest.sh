@@ -442,6 +442,7 @@ print_list(){
 10) NextTrace Route/MTR — loss/jitter/ASN/geo
 11) NextTrace Path MTU — UDP PMTU
 12) NextTrace Globalping — внешние TCP/443 точки → эта нода
+98) Анализ последнего прогона
 99) Мультитест: все тесты автоматически
 EOF
 }
@@ -725,6 +726,10 @@ menu(){
         rc=0
         run_interruptible "$choice" || rc=$?
         (( rc == 0 || rc == 130 )) || warn "Тест завершился с rc=$rc"
+        pause
+        ;;
+      98)
+        show_latest_analysis || true
         pause
         ;;
       99)
