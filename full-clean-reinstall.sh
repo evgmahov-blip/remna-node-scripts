@@ -182,7 +182,7 @@ FILES
   grep -Fq '98) Анализ последнего прогона' "$tester" || die 'Server Multitest: analysis menu item отсутствует.'
   grep -Fq 'ОЦЕНКА НОДЫ — БЫСТРАЯ ЛОКАЛЬНАЯ АНАЛИТИКА' "$tester" || die 'Server Multitest: inline scorecard отсутствует.'
   grep -Fq 'АНАЛИТИКА ПОСЛЕ ТЕСТОВ' "$tester" || die 'Server Multitest: automatic inline analysis отсутствует.'
-  grep -Fq 'Плановый сетевой бюджет с 30% запасом' "$tester" || die 'Server Multitest: XHTTP planning heuristic отсутствует.'
+  grep -Fq 'Плановый сетевой бюджет с 30%% запасом' "$tester" || die 'Server Multitest: XHTTP planning heuristic отсутствует.'
   ! sed -n '/run_all(){/,/^}/p' "$tester" | grep -Fq 'read -r action' || die 'Server Multitest: all mode снова требует Enter.'
   if grep -Eq '(^|[^[:alnum:]])http://' "$tester"; then
     die 'Server Multitest содержит небезопасный HTTP URL.'
