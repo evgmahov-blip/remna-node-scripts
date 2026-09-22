@@ -646,7 +646,7 @@ print_node_scorecard(){
 generate_report(){
   local dir="$1"
   local summary analysis ai
-  local pass fail skip total speed
+  local pass fail skip total
 
   summary="$dir/summary.tsv"
   analysis="$dir/analysis.txt"
@@ -671,28 +671,6 @@ generate_report(){
 
     echo
     print_node_scorecard "$dir"
-    echo
-    echo '=== AUTOMATIC FINDINGS ==='
-    if (( fail > 0 )); then
-      echo '[WARN] Есть упавшие тесты:'
-      awk -F '\t' 'NR>1 && $3=="FAIL"{printf "  - #%s %s (rc=%s)\n",$1,$2,$5}' "$summary"
-    else
-      echo '[OK] Все запущенные тесты завершились без ошибки.'
-    fi
-
-    if (( skip > 0 )); then
-      printf '[INFO] Пропущено тестов: %s\n' "$skip"
-    fi
-
-    speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
-    if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-      awk -v s="$speed" 'BEGIN{
-        if (s < 20) printf "[WARN] Cloudflare download %.2f Mbit/s — очень низко для VPN-ноды; проверь канал/шейпинг.\n",s;
-        else if (s < 50) printf "[WARN] Cloudflare download %.2f Mbit/s — низковато; сравни с тарифом и iPerf.\n",s;
-        else printf "[INFO] Cloudflare download %.2f Mbit/s.\n",s;
-      }'
-    fi
-
     echo
     echo '=== ПРОБЛЕМЫ ==='
     if (( fail > 0 )); then
