@@ -80,7 +80,6 @@ CLI:  sudo remnanode-next
       RUN:    sudo remnanode-next hysteria-diag
 
       NETWORK: sudo remnanode-next network
-      TUNE:   https://github.com/Balbuto/safe-remnanode-setup
       BBR3:   https://github.com/ivan-nginx/bbr3
 
  [0]  Выход
@@ -215,7 +214,6 @@ Final Mask: ПУСТО / DEFAULT
 
 ### Мульти-тесты сервера
 
-В NEXT встроен отдельный tester-модуль, адаптированный из **Module D** проекта `Balbuto/safe-remnanode-setup` (source commit `274d84d9daa3b4d4a33264ba77992210aedd9b32`, source script blob `58a85a9baa4f36648d6587c5d6c4ac347096963d`). Upstream указывает, что модуль актуализирован по `saveksme/multitest v1.1`.
 
 Запуск:
 
@@ -263,21 +261,13 @@ sudo remnanode-next multitest report
 
 `analyze` повторно строит и показывает анализ последнего прогона. `report` показывает каталог и пути к `analysis.txt`, `AI_REPORT.txt` и raw logs. В меню также есть пункт `98) Анализ последнего прогона`.
 
-После `multitest all` анализ теперь **автоматически печатается в терминал**. Вверху выводится блок `ОЦЕНКА НОДЫ — БЫСТРАЯ ЛОКАЛЬНАЯ АНАЛИТИКА` с:
-- измеренной Cloudflare скоростью;
-- single-thread и all-thread CPU;
-- Path MTU;
-- DNSBL blacklist count;
-- числом FAIL;
-- сетевым бюджетом с 30% запасом и прозрачной арифметикой эквивалентной одновременной нагрузки при 3 и 5 Mbit/s на активного клиента.
+После `multitest all` в терминале сразу выводится короткий блок **ИТОГ ПО НОДЕ**: FAIL, измеренная скорость, single/all-thread CPU, MTU, DNSBL blacklist, рабочий сетевой бюджет и ориентир по одновременно активным XHTTP-клиентам при 3 и 5 Mbit/s.
 
-Это именно локальная эвристика планирования, а не гарантированный лимит XHTTP-пользователей.
-
-Локальный анализ намеренно осторожный: он выделяет FAIL/timeout, длительность, Cloudflare throughput и ключевые строки из geo/IP-quality/fio/CPU/MTR/PMTU/Globalping. FAIL означает ошибку/timeout теста, а не автоматически плохую ноду; geo/risk базы и скорости нужно оценивать вместе.
+IPQuality запускается в JSON/privacy-режиме и выводит только полезные поля: ASN, регион, тип IP, risk, proxy flags, media и DNSBL — без рекламных sponsor-блоков. Подробные raw-логи и `AI_REPORT.txt` сохраняются отдельно.
 
 Tester не меняет firewall, sysctl, Docker или конфигурацию Remnawave. Он может доустановить только утилиту, необходимую выбранному тесту (`iperf3`, `sysbench`, `traceroute`, `jq` и т.п.).
 
-После отдельного аудита tester дополнительно исправлен:
+Tester дополнительно оптимизирован:
 
 - upstream YABS больше не запускается с `-4`: у YABS этот флаг означает **Geekbench 4**, а не IPv4;
 - в составе REMNANODE multitest YABS запускается с `-ign`: остаётся только fio disk I/O; iperf, Geekbench и network-info отключены, потому что сеть/CPU проверяются отдельными тестами; hard timeout — 420 секунд;
@@ -385,7 +375,6 @@ sudo remnanode-next network
 
 ```text
 [2] BBR TUNE — SAFE/HIGHLOAD, БЕЗ ЗАМЕНЫ ЯДРА
-    SOURCE: https://github.com/Balbuto/safe-remnanode-setup
     RUN:    sudo remnanode-next bbr-tune
 
 [3] BBR3 — КАСТОМНОЕ ЯДРО, НУЖЕН REBOOT
@@ -409,7 +398,6 @@ sudo remnanode-next bbr3
 
 Источники:
 - BBR3: https://github.com/ivan-nginx/bbr3
-- BBR tune / SAFE-HIGHLOAD: https://github.com/Balbuto/safe-remnanode-setup
 
 ## Два сценария очистки / переустановки
 

@@ -13,11 +13,11 @@ HYSTERIA_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${HYSTERIA_OVERL
 V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"
 V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
 V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next-installer/existing-node-v2-cleanup.sh"
-NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"
-NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"
+NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"
+NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="6679bcb2cce285467678a1faf9b95fe79cbd0f2e"
-TESTER_BLOB_SHA="851b5dd69d43cd38d8e0377c02a199053c420b5b"
+TESTER_REF="bce43fa11e467e0ecd5163666ce7e88667001d6c"
+TESTER_BLOB_SHA="f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 APP_DIR="/opt/remnanode"
@@ -146,7 +146,6 @@ FILES
   bash -n "$network" || die 'Network/BBR manager не прошёл bash -n.'
   grep -Fq 'sudo remnanode-next bbr-tune' "$network" || die 'Network/BBR manager: CLI hint отсутствует.'
   grep -Fq 'https://github.com/ivan-nginx/bbr3' "$network" || die 'Network/BBR manager: BBR3 source link отсутствует.'
-  grep -Fq 'https://github.com/Balbuto/safe-remnanode-setup' "$network" || die 'Network/BBR manager: BBR tune source link отсутствует.'
 
   local tester
   tester="$tmp/next-installer/server-multitest.sh"
@@ -154,7 +153,6 @@ FILES
     "$TESTER_URL" -o "$tester" || die 'Не удалось скачать Server Multitest.'
   [[ "$(git_blob_sha "$tester")" == "$TESTER_BLOB_SHA" ]] || die 'Server Multitest не прошёл Git blob SHA.'
   bash -n "$tester" || die 'Server Multitest не прошёл bash -n.'
-  grep -Fq 'Balbuto/safe-remnanode-setup' "$tester" || die 'Server Multitest: provenance marker отсутствует.'
   grep -Fq 'Censorcheck — DPI' "$tester" || die 'Server Multitest: Censorcheck DPI отсутствует.'
   grep -Fq 'Geo/Media Unlock — RegionRestrictionCheck' "$tester" || die 'Server Multitest: geo/media unlock отсутствует.'
   grep -Fq 'IPQUALITY_BLOB_SHA=' "$tester" || die 'Server Multitest: IPQuality pin отсутствует.'
@@ -180,9 +178,12 @@ FILES
   grep -Fq 'summary.tsv' "$tester" || die 'Server Multitest: summary.tsv отсутствует.'
   grep -Fq 'show_latest_analysis(){' "$tester" || die 'Server Multitest: analyze command отсутствует.'
   grep -Fq '98) Анализ последнего прогона' "$tester" || die 'Server Multitest: analysis menu item отсутствует.'
-  grep -Fq 'ОЦЕНКА НОДЫ — БЫСТРАЯ ЛОКАЛЬНАЯ АНАЛИТИКА' "$tester" || die 'Server Multitest: inline scorecard отсутствует.'
+  grep -Fq 'ИТОГ ПО НОДЕ' "$tester" || die 'Server Multitest: final node summary отсутствует.'
   grep -Fq 'АНАЛИТИКА ПОСЛЕ ТЕСТОВ' "$tester" || die 'Server Multitest: automatic inline analysis отсутствует.'
-  grep -Fq 'Плановый сетевой бюджет с 30%% запасом' "$tester" || die 'Server Multitest: XHTTP planning heuristic отсутствует.'
+  grep -Fq 'Рабочий бюджет:' "$tester" || die 'Server Multitest: XHTTP planning budget отсутствует.'
+  grep -Fq 'XHTTP ориентир:' "$tester" || die 'Server Multitest: XHTTP planning estimate отсутствует.'
+  grep -Fq '"DNSBL: clean="' "$tester" || die 'Server Multitest: concise IPQuality output отсутствует.'
+  ! grep -Fq 'INTERPRETATION RULE' "$tester" || die 'Server Multitest: verbose interpretation footer вернулся.'
   ! sed -n '/run_all(){/,/^}/p' "$tester" | grep -Fq 'read -r action' || die 'Server Multitest: all mode снова требует Enter.'
   if grep -Eq '(^|[^[:alnum:]])http://' "$tester"; then
     die 'Server Multitest содержит небезопасный HTTP URL.'
@@ -805,13 +806,11 @@ CLI:  sudo remnanode-next
 
  [13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
       RUN:    sudo remnanode-next network
-      TUNE:   https://github.com/Balbuto/safe-remnanode-setup
       BBR3:   https://github.com/ivan-nginx/bbr3
  [14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters
- [15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА — Balbuto Module D
+ [15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА
       RUN:    sudo remnanode-next multitest
       TEST:   sudo remnanode-next multitest 1..12
-      SOURCE: https://github.com/Balbuto/safe-remnanode-setup
 
  [0]  Выход
 ────────────────────────────────────────────────────────────

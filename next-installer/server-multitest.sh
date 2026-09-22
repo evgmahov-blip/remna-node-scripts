@@ -3,11 +3,6 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 # REMNANODE NEXT — server multitest
-# Derived from Module D of:
-#   https://github.com/Balbuto/safe-remnanode-setup
-# Source commit: 274d84d9daa3b4d4a33264ba77992210aedd9b32
-# Source script blob: 58a85a9baa4f36648d6587c5d6c4ac347096963d
-#
 # REMNANODE NEXT audit adaptations:
 # - standalone tester only; no node/firewall/sysctl installer code;
 # - all wrapper downloads are HTTPS only;
@@ -21,9 +16,6 @@ IFS=$'\n\t'
 #   pinned by upstream SHA256, and cached outside PATH for MTR/PMTU/Globalping tests.
 # - all/99 runs every test automatically without per-test Enter prompts.
 
-SOURCE_REPO="Balbuto/safe-remnanode-setup"
-SOURCE_REF="274d84d9daa3b4d4a33264ba77992210aedd9b32"
-SOURCE_BLOB_SHA="58a85a9baa4f36648d6587c5d6c4ac347096963d"
 
 CENSOR_REF="42a688b855b37bc6e97eace1897df38897b8d9fe"
 CENSOR_BLOB_SHA="4b12652cd83112f5c615fdf6af1048aa7abca958"
@@ -178,7 +170,7 @@ run_external_script_timeout(){
   tmp="$(mktemp "/tmp/remna-multitest.XXXXXX.sh")"
   echo
   printf '%s================ %s ================%s\n' "$C_CYAN" "$name" "$C_RESET"
-  say "Execution timeout: ${seconds}s"
+  say "Max runtime: ${seconds}s"
   if [[ -n "$expected_blob" ]]; then
     say "Entry script pinned: $expected_blob"
   else
@@ -321,8 +313,46 @@ test_geo_unlock(){
 test_ipquality(){
   need_cmd curl curl ca-certificates
   need_cmd jq jq
-  warn 'IPQuality обращается к множеству внешних IP/risk/media API; расхождения между базами нормальны.'
-  run_external_script     "IPQuality"     "$IPQUALITY_URL"     "$IPQUALITY_BLOB_SHA"     -l ru -y
+
+  local script json rc=0
+  script="$(mktemp "/tmp/remna-ipquality.XXXXXX.sh")"
+  json="$(mktemp "/tmp/remna-ipquality.XXXXXX.json")"
+
+  printf '%s================ IPQuality ================%s\n' "$C_CYAN" "$C_RESET"
+  if ! download_external_script "IPQuality" "$IPQUALITY_URL" "$script" "$IPQUALITY_BLOB_SHA"; then
+    rm -f "$script" "$json"
+    return 1
+  fi
+
+  set +e
+  bash "$script" -l ru -y -p -j >"$json" 2>/dev/null
+  rc=$?
+  set -e
+
+  if ! jq -e . "$json" >/dev/null 2>&1; then
+    fail "IPQuality не вернул валидный JSON (rc=$rc)."
+    rm -f "$script" "$json"
+    return 1
+  fi
+
+  jq -r '
+    "ASN: " + (.Info.ASN // "?"),
+    "Region: " + (.Info.Region.Code // "?") + " " + (.Info.Region.Name // ""),
+    "Usage: " + ([.Type.Usage[]?] | unique | join(", ")),
+    "Risk: IP2Location=" + (.Score.IP2LOCATION // "?") +
+      " AbuseIPDB=" + (.Score.AbuseIPDB // "?") +
+      " Scamalytics=" + (.Score.SCAMALYTICS // "?"),
+    "Proxy flags: " + ([.Factor.Proxy | to_entries[] | select(.value == true) | .key] |
+      if length == 0 then "none" else join(",") end),
+    "Media: " + ([.Media | to_entries[] |
+      (.key + "=" + (.value.Status // "?") + "/" + (.value.Region // "-"))] | join(" ")),
+    "DNSBL: clean=" + ((.Mail.DNSBlacklist.Clean // "?")|tostring) +
+      " marked=" + ((.Mail.DNSBlacklist.Marked // "?")|tostring) +
+      " blacklisted=" + ((.Mail.DNSBlacklist.Blacklisted // "?")|tostring)
+  ' "$json"
+
+  rm -f "$script" "$json"
+  return 0
 }
 
 test_sysbench_cpu(){
@@ -524,7 +554,7 @@ report_key_metrics(){
   if [[ -f "$dir/07-ipquality.log" ]]; then
     echo
     echo '[IP quality / unlock]'
-    grep -aiE 'ASN|Country|Location|Risk|Blacklist|Netflix|YouTube|ChatGPT|TikTok|Disney|Mail|Proxy|Hosting|Datacenter|Abuse' "$dir/07-ipquality.log" | tail -50 || true
+    grep -aE '^(ASN|Region|Usage|Risk|Proxy flags|Media|DNSBL):' "$dir/07-ipquality.log" | tail -20 || true
   fi
 
   if [[ -f "$dir/08-sysbench-cpu.log" ]]; then
@@ -559,8 +589,12 @@ report_key_metrics(){
 }
 
 print_node_scorecard(){
-  local dir="$1" summary="$dir/summary.tsv"
+  local dir="$1"
+  local summary
   local speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" fail_count="" safe_mbps=""
+  local at3="" at5=""
+
+  summary="$dir/summary.tsv"
 
   [[ -f "$dir/09-network-bench.log" ]] &&     speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
 
@@ -578,41 +612,41 @@ print_node_scorecard(){
 
   [[ -f "$dir/11-nexttrace-mtu.log" ]] &&     mtu="$(awk '/Path MTU:[[:space:]]*[0-9]+/{print $3; exit}' "$dir/11-nexttrace-mtu.log" 2>/dev/null || true)"
 
-  [[ -f "$dir/07-ipquality.log" ]] &&     blacklisted="$(awk '/DNSBL database:/{
-      for (i=1;i<=NF;i++) if ($i=="Blacklisted") {print $(i+1); exit}
-    }' "$dir/07-ipquality.log" 2>/dev/null || true)"
+  [[ -f "$dir/07-ipquality.log" ]] &&     blacklisted="$(sed -nE 's/^DNSBL:.*blacklisted=([0-9]+).*/\1/p' "$dir/07-ipquality.log" | head -1)"
 
   [[ -f "$summary" ]] &&     fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
 
   echo '======================================================================'
-  echo ' ОЦЕНКА НОДЫ — БЫСТРАЯ ЛОКАЛЬНАЯ АНАЛИТИКА'
+  echo ' ИТОГ ПО НОДЕ'
   echo '======================================================================'
-  printf 'Тесты:           FAIL=%s\n' "${fail_count:-?}"
-  printf 'Сеть:            %s\n' "$([[ -n "$speed" ]] && printf '%s Mbit/s' "$speed" || printf 'нет данных')"
-  printf 'CPU single:      %s\n' "$([[ -n "$cpu_single" ]] && printf '%s events/s' "$cpu_single" || printf 'нет данных')"
-  printf 'CPU all-thread:  %s\n' "$([[ -n "$cpu_all" ]] && printf '%s events/s' "$cpu_all" || printf 'нет данных')"
-  printf 'Path MTU:        %s\n' "${mtu:-нет данных}"
-  printf 'DNSBL blacklist: %s\n' "${blacklisted:-нет данных}"
+  printf 'FAIL:             %s\n' "${fail_count:-?}"
+  printf 'Сеть:             %s\n' "$([[ -n "$speed" ]] && printf '%s Mbit/s' "$speed" || printf 'нет данных')"
+  printf 'CPU single:       %s\n' "$([[ -n "$cpu_single" ]] && printf '%s events/s' "$cpu_single" || printf 'нет данных')"
+  printf 'CPU all-thread:   %s\n' "$([[ -n "$cpu_all" ]] && printf '%s events/s' "$cpu_all" || printf 'нет данных')"
+  printf 'MTU:              %s\n' "${mtu:-нет данных}"
+  printf 'DNSBL blacklist:  %s\n' "${blacklisted:-нет данных}"
 
   if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     safe_mbps="$(awk -v s="$speed" 'BEGIN{printf "%.1f", s*0.70}')"
-    echo
-    printf 'Плановый сетевой бюджет с 30%% запасом: %s Mbit/s\n' "$safe_mbps"
-    awk -v s="$safe_mbps" 'BEGIN{
-      printf "Эквивалент одновременной средней нагрузки: ~%d клиентов @3 Mbit/s или ~%d @5 Mbit/s.\n", int(s/3), int(s/5)
-    }'
+    at3="$(awk -v s="$safe_mbps" 'BEGIN{print int(s/3)}')"
+    at5="$(awk -v s="$safe_mbps" 'BEGIN{print int(s/5)}')"
+    printf 'Рабочий бюджет:   %s Mbit/s (70%% измеренной скорости)\n' "$safe_mbps"
+    printf 'XHTTP ориентир:   ~%s активных @3 Mbit/s / ~%s @5 Mbit/s\n' "$at3" "$at5"
   fi
 
-  echo
-  echo 'Важно: это локальная эвристика по измеренной сети/CPU, а не гарантированный лимит пользователей.'
-  echo 'Для XHTTP реальный предел зависит от профиля трафика, TLS/Reality, числа активных сессий и oversubscription VPS.'
+  if [[ "$blacklisted" == "0" ]]; then
+    echo 'IP reputation:    без DNSBL blacklist по текущему тесту'
+  fi
+  if [[ "$mtu" == "1500" ]]; then
+    echo 'MTU:              нормальный для XHTTP/Hysteria2'
+  fi
   echo '======================================================================'
 }
 
 generate_report(){
   local dir="$1"
   local summary analysis ai
-  local pass fail skip total speed
+  local pass fail skip total
 
   summary="$dir/summary.tsv"
   analysis="$dir/analysis.txt"
@@ -638,33 +672,12 @@ generate_report(){
     echo
     print_node_scorecard "$dir"
     echo
-    echo '=== AUTOMATIC FINDINGS ==='
+    echo '=== ПРОБЛЕМЫ ==='
     if (( fail > 0 )); then
-      echo '[WARN] Есть упавшие тесты:'
-      awk -F '\t' 'NR>1 && $3=="FAIL"{printf "  - #%s %s (rc=%s)\n",$1,$2,$5}' "$summary"
+      awk -F '\t' 'NR>1 && $3=="FAIL"{printf "  #%s %s (rc=%s)\n",$1,$2,$5}' "$summary"
     else
-      echo '[OK] Все запущенные тесты завершились без ошибки.'
+      echo '  Нет.'
     fi
-
-    if (( skip > 0 )); then
-      printf '[INFO] Пропущено тестов: %s\n' "$skip"
-    fi
-
-    speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
-    if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-      awk -v s="$speed" 'BEGIN{
-        if (s < 20) printf "[WARN] Cloudflare download %.2f Mbit/s — очень низко для VPN-ноды; проверь канал/шейпинг.\n",s;
-        else if (s < 50) printf "[WARN] Cloudflare download %.2f Mbit/s — низковато; сравни с тарифом и iPerf.\n",s;
-        else printf "[INFO] Cloudflare download %.2f Mbit/s.\n",s;
-      }'
-    fi
-
-    echo
-    report_key_metrics "$dir"
-    echo
-    echo '=== INTERPRETATION RULE ==='
-    echo 'FAIL означает ошибку запуска/timeout/ненулевой exit code, а не автоматически плохое качество ноды.'
-    echo 'Сетевые скорости, geo/risk базы и маршруты нужно оценивать вместе и относительно тарифа/локации.'
   } >"$analysis"
 
   {
@@ -759,7 +772,7 @@ run_all(){
     printf 'host=%s\n' "$(hostname -f 2>/dev/null || hostname)"
     printf 'utc_start=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     printf 'kernel=%s\n' "$(uname -srmo)"
-    printf 'tester_source=%s@%s\n' "$SOURCE_REPO" "$SOURCE_REF"
+    printf 'tester=remnanode-next-server-multitest\n'
   } >"$run_dir/meta.txt"
 
   say 'Автоматический режим: все тесты идут подряд без подтверждений.'

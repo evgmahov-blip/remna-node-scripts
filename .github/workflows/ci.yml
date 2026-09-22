@@ -116,11 +116,9 @@ jobs:
           set -Eeuo pipefail
 
           t=next-installer/server-multitest.sh
-          test "$(git rev-parse HEAD:$t)" = "851b5dd69d43cd38d8e0377c02a199053c420b5b"
-          test "$(git rev-parse 6679bcb2cce285467678a1faf9b95fe79cbd0f2e:$t)" = "851b5dd69d43cd38d8e0377c02a199053c420b5b"
+          test "$(git rev-parse HEAD:$t)" = "f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"
+          test "$(git rev-parse bce43fa11e467e0ecd5163666ce7e88667001d6c:$t)" = "f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"
 
-          grep -Fq 'Balbuto/safe-remnanode-setup' "$t"
-          grep -Fq '274d84d9daa3b4d4a33264ba77992210aedd9b32' "$t"
           grep -Fq 'Censorcheck — DPI' "$t"
           grep -Fq 'YABS — disk fio only' "$t"
           grep -Fq 'run_external_script_timeout 420 "YABS' "$t"
@@ -171,10 +169,15 @@ jobs:
           grep -Fq 'summary="$dir/summary.tsv"' "$t"
           ! grep -Fq 'local dir="$1" summary="$dir/summary.tsv"' "$t"
           grep -Fq '98) Анализ последнего прогона' "$t"
-          grep -Fq 'ОЦЕНКА НОДЫ — БЫСТРАЯ ЛОКАЛЬНАЯ АНАЛИТИКА' "$t"
+          grep -Fq 'ИТОГ ПО НОДЕ' "$t"
           grep -Fq 'АНАЛИТИКА ПОСЛЕ ТЕСТОВ' "$t"
-          grep -Fq 'Плановый сетевой бюджет с 30%% запасом' "$t"
-          grep -Fq 'Эквивалент одновременной средней нагрузки' "$t"
+          grep -Fq 'Рабочий бюджет:' "$t"
+          grep -Fq 'XHTTP ориентир:' "$t"
+          grep -Fq '"DNSBL: clean="' "$t"
+          grep -Fq 'bash "$script" -l ru -y -p -j' "$t"
+          grep -Fq 'Max runtime:' "$t"
+          ! grep -Fq 'Execution timeout:' "$t"
+          ! grep -Fq 'INTERPRETATION RULE' "$t"
           grep -Fq 'cat "$run_dir/analysis.txt"' "$t"
           grep -Fq 'analyze) need_root; show_latest_analysis' "$t"
           grep -Fq 'report) need_root; show_latest_report' "$t"
@@ -190,8 +193,8 @@ jobs:
           ! bash "$t" list | grep -Fq 'Ping yandex'
           ! grep -Eq '(^|[^[:alnum:]])http://' "$t"
 
-          grep -Fq 'TESTER_REF="6679bcb2cce285467678a1faf9b95fe79cbd0f2e"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="851b5dd69d43cd38d8e0377c02a199053c420b5b"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="bce43fa11e467e0ecd5163666ce7e88667001d6c"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"' full-clean-reinstall.sh
           grep -Fq 'server-multitest.sh' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next multitest' full-clean-reinstall.sh
           grep -Fq 'multitest|server-test|tests)' full-clean-reinstall.sh
@@ -280,10 +283,10 @@ jobs:
 
           grep -Fq 'V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
-          grep -Fq 'NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"' full-clean-reinstall.sh
-          grep -Fq 'NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_REF="6679bcb2cce285467678a1faf9b95fe79cbd0f2e"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="851b5dd69d43cd38d8e0377c02a199053c420b5b"' full-clean-reinstall.sh
+          grep -Fq 'NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"' full-clean-reinstall.sh
+          grep -Fq 'NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="bce43fa11e467e0ecd5163666ce7e88667001d6c"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"' full-clean-reinstall.sh
           grep -Fq 'run_existing_node_v2(){' full-clean-reinstall.sh
           grep -Fq 'NEXT V2 — существующая/legacy нода' full-clean-reinstall.sh
           grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
@@ -308,7 +311,7 @@ jobs:
           grep -Fq 'host-hysteria2|host-hysteria)' full-clean-reinstall.sh
           grep -Fq '[13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)' full-clean-reinstall.sh
           grep -Fq '[14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters' full-clean-reinstall.sh
-          grep -Fq '[15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА — Balbuto Module D' full-clean-reinstall.sh
+          grep -Fq '[15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next multitest 1..12' full-clean-reinstall.sh
           grep -Fq 'hysteria-diag|hy2-diag)' full-clean-reinstall.sh
           grep -Fq 'RKN UDP/443 DROP rule + counters:' full-clean-reinstall.sh
@@ -316,7 +319,6 @@ jobs:
           grep -Fq 'HYSTERIA2 RUNTIME DRIFT' full-clean-reinstall.sh
           grep -Fq 'runtime семантически совпадает с локальным hysteria2-tls.json' full-clean-reinstall.sh
           ! sed -n '/hysteria_diag(){/,/^}/p' full-clean-reinstall.sh | grep -Fq 'sync_next_sources'
-          grep -Fq 'https://github.com/Balbuto/safe-remnanode-setup' full-clean-reinstall.sh
           grep -Fq 'https://github.com/ivan-nginx/bbr3' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next network' full-clean-reinstall.sh
           grep -Fq 'ensure_default_rkn(){' full-clean-reinstall.sh
@@ -326,8 +328,8 @@ jobs:
           ! grep -Fq 'Открыть RKN SAFE menu сейчас?' full-clean-reinstall.sh
 
           n=next-installer/network-tuning-manager.sh
-          test "$(git rev-parse HEAD:$n)" = "8616189227534a4c651000d233162b1603a50d7b"
-          test "$(git rev-parse dd7474f8f72b7d4b56221e89bb969ac75b2dff00:$n)" = "8616189227534a4c651000d233162b1603a50d7b"
+          test "$(git rev-parse HEAD:$n)" = "a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
+          test "$(git rev-parse 8378a6b4340fc0b11b3f66246caaa39d3ee360b9:$n)" = "a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
           grep -Fq 'sudo remnanode-next bbr-tune' "$n"
           grep -Fq 'sudo remnanode-next bbr3' "$n"
           grep -Fq 'BBR3 — КАСТОМНОЕ ЯДРО, НУЖЕН REBOOT' "$n"
@@ -362,7 +364,7 @@ jobs:
           test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
           test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "62ff1364c26d88f357968422d5591b3d2b8d9e78"
           test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
-          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "851b5dd69d43cd38d8e0377c02a199053c420b5b"
+          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"
 
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
@@ -401,7 +403,6 @@ jobs:
           grep -Fq 'sudo remnanode-next host-hysteria2' README.md
           grep -Fq 'HOST HYSTERIA2' README.md
           grep -Fq '### Мульти-тесты сервера' README.md
-          grep -Fq 'Balbuto/safe-remnanode-setup' README.md
           grep -Fq 'sudo remnanode-next multitest all' README.md
           grep -Fq 'Network Bench — HTTPS 100MB' README.md
           grep -Fq '50MB fallback' README.md
@@ -420,8 +421,9 @@ jobs:
           grep -Fq 'NextTrace Globalping' README.md
           grep -Fq 'ничего дополнительно нажимать не нужно' README.md
           grep -Fq 'multitest analyze' README.md
-          grep -Fq 'автоматически печатается в терминал' README.md
-          grep -Fq '30% запасом' README.md
+          grep -Fq 'в терминале сразу выводится короткий блок' README.md
+          grep -Fq 'ИТОГ ПО НОДЕ' README.md
+          grep -Fq 'JSON/privacy-режиме' README.md
           grep -Fq 'multitest report' README.md
           grep -Fq 'AI_REPORT.txt' README.md
           grep -Fq '/var/log/remnanode-next/multitest/' README.md

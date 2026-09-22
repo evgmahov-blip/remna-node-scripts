@@ -8,8 +8,6 @@ TTY=/dev/tty
 
 IVAN_REPO="https://github.com/ivan-nginx/bbr3"
 IVAN_REF="faabcb8b4070742acc01955283130b386bb07b68"
-BALBUTO_REPO="https://github.com/Balbuto/safe-remnanode-setup"
-BALBUTO_REF="274d84d9daa3b4d4a33264ba77992210aedd9b32"
 
 BBR3_INSTALLER_REPO="XDflight/bbr3-debs"
 BBR3_INSTALLER_REF="4f7e3b5a14ffd26777c28f364ce49c7c6e02180b"
@@ -81,7 +79,7 @@ apply_bbr_tune(){
   if (( ram_gb >= 2 )); then
     cat > "$SYSCTL_TUNE" <<'EOF'
 # REMNANODE BBR TUNE — HIGHLOAD
-# Based on the conservative tuning approach used by Balbuto/safe-remnanode-setup.
+# REMNANODE conservative network tuning profile.
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 fs.file-max = 2097152
@@ -105,7 +103,7 @@ EOF
   else
     cat > "$SYSCTL_TUNE" <<'EOF'
 # REMNANODE BBR TUNE — SAFE
-# Based on the conservative tuning approach used by Balbuto/safe-remnanode-setup.
+# REMNANODE conservative network tuning profile.
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 fs.file-max = 524288
