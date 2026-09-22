@@ -313,8 +313,46 @@ test_geo_unlock(){
 test_ipquality(){
   need_cmd curl curl ca-certificates
   need_cmd jq jq
-  warn 'IPQuality обращается к множеству внешних IP/risk/media API; расхождения между базами нормальны.'
-  run_external_script     "IPQuality"     "$IPQUALITY_URL"     "$IPQUALITY_BLOB_SHA"     -l ru -y
+
+  local script json rc=0
+  script="$(mktemp "/tmp/remna-ipquality.XXXXXX.sh")"
+  json="$(mktemp "/tmp/remna-ipquality.XXXXXX.json")"
+  trap 'rm -f "$script" "$json"' RETURN
+
+  printf '%s================ IPQuality ================%s\n' "$C_CYAN" "$C_RESET"
+  if ! download_external_script "IPQuality" "$IPQUALITY_URL" "$script" "$IPQUALITY_BLOB_SHA"; then
+    return 1
+  fi
+
+  set +e
+  bash "$script" -l ru -y -p -j >"$json" 2>/dev/null
+  rc=$?
+  set -e
+
+  if ! jq -e . "$json" >/dev/null 2>&1; then
+    fail "IPQuality не вернул валидный JSON (rc=$rc)."
+    return 1
+  fi
+
+  jq -r '
+    "ASN: " + (.Info.ASN // "?"),
+    "Region: " + (.Info.Region.Code // "?") + " " + (.Info.Region.Name // ""),
+    "Usage: " + ([.Type.Usage[]?] | unique | join(", ")),
+    "Risk: IP2Location=" + (.Score.IP2LOCATION // "?") +
+      " AbuseIPDB=" + (.Score.AbuseIPDB // "?") +
+      " Scamalytics=" + (.Score.SCAMALYTICS // "?"),
+    "Proxy flags: " + ([.Factor.Proxy | to_entries[] | select(.value == true) | .key] |
+      if length == 0 then "none" else join(",") end),
+    "Media: " + ([.Media | to_entries[] |
+      (.key + "=" + (.value.Status // "?") + "/" + (.value.Region // "-"))] | join(" ")),
+    "DNSBL: clean=" + ((.Mail.DNSBlacklist.Clean // "?")|tostring) +
+      " marked=" + ((.Mail.DNSBlacklist.Marked // "?")|tostring) +
+      " blacklisted=" + ((.Mail.DNSBlacklist.Blacklisted // "?")|tostring)
+  ' "$json"
+
+  # Валидный JSON-отчёт важнее внутреннего rc upstream-скрипта:
+  # внешние API могут дать частичный результат и ненулевой rc.
+  return 0
 }
 
 test_sysbench_cpu(){
@@ -516,7 +554,7 @@ report_key_metrics(){
   if [[ -f "$dir/07-ipquality.log" ]]; then
     echo
     echo '[IP quality / unlock]'
-    grep -aiE 'ASN|Country|Location|Risk|Blacklist|Netflix|YouTube|ChatGPT|TikTok|Disney|Mail|Proxy|Hosting|Datacenter|Abuse' "$dir/07-ipquality.log" | tail -50 || true
+    grep -aE '^(ASN|Region|Usage|Risk|Proxy flags|Media|DNSBL):' "$dir/07-ipquality.log" | tail -20 || true
   fi
 
   if [[ -f "$dir/08-sysbench-cpu.log" ]]; then
@@ -574,9 +612,7 @@ print_node_scorecard(){
 
   [[ -f "$dir/11-nexttrace-mtu.log" ]] &&     mtu="$(awk '/Path MTU:[[:space:]]*[0-9]+/{print $3; exit}' "$dir/11-nexttrace-mtu.log" 2>/dev/null || true)"
 
-  [[ -f "$dir/07-ipquality.log" ]] &&     blacklisted="$(awk '/DNSBL database:/{
-      for (i=1;i<=NF;i++) if ($i=="Blacklisted") {print $(i+1); exit}
-    }' "$dir/07-ipquality.log" 2>/dev/null || true)"
+  [[ -f "$dir/07-ipquality.log" ]] &&     blacklisted="$(sed -nE 's/^DNSBL:.*blacklisted=([0-9]+).*/\1/p' "$dir/07-ipquality.log" | head -1)"
 
   [[ -f "$summary" ]] &&     fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
 
