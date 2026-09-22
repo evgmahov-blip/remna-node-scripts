@@ -16,8 +16,8 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"
 NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="b0f1858a10cb41e99c6ff6d0d20d1df1dafbf497"
-TESTER_BLOB_SHA="95284f1e1d1ee5355dadf502963a386baf522e6d"
+TESTER_REF="bce43fa11e467e0ecd5163666ce7e88667001d6c"
+TESTER_BLOB_SHA="f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 APP_DIR="/opt/remnanode"
