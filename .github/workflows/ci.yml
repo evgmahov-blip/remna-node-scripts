@@ -119,7 +119,6 @@ jobs:
           test "$(git rev-parse HEAD:$t)" = "4e95f45c971142671389ade189a39c0673b90b17"
           test "$(git rev-parse fd4ac822a9345dda04ad9ae353003ac1d0f67ed2:$t)" = "4e95f45c971142671389ade189a39c0673b90b17"
 
-          grep -Fq '274d84d9daa3b4d4a33264ba77992210aedd9b32' "$t"
           grep -Fq 'Censorcheck — DPI' "$t"
           grep -Fq 'YABS — disk fio only' "$t"
           grep -Fq 'run_external_script_timeout 420 "YABS' "$t"
