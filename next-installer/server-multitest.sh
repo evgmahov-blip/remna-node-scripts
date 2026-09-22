@@ -516,8 +516,13 @@ report_key_metrics(){
 }
 
 generate_report(){
-  local dir="$1" summary="$dir/summary.tsv" analysis="$dir/analysis.txt" ai="$dir/AI_REPORT.txt"
+  local dir="$1"
+  local summary analysis ai
   local pass fail skip total speed
+
+  summary="$dir/summary.tsv"
+  analysis="$dir/analysis.txt"
+  ai="$dir/AI_REPORT.txt"
 
   pass="$(awk -F '\t' 'NR>1 && $3=="PASS"{n++} END{print n+0}' "$summary")"
   fail="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
