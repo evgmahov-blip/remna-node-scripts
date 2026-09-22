@@ -703,6 +703,52 @@ generate_report(){
   cp -f "$ai" "$REPORT_ROOT/latest-AI_REPORT.txt"
 }
 
+print_colored_analysis(){
+  local file="$1" line status
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      " REMNANODE NEXT — MULTITEST ANALYSIS"|" ИТОГ ПО НОДЕ"|"=== TEST STATUS ==="|"=== ПРОБЛЕМЫ ===")
+        printf '%s%s%s\n' "$C_CYAN" "$line" "$C_RESET"
+        ;;
+      "======================================================================"|"================================================================="|"==================== АНАЛИТИКА ПОСЛЕ ТЕСТОВ ====================")
+        printf '%s%s%s\n' "$C_CYAN" "$line" "$C_RESET"
+        ;;
+      "Result:"*)
+        printf '%s%s%s\n' "$C_CYAN" "$line" "$C_RESET"
+        ;;
+      *" PASS "*|PASS=*|*"PASS="*)
+        printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
+        ;;
+      *" FAIL "*|FAIL=*|*"FAIL="*|*"rc="*)
+        if [[ "$line" == *"FAIL=0"* && "$line" != *" FAIL "* ]]; then
+          printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
+        else
+          printf '%s%s%s\n' "$C_RED" "$line" "$C_RESET"
+        fi
+        ;;
+      *" SKIP "*|SKIP=*|*"SKIP="*)
+        printf '%s%s%s\n' "$C_YELLOW" "$line" "$C_RESET"
+        ;;
+      "Сеть:"*|"CPU single:"*|"CPU all-thread:"*|"MTU:"*|"DNSBL blacklist:"*|"Рабочий бюджет:"*|"XHTTP ориентир:"*|"IP reputation:"*)
+        printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
+        ;;
+      "  Нет.")
+        printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
+        ;;
+      "  #"*)
+        printf '%s%s%s\n' "$C_RED" "$line" "$C_RESET"
+        ;;
+      Host:*|UTC:*|Run:*)
+        printf '%s%s%s\n' "$C_GRAY" "$line" "$C_RESET"
+        ;;
+      *)
+        printf '%s\n' "$line"
+        ;;
+    esac
+  done < "$file"
+}
+
 show_latest_analysis(){
   ensure_report_root
   local dir
@@ -711,7 +757,7 @@ show_latest_analysis(){
     return 1
   }
   generate_report "$dir"
-  cat "$dir/analysis.txt"
+  print_colored_analysis "$dir/analysis.txt"
 }
 
 show_latest_report(){
@@ -818,7 +864,7 @@ run_all(){
   printf '%sИтог:%s PASS=%s FAIL=%s SKIP=%s TOTAL=%s\n'     "$C_GREEN" "$C_RESET" "$passed" "$failed" "$skipped" "$total"
   echo
   echo '==================== АНАЛИТИКА ПОСЛЕ ТЕСТОВ ===================='
-  cat "$run_dir/analysis.txt"
+  print_colored_analysis "$run_dir/analysis.txt"
   echo '================================================================='
   echo
   printf 'Analysis:  %s/analysis.txt\n' "$run_dir"
@@ -833,7 +879,6 @@ menu(){
     echo
     printf '%s============================================================%s\n' "$C_CYAN" "$C_RESET"
     say 'REMNANODE NEXT — SERVER MULTITEST'
-    say "Derived from: $SOURCE_REPO @ $SOURCE_REF"
     printf '%s============================================================%s\n' "$C_CYAN" "$C_RESET"
     print_list
     say ' 0) Назад'
