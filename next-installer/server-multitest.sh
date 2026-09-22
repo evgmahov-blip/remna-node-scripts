@@ -333,7 +333,7 @@ test_sysbench_cpu(){
   threads="$(nproc)"
   [[ "$threads" =~ ^[0-9]+$ ]] || threads=1
 
-  echo "CPU single-thread:"
+  echo 'CPU single-thread:'
   sysbench cpu --threads=1 --time=10 --cpu-max-prime=20000 run
 
   if (( threads > 1 )); then
@@ -349,7 +349,7 @@ test_network_100mb(){
   local result bytes speed seconds url label rc=1
 
   say 'Network Bench: Cloudflare HTTPS download'
-  say 'Cloudflare 100MB endpoint requires a Referer on some requests; using the official speed.cloudflare.com referer.'
+  say 'Using Referer: https://speed.cloudflare.com/'
 
   for label in "100 MB" "50 MB fallback"; do
     if [[ "$label" == "100 MB" ]]; then
@@ -817,7 +817,9 @@ main(){
 }
 
 main "$@"
-s/\\x1B\\[[0-9;]*[mK]//g' "$dir/04-iperf-ru.log"       | grep -aE 'Server[[:space:]]+Download[[:space:]]+Upload[[:space:]]+Ping|Mbps|Execution time'       | tail -30 || true
+s/\\x1B\\[[0-9;]*[mK]//g' "$dir/04-iperf-ru.log" \
+      | grep -aE 'Server[[:space:]]+Download[[:space:]]+Upload[[:space:]]+Ping|Mbps|Execution time' \
+      | tail -30 || true
   fi
 
   if [[ -f "$dir/05-yabs-disk.log" ]]; then
