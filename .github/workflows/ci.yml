@@ -421,7 +421,7 @@ jobs:
           grep -Fq 'NextTrace Globalping' README.md
           grep -Fq 'ничего дополнительно нажимать не нужно' README.md
           grep -Fq 'multitest analyze' README.md
-          grep -Fq 'автоматически печатается в терминал' README.md
+          grep -Fq 'в терминале сразу выводится короткий блок' README.md
           grep -Fq 'ИТОГ ПО НОДЕ' README.md
           grep -Fq 'JSON/privacy-режиме' README.md
           grep -Fq 'multitest report' README.md
