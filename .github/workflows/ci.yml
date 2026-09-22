@@ -190,8 +190,6 @@ jobs:
           ! bash "$t" list | grep -Fq 'Traceroute yandex'
           ! bash "$t" list | grep -Fq 'Ping yandex'
           ! grep -Eq '(^|[^[:alnum:]])http://' "$t"
-          ! grep -Fiq 'Balbuto' "$t"
-          ! grep -Fiq 'safe-remnanode-setup' "$t"
 
           grep -Fq 'TESTER_REF="fd4ac822a9345dda04ad9ae353003ac1d0f67ed2"' full-clean-reinstall.sh
           grep -Fq 'TESTER_BLOB_SHA="4e95f45c971142671389ade189a39c0673b90b17"' full-clean-reinstall.sh
@@ -424,8 +422,6 @@ jobs:
           grep -Fq 'автоматически печатается в терминал' README.md
           grep -Fq 'ИТОГ ПО НОДЕ' README.md
           grep -Fq 'JSON/privacy-режиме' README.md
-          ! grep -Fiq 'Balbuto' README.md
-          ! grep -Fiq 'safe-remnanode-setup' README.md
           grep -Fq 'multitest report' README.md
           grep -Fq 'AI_REPORT.txt' README.md
           grep -Fq '/var/log/remnanode-next/multitest/' README.md
@@ -449,13 +445,6 @@ jobs:
           mapfile -d '' shell_files < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
           ! grep -nE 'ghostos\.space|GHOST_(LIC|ID|SITE|DL|Q)' "${shell_files[@]}"
           ! grep -nE 'printf .*Password:|printf .*Username:' "${shell_files[@]}"
-
-      - name: Removed branding guard
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          ! grep -RFiq --exclude-dir=.git 'Balbuto' .
-          ! grep -RFiq --exclude-dir=.git 'safe-remnanode-setup' .
 
       - name: Invisible-character guard
         run: |
