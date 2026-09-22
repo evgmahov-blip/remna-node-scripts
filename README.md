@@ -276,7 +276,9 @@ Tester не меняет firewall, sysctl, Docker или конфигураци�
 - дублирующий IP-quality пункт заменён на `RegionRestrictionCheck` для geo/media unlock;
 - ошибки выбранных тестов больше не скрываются через `|| true`; режим `99/all` показывает PASS/FAIL/SKIP;
 - удалены дублирующие/низкоценные пункты: второй iPerf (bench.tlab), sysbench Memory, TLS к google.com, обычные traceroute/ping;
-- Network Bench выводит Mbit/s и использует только HTTPS;
+- Network Bench выводит Mbit/s и использует только HTTPS; для Cloudflare 100MB отправляется официальный `Referer: https://speed.cloudflare.com/`, а при отказе 100MB автоматически пробуется 50MB fallback;
+- CPU-тест теперь показывает и single-thread, и all-thread (`nproc`) результат — это нужно для оценки реальной ёмкости XHTTP/Remnawave;
+- анализ iPerf понимает текущий формат `itdoginfo/russian-iperf3-servers` с колонками Server/Download/Upload/Ping и значениями в Mbps;
 - добавлен официальный **NextTrace v1.7.3**: Route/MTR, Path MTU и Globalping;
 - NextTrace не добавляет внешний APT repository: full binary скачивается из официального GitHub release, проверяется закреплённым SHA256 и кешируется вне PATH;
 - NextTrace MTR проверяет TCP/443 с 10 пробами на hop и показывает loss/jitter/ASN/geo;

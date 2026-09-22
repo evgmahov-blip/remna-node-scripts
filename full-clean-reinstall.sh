@@ -16,8 +16,8 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"
 NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="bc8e34e5fdbb0cb23eb6119871a5d2846d1c2849"
-TESTER_BLOB_SHA="66bacba59177e681a0acc32188c93ddf1d8bd2d0"
+TESTER_REF="657fb27948aa7c8023fbc61c276bb49c7c7a7c82"
+TESTER_BLOB_SHA="f64c4b2f02ebffc870d8aee0342d87bd8c48fab8"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 APP_DIR="/opt/remnanode"
@@ -166,6 +166,10 @@ FILES
   grep -Fq 'prepare_censorcheck(){' "$tester" || die 'Server Multitest: Censorcheck dependency guard отсутствует.'
   grep -Fq 'prepare_iperf_ru(){' "$tester" || die 'Server Multitest: iPerf dependency guard отсутствует.'
   grep -Fq 'Network Bench — HTTPS 100MB' "$tester" || die 'Server Multitest: HTTPS network bench отсутствует.'
+  grep -Fq 'NETWORK_BENCH_REFERER=' "$tester" || die 'Server Multitest: Cloudflare referer guard отсутствует.'
+  grep -Fq 'NETWORK_BENCH_FALLBACK_URL=' "$tester" || die 'Server Multitest: Cloudflare fallback отсутствует.'
+  grep -Fq 'CPU all-thread' "$tester" || die 'Server Multitest: multi-thread CPU capacity test отсутствует.'
+  grep -Fq "grep -aE 'Server[[:space:]]+Download[[:space:]]+Upload[[:space:]]+Ping|Mbps|Execution time'" "$tester" || die 'Server Multitest: iPerf report parser отсутствует.'
   grep -Fq 'NextTrace Route/MTR' "$tester" || die 'Server Multitest: NextTrace MTR отсутствует.'
   grep -Fq 'NextTrace Path MTU' "$tester" || die 'Server Multitest: NextTrace PMTU отсутствует.'
   grep -Fq 'NextTrace Globalping' "$tester" || die 'Server Multitest: NextTrace Globalping отсутствует.'

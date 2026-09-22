@@ -46,6 +46,8 @@ IPQUALITY_BLOB_SHA="086792f3be803fa0b1c0af6eb9247207abb7e182"
 IPQUALITY_URL="https://raw.githubusercontent.com/xykt/IPQuality/${IPQUALITY_REF}/ip.sh"
 
 NETWORK_BENCH_URL="https://speed.cloudflare.com/__down?bytes=100000000"
+NETWORK_BENCH_FALLBACK_URL="https://speed.cloudflare.com/__down?bytes=50000000"
+NETWORK_BENCH_REFERER="https://speed.cloudflare.com/"
 
 NEXTTRACE_VERSION="v1.7.3"
 NEXTTRACE_AMD64_SHA256="aa75440fcdee46c16d941f48f9dabee1eb4c35bea6b739b0960fcf8307088c29"
@@ -325,23 +327,62 @@ test_ipquality(){
 
 test_sysbench_cpu(){
   need_cmd sysbench sysbench
-  sysbench cpu --cpu-max-prime=20000 run
+  need_cmd nproc coreutils
+
+  local threads
+  threads="$(nproc)"
+  [[ "$threads" =~ ^[0-9]+$ ]] || threads=1
+
+  echo 'CPU single-thread:'
+  sysbench cpu --threads=1 --time=10 --cpu-max-prime=20000 run
+
+  if (( threads > 1 )); then
+    echo
+    printf 'CPU all-thread (%s threads):\n' "$threads"
+    sysbench cpu --threads="$threads" --time=10 --cpu-max-prime=20000 run
+  fi
 }
 
 
 test_network_100mb(){
   need_cmd curl curl ca-certificates
-  local result bytes speed seconds
-  say 'Network Bench: HTTPS download 100 MB via Cloudflare speed endpoint'
-  result="$(curl -4 -fsSL --proto '=https' --tlsv1.2     --connect-timeout 10 --max-time 180     -o /dev/null     -w '%{size_download} %{speed_download} %{time_total}'     "$NETWORK_BENCH_URL")" || return 1
-  IFS=' ' read -r bytes speed seconds <<<"$result"
-  awk -v b="$bytes" -v s="$speed" -v t="$seconds" '
-    BEGIN {
-      printf "Downloaded: %.2f MB\n", b / 1000000
-      printf "Average:    %.2f Mbit/s\n", s * 8 / 1000000
-      printf "Time:       %.2f s\n", t
-    }
-  '
+  local result bytes speed seconds url label rc=1
+
+  say 'Network Bench: Cloudflare HTTPS download'
+  say 'Using Referer: https://speed.cloudflare.com/'
+
+  for label in "100 MB" "50 MB fallback"; do
+    if [[ "$label" == "100 MB" ]]; then
+      url="$NETWORK_BENCH_URL"
+    else
+      url="$NETWORK_BENCH_FALLBACK_URL"
+    fi
+
+    printf 'Attempt: %s\n' "$label"
+    set +e
+    result="$(curl -4 -fsSL --proto '=https' --tlsv1.2       -H "Referer: $NETWORK_BENCH_REFERER"       -A 'REMNANODE-NEXT-NetworkBench/1.0'       --connect-timeout 10 --max-time 180 --retry 1 --retry-delay 1       -o /dev/null       -w '%{size_download} %{speed_download} %{time_total}'       "$url")"
+    rc=$?
+    set -e
+
+    if (( rc == 0 )); then
+      IFS=' ' read -r bytes speed seconds <<<"$result"
+      if [[ "$bytes" =~ ^[0-9]+([.][0-9]+)?$ && "$speed" =~ ^[0-9]+([.][0-9]+)?$ && "$seconds" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        awk -v b="$bytes" -v s="$speed" -v t="$seconds" -v src="$label" '
+          BEGIN {
+            printf "Source:     Cloudflare %s\n", src
+            printf "Downloaded: %.2f MB\n", b / 1000000
+            printf "Average:    %.2f Mbit/s\n", s * 8 / 1000000
+            printf "Time:       %.2f s\n", t
+          }
+        '
+        return 0
+      fi
+    fi
+
+    warn "Cloudflare $label attempt failed (curl rc=$rc)."
+  done
+
+  fail 'Cloudflare network bench failed for both 100MB and 50MB endpoints.'
 }
 
 
@@ -469,7 +510,9 @@ report_key_metrics(){
   if [[ -f "$dir/04-iperf-ru.log" ]]; then
     echo
     echo '[iPerf3 RU]'
-    grep -aE 'Mbits/sec|Gbits/sec|Mbit/s|Gbit/s|Location|Provider' "$dir/04-iperf-ru.log" | tail -30 || true
+    sed -E 's/\\x1B\\[[0-9;]*[mK]//g' "$dir/04-iperf-ru.log" \
+      | grep -aE 'Server[[:space:]]+Download[[:space:]]+Upload[[:space:]]+Ping|Mbps|Execution time' \
+      | tail -30 || true
   fi
 
   if [[ -f "$dir/05-yabs-disk.log" ]]; then
@@ -487,13 +530,13 @@ report_key_metrics(){
   if [[ -f "$dir/08-sysbench-cpu.log" ]]; then
     echo
     echo '[CPU]'
-    grep -aE 'events per second|total time|total number of events' "$dir/08-sysbench-cpu.log" | tail -10 || true
+    grep -aE 'CPU single-thread:|CPU all-thread|events per second|total time|total number of events' "$dir/08-sysbench-cpu.log" | tail -20 || true
   fi
 
   if [[ -f "$dir/09-network-bench.log" ]]; then
     echo
     echo '[Cloudflare 100MB]'
-    grep -aE 'Downloaded:|Average:|Time:' "$dir/09-network-bench.log" | tail -10 || true
+    grep -aE 'Source:|Downloaded:|Average:|Time:' "$dir/09-network-bench.log" | tail -12 || true
   fi
 
   if [[ -f "$dir/10-nexttrace-mtr.log" ]]; then
