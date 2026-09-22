@@ -16,8 +16,8 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"
 NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="bce43fa11e467e0ecd5163666ce7e88667001d6c"
-TESTER_BLOB_SHA="f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"
+TESTER_REF="3a2014701d1775ba07f30b469865fc993cd633d1"
+TESTER_BLOB_SHA="3d445a57ddadf923f03206f7848d37dc65f377ae"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 APP_DIR="/opt/remnanode"
@@ -179,6 +179,9 @@ FILES
   grep -Fq 'show_latest_analysis(){' "$tester" || die 'Server Multitest: analyze command отсутствует.'
   grep -Fq '98) Анализ последнего прогона' "$tester" || die 'Server Multitest: analysis menu item отсутствует.'
   grep -Fq 'ИТОГ ПО НОДЕ' "$tester" || die 'Server Multitest: final node summary отсутствует.'
+  grep -Fq 'print_colored_analysis(){' "$tester" || die 'Server Multitest: colored terminal report отсутствует.'
+  ! grep -Fq 'SOURCE_REPO' "$tester" || die 'Server Multitest: stale SOURCE_REPO reference вернулся.'
+  ! grep -Fq 'SOURCE_REF' "$tester" || die 'Server Multitest: stale SOURCE_REF reference вернулся.'
   grep -Fq 'АНАЛИТИКА ПОСЛЕ ТЕСТОВ' "$tester" || die 'Server Multitest: automatic inline analysis отсутствует.'
   grep -Fq 'Рабочий бюджет:' "$tester" || die 'Server Multitest: XHTTP planning budget отсутствует.'
   grep -Fq 'XHTTP ориентир:' "$tester" || die 'Server Multitest: XHTTP planning estimate отсутствует.'
