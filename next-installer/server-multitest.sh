@@ -3,11 +3,6 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 # REMNANODE NEXT — server multitest
-# Derived from Module D of:
-#   https://github.com/Balbuto/safe-remnanode-setup
-# Source commit: 274d84d9daa3b4d4a33264ba77992210aedd9b32
-# Source script blob: 58a85a9baa4f36648d6587c5d6c4ac347096963d
-#
 # REMNANODE NEXT audit adaptations:
 # - standalone tester only; no node/firewall/sysctl installer code;
 # - all wrapper downloads are HTTPS only;
@@ -21,9 +16,6 @@ IFS=$'\n\t'
 #   pinned by upstream SHA256, and cached outside PATH for MTR/PMTU/Globalping tests.
 # - all/99 runs every test automatically without per-test Enter prompts.
 
-SOURCE_REPO="Balbuto/safe-remnanode-setup"
-SOURCE_REF="274d84d9daa3b4d4a33264ba77992210aedd9b32"
-SOURCE_BLOB_SHA="58a85a9baa4f36648d6587c5d6c4ac347096963d"
 
 CENSOR_REF="42a688b855b37bc6e97eace1897df38897b8d9fe"
 CENSOR_BLOB_SHA="4b12652cd83112f5c615fdf6af1048aa7abca958"
@@ -559,8 +551,12 @@ report_key_metrics(){
 }
 
 print_node_scorecard(){
-  local dir="$1" summary="$dir/summary.tsv"
+  local dir="$1"
+  local summary
   local speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" fail_count="" safe_mbps=""
+  local at3="" at5=""
+
+  summary="$dir/summary.tsv"
 
   [[ -f "$dir/09-network-bench.log" ]] &&     speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
 
@@ -585,27 +581,29 @@ print_node_scorecard(){
   [[ -f "$summary" ]] &&     fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
 
   echo '======================================================================'
-  echo ' ОЦЕНКА НОДЫ — БЫСТРАЯ ЛОКАЛЬНАЯ АНАЛИТИКА'
+  echo ' ИТОГ ПО НОДЕ'
   echo '======================================================================'
-  printf 'Тесты:           FAIL=%s\n' "${fail_count:-?}"
-  printf 'Сеть:            %s\n' "$([[ -n "$speed" ]] && printf '%s Mbit/s' "$speed" || printf 'нет данных')"
-  printf 'CPU single:      %s\n' "$([[ -n "$cpu_single" ]] && printf '%s events/s' "$cpu_single" || printf 'нет данных')"
-  printf 'CPU all-thread:  %s\n' "$([[ -n "$cpu_all" ]] && printf '%s events/s' "$cpu_all" || printf 'нет данных')"
-  printf 'Path MTU:        %s\n' "${mtu:-нет данных}"
-  printf 'DNSBL blacklist: %s\n' "${blacklisted:-нет данных}"
+  printf 'FAIL:             %s\n' "${fail_count:-?}"
+  printf 'Сеть:             %s\n' "$([[ -n "$speed" ]] && printf '%s Mbit/s' "$speed" || printf 'нет данных')"
+  printf 'CPU single:       %s\n' "$([[ -n "$cpu_single" ]] && printf '%s events/s' "$cpu_single" || printf 'нет данных')"
+  printf 'CPU all-thread:   %s\n' "$([[ -n "$cpu_all" ]] && printf '%s events/s' "$cpu_all" || printf 'нет данных')"
+  printf 'MTU:              %s\n' "${mtu:-нет данных}"
+  printf 'DNSBL blacklist:  %s\n' "${blacklisted:-нет данных}"
 
   if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     safe_mbps="$(awk -v s="$speed" 'BEGIN{printf "%.1f", s*0.70}')"
-    echo
-    printf 'Плановый сетевой бюджет с 30%% запасом: %s Mbit/s\n' "$safe_mbps"
-    awk -v s="$safe_mbps" 'BEGIN{
-      printf "Эквивалент одновременной средней нагрузки: ~%d клиентов @3 Mbit/s или ~%d @5 Mbit/s.\n", int(s/3), int(s/5)
-    }'
+    at3="$(awk -v s="$safe_mbps" 'BEGIN{print int(s/3)}')"
+    at5="$(awk -v s="$safe_mbps" 'BEGIN{print int(s/5)}')"
+    printf 'Рабочий бюджет:   %s Mbit/s (70%% измеренной скорости)\n' "$safe_mbps"
+    printf 'XHTTP ориентир:   ~%s активных @3 Mbit/s / ~%s @5 Mbit/s\n' "$at3" "$at5"
   fi
 
-  echo
-  echo 'Важно: это локальная эвристика по измеренной сети/CPU, а не гарантированный лимит пользователей.'
-  echo 'Для XHTTP реальный предел зависит от профиля трафика, TLS/Reality, числа активных сессий и oversubscription VPS.'
+  if [[ "$blacklisted" == "0" ]]; then
+    echo 'IP reputation:    без DNSBL blacklist по текущему тесту'
+  fi
+  if [[ "$mtu" == "1500" ]]; then
+    echo 'MTU:              нормальный для XHTTP/Hysteria2'
+  fi
   echo '======================================================================'
 }
 
@@ -660,11 +658,12 @@ generate_report(){
     fi
 
     echo
-    report_key_metrics "$dir"
-    echo
-    echo '=== INTERPRETATION RULE ==='
-    echo 'FAIL означает ошибку запуска/timeout/ненулевой exit code, а не автоматически плохое качество ноды.'
-    echo 'Сетевые скорости, geo/risk базы и маршруты нужно оценивать вместе и относительно тарифа/локации.'
+    echo '=== ПРОБЛЕМЫ ==='
+    if (( fail > 0 )); then
+      awk -F '\t' 'NR>1 && $3=="FAIL"{printf "  #%s %s (rc=%s)\n",$1,$2,$5}' "$summary"
+    else
+      echo '  Нет.'
+    fi
   } >"$analysis"
 
   {
@@ -759,7 +758,7 @@ run_all(){
     printf 'host=%s\n' "$(hostname -f 2>/dev/null || hostname)"
     printf 'utc_start=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     printf 'kernel=%s\n' "$(uname -srmo)"
-    printf 'tester_source=%s@%s\n' "$SOURCE_REPO" "$SOURCE_REF"
+    printf 'tester=remnanode-next-server-multitest\n'
   } >"$run_dir/meta.txt"
 
   say 'Автоматический режим: все тесты идут подряд без подтверждений.'
