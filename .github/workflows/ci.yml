@@ -116,8 +116,8 @@ jobs:
           set -Eeuo pipefail
 
           t=next-installer/server-multitest.sh
-          test "$(git rev-parse HEAD:$t)" = "f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"
-          test "$(git rev-parse bce43fa11e467e0ecd5163666ce7e88667001d6c:$t)" = "f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"
+          test "$(git rev-parse HEAD:$t)" = "3d445a57ddadf923f03206f7848d37dc65f377ae"
+          test "$(git rev-parse 3a2014701d1775ba07f30b469865fc993cd633d1:$t)" = "3d445a57ddadf923f03206f7848d37dc65f377ae"
 
           grep -Fq 'Censorcheck — DPI' "$t"
           grep -Fq 'YABS — disk fio only' "$t"
@@ -170,6 +170,12 @@ jobs:
           ! grep -Fq 'local dir="$1" summary="$dir/summary.tsv"' "$t"
           grep -Fq '98) Анализ последнего прогона' "$t"
           grep -Fq 'ИТОГ ПО НОДЕ' "$t"
+          grep -Fq 'print_colored_analysis(){' "$t"
+          grep -Fq 'C_GREEN' "$t"
+          grep -Fq 'C_YELLOW' "$t"
+          grep -Fq 'C_RED' "$t"
+          ! grep -Fq 'SOURCE_REPO' "$t"
+          ! grep -Fq 'SOURCE_REF' "$t"
           grep -Fq 'АНАЛИТИКА ПОСЛЕ ТЕСТОВ' "$t"
           grep -Fq 'Рабочий бюджет:' "$t"
           grep -Fq 'XHTTP ориентир:' "$t"
@@ -193,8 +199,8 @@ jobs:
           ! bash "$t" list | grep -Fq 'Ping yandex'
           ! grep -Eq '(^|[^[:alnum:]])http://' "$t"
 
-          grep -Fq 'TESTER_REF="bce43fa11e467e0ecd5163666ce7e88667001d6c"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="3a2014701d1775ba07f30b469865fc993cd633d1"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="3d445a57ddadf923f03206f7848d37dc65f377ae"' full-clean-reinstall.sh
           grep -Fq 'server-multitest.sh' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next multitest' full-clean-reinstall.sh
           grep -Fq 'multitest|server-test|tests)' full-clean-reinstall.sh
@@ -285,8 +291,8 @@ jobs:
           grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_REF="bce43fa11e467e0ecd5163666ce7e88667001d6c"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="3a2014701d1775ba07f30b469865fc993cd633d1"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="3d445a57ddadf923f03206f7848d37dc65f377ae"' full-clean-reinstall.sh
           grep -Fq 'run_existing_node_v2(){' full-clean-reinstall.sh
           grep -Fq 'NEXT V2 — существующая/legacy нода' full-clean-reinstall.sh
           grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
@@ -364,7 +370,7 @@ jobs:
           test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
           test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "62ff1364c26d88f357968422d5591b3d2b8d9e78"
           test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
-          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "f19e44b39ce05acbbb5ccfff82ca53170a9eb09a"
+          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "3d445a57ddadf923f03206f7848d37dc65f377ae"
 
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
@@ -423,6 +429,7 @@ jobs:
           grep -Fq 'multitest analyze' README.md
           grep -Fq 'в терминале сразу выводится короткий блок' README.md
           grep -Fq 'ИТОГ ПО НОДЕ' README.md
+          grep -Fq 'подсвечиваются зелёным' README.md
           grep -Fq 'JSON/privacy-режиме' README.md
           grep -Fq 'multitest report' README.md
           grep -Fq 'AI_REPORT.txt' README.md
