@@ -46,6 +46,8 @@ IPQUALITY_BLOB_SHA="086792f3be803fa0b1c0af6eb9247207abb7e182"
 IPQUALITY_URL="https://raw.githubusercontent.com/xykt/IPQuality/${IPQUALITY_REF}/ip.sh"
 
 NETWORK_BENCH_URL="https://speed.cloudflare.com/__down?bytes=100000000"
+NETWORK_BENCH_FALLBACK_URL="https://speed.cloudflare.com/__down?bytes=50000000"
+NETWORK_BENCH_REFERER="https://speed.cloudflare.com/"
 
 NEXTTRACE_VERSION="v1.7.3"
 NEXTTRACE_AMD64_SHA256="aa75440fcdee46c16d941f48f9dabee1eb4c35bea6b739b0960fcf8307088c29"
@@ -325,23 +327,62 @@ test_ipquality(){
 
 test_sysbench_cpu(){
   need_cmd sysbench sysbench
-  sysbench cpu --cpu-max-prime=20000 run
+  need_cmd nproc coreutils
+
+  local threads
+  threads="$(nproc)"
+  [[ "$threads" =~ ^[0-9]+$ ]] || threads=1
+
+  echo "CPU single-thread:"
+  sysbench cpu --threads=1 --time=10 --cpu-max-prime=20000 run
+
+  if (( threads > 1 )); then
+    echo
+    printf 'CPU all-thread (%s threads):\n' "$threads"
+    sysbench cpu --threads="$threads" --time=10 --cpu-max-prime=20000 run
+  fi
 }
 
 
 test_network_100mb(){
   need_cmd curl curl ca-certificates
-  local result bytes speed seconds
-  say 'Network Bench: HTTPS download 100 MB via Cloudflare speed endpoint'
-  result="$(curl -4 -fsSL --proto '=https' --tlsv1.2     --connect-timeout 10 --max-time 180     -o /dev/null     -w '%{size_download} %{speed_download} %{time_total}'     "$NETWORK_BENCH_URL")" || return 1
-  IFS=' ' read -r bytes speed seconds <<<"$result"
-  awk -v b="$bytes" -v s="$speed" -v t="$seconds" '
-    BEGIN {
-      printf "Downloaded: %.2f MB\n", b / 1000000
-      printf "Average:    %.2f Mbit/s\n", s * 8 / 1000000
-      printf "Time:       %.2f s\n", t
-    }
-  '
+  local result bytes speed seconds url label rc=1
+
+  say 'Network Bench: Cloudflare HTTPS download'
+  say 'Cloudflare 100MB endpoint requires a Referer on some requests; using the official speed.cloudflare.com referer.'
+
+  for label in "100 MB" "50 MB fallback"; do
+    if [[ "$label" == "100 MB" ]]; then
+      url="$NETWORK_BENCH_URL"
+    else
+      url="$NETWORK_BENCH_FALLBACK_URL"
+    fi
+
+    printf 'Attempt: %s\n' "$label"
+    set +e
+    result="$(curl -4 -fsSL --proto '=https' --tlsv1.2       -H "Referer: $NETWORK_BENCH_REFERER"       -A 'REMNANODE-NEXT-NetworkBench/1.0'       --connect-timeout 10 --max-time 180 --retry 1 --retry-delay 1       -o /dev/null       -w '%{size_download} %{speed_download} %{time_total}'       "$url")"
+    rc=$?
+    set -e
+
+    if (( rc == 0 )); then
+      IFS=' ' read -r bytes speed seconds <<<"$result"
+      if [[ "$bytes" =~ ^[0-9]+([.][0-9]+)?$ && "$speed" =~ ^[0-9]+([.][0-9]+)?$ && "$seconds" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        awk -v b="$bytes" -v s="$speed" -v t="$seconds" -v src="$label" '
+          BEGIN {
+            printf "Source:     Cloudflare %s\n", src
+            printf "Downloaded: %.2f MB\n", b / 1000000
+            printf "Average:    %.2f Mbit/s\n", s * 8 / 1000000
+            printf "Time:       %.2f s\n", t
+          }
+        '
+        return 0
+      fi
+    fi
+
+    warn "Cloudflare $label attempt failed (curl rc=$rc)."
+  done
+
+  fail 'Cloudflare network bench failed for both 100MB and 50MB endpoints.'
 }
 
 
@@ -469,7 +510,314 @@ report_key_metrics(){
   if [[ -f "$dir/04-iperf-ru.log" ]]; then
     echo
     echo '[iPerf3 RU]'
-    grep -aE 'Mbits/sec|Gbits/sec|Mbit/s|Gbit/s|Location|Provider' "$dir/04-iperf-ru.log" | tail -30 || true
+    sed -E 
+  fi
+
+  if [[ -f "$dir/05-yabs-disk.log" ]]; then
+    echo
+    echo '[Disk fio]'
+    grep -aE 'fio Disk Speed|Block Size|Read|Write|Total|IOPS|MB/s|GB/s' "$dir/05-yabs-disk.log" | tail -35 || true
+  fi
+
+  if [[ -f "$dir/07-ipquality.log" ]]; then
+    echo
+    echo '[IP quality / unlock]'
+    grep -aiE 'ASN|Country|Location|Risk|Blacklist|Netflix|YouTube|ChatGPT|TikTok|Disney|Mail|Proxy|Hosting|Datacenter|Abuse' "$dir/07-ipquality.log" | tail -50 || true
+  fi
+
+  if [[ -f "$dir/08-sysbench-cpu.log" ]]; then
+    echo
+    echo '[CPU]'
+    grep -aE 'CPU single-thread:|CPU all-thread|events per second|total time|total number of events' "$dir/08-sysbench-cpu.log" | tail -20 || true
+  fi
+
+  if [[ -f "$dir/09-network-bench.log" ]]; then
+    echo
+    echo '[Cloudflare 100MB]'
+    grep -aE 'Source:|Downloaded:|Average:|Time:' "$dir/09-network-bench.log" | tail -12 || true
+  fi
+
+  if [[ -f "$dir/10-nexttrace-mtr.log" ]]; then
+    echo
+    echo '[NextTrace MTR]'
+    grep -aE 'Loss|Avg|Best|Wrst|StDev|AS[0-9]|ms' "$dir/10-nexttrace-mtr.log" | tail -35 || true
+  fi
+
+  if [[ -f "$dir/11-nexttrace-mtu.log" ]]; then
+    echo
+    echo '[Path MTU]'
+    grep -aiE 'MTU|PMTU|payload|fragment' "$dir/11-nexttrace-mtu.log" | tail -20 || true
+  fi
+
+  if [[ -f "$dir/12-nexttrace-globalping.log" ]]; then
+    echo
+    echo '[External TCP/443]'
+    grep -aE '^--- from |ms|AS[0-9]|Trace|reached|unreachable|timeout' "$dir/12-nexttrace-globalping.log" | tail -50 || true
+  fi
+}
+
+generate_report(){
+  local dir="$1"
+  local summary analysis ai
+  local pass fail skip total speed
+
+  summary="$dir/summary.tsv"
+  analysis="$dir/analysis.txt"
+  ai="$dir/AI_REPORT.txt"
+
+  pass="$(awk -F '\t' 'NR>1 && $3=="PASS"{n++} END{print n+0}' "$summary")"
+  fail="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
+  skip="$(awk -F '\t' 'NR>1 && $3=="SKIP"{n++} END{print n+0}' "$summary")"
+  total="$(awk -F '\t' 'NR>1{n++} END{print n+0}' "$summary")"
+
+  {
+    echo '======================================================================'
+    echo ' REMNANODE NEXT — MULTITEST ANALYSIS'
+    echo '======================================================================'
+    printf 'Host: %s\n' "$(hostname -f 2>/dev/null || hostname)"
+    printf 'UTC:  %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S')"
+    printf 'Run:  %s\n' "$dir"
+    printf 'Result: PASS=%s FAIL=%s SKIP=%s TOTAL=%s\n' "$pass" "$fail" "$skip" "$total"
+    echo
+    echo '=== TEST STATUS ==='
+    awk -F '\t' 'NR>1{printf "%-4s %-52s %-6s %5ss rc=%s\n",$1,$2,$3,$4,$5}' "$summary"
+
+    echo
+    echo '=== AUTOMATIC FINDINGS ==='
+    if (( fail > 0 )); then
+      echo '[WARN] Есть упавшие тесты:'
+      awk -F '\t' 'NR>1 && $3=="FAIL"{printf "  - #%s %s (rc=%s)\n",$1,$2,$5}' "$summary"
+    else
+      echo '[OK] Все запущенные тесты завершились без ошибки.'
+    fi
+
+    if (( skip > 0 )); then
+      printf '[INFO] Пропущено тестов: %s\n' "$skip"
+    fi
+
+    speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
+    if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+      awk -v s="$speed" 'BEGIN{
+        if (s < 20) printf "[WARN] Cloudflare download %.2f Mbit/s — очень низко для VPN-ноды; проверь канал/шейпинг.\n",s;
+        else if (s < 50) printf "[WARN] Cloudflare download %.2f Mbit/s — низковато; сравни с тарифом и iPerf.\n",s;
+        else printf "[INFO] Cloudflare download %.2f Mbit/s.\n",s;
+      }'
+    fi
+
+    echo
+    report_key_metrics "$dir"
+    echo
+    echo '=== INTERPRETATION RULE ==='
+    echo 'FAIL означает ошибку запуска/timeout/ненулевой exit code, а не автоматически плохое качество ноды.'
+    echo 'Сетевые скорости, geo/risk базы и маршруты нужно оценивать вместе и относительно тарифа/локации.'
+  } >"$analysis"
+
+  {
+    echo '# REMNANODE NEXT MULTITEST — AI REPORT'
+    printf 'host: %s\n' "$(hostname -f 2>/dev/null || hostname)"
+    printf 'utc: %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S')"
+    printf 'result: PASS=%s FAIL=%s SKIP=%s TOTAL=%s\n' "$pass" "$fail" "$skip" "$total"
+    echo
+    echo '## TEST STATUS'
+    cat "$summary"
+    echo
+    echo '## KEY METRICS'
+    report_key_metrics "$dir"
+    echo
+    echo '## FAILURES / TIMEOUTS'
+    grep -aE '\[ERROR\]|\[WARN\]|timeout|timed out|превысил лимит|rc=' "$dir"/*.log 2>/dev/null | tail -120 || true
+    echo
+    echo '## REQUEST'
+    echo 'Проанализируй результаты RemnaNode: выдели проблемы, вероятные причины, приоритет проверки и что выглядит нормальным. Не делай вывод только по одному внешнему geo/risk источнику.'
+  } >"$ai"
+
+  cp -f "$analysis" "$REPORT_ROOT/latest-analysis.txt"
+  cp -f "$ai" "$REPORT_ROOT/latest-AI_REPORT.txt"
+}
+
+show_latest_analysis(){
+  ensure_report_root
+  local dir
+  dir="$(latest_report_dir)" || {
+    fail 'Нет сохранённых прогонов. Сначала запусти multitest all.'
+    return 1
+  }
+  generate_report "$dir"
+  cat "$dir/analysis.txt"
+}
+
+show_latest_report(){
+  ensure_report_root
+  local dir
+  dir="$(latest_report_dir)" || {
+    fail 'Нет сохранённых прогонов. Сначала запусти multitest all.'
+    return 1
+  }
+  generate_report "$dir"
+  printf 'Run directory: %s\n' "$dir"
+  printf 'Analysis:      %s/analysis.txt\n' "$dir"
+  printf 'AI report:     %s/AI_REPORT.txt\n' "$dir"
+  printf 'Raw logs:      %s/*.log\n' "$dir"
+}
+
+run_all(){
+  local names=(
+    "IP Region"
+    "Censorcheck — проверка геоблока"
+    "Censorcheck — DPI"
+    "iPerf3 — российские серверы"
+    "YABS — disk fio only"
+    "Geo/Media Unlock — RegionRestrictionCheck"
+    "IPQuality"
+    "sysbench CPU"
+    "Network Bench — HTTPS 100MB"
+    "NextTrace Route/MTR"
+    "NextTrace Path MTU"
+    "NextTrace Globalping"
+  )
+  local slugs=(
+    "ip-region"
+    "censor-geoblock"
+    "censor-dpi"
+    "iperf-ru"
+    "yabs-disk"
+    "geo-unlock"
+    "ipquality"
+    "sysbench-cpu"
+    "network-bench"
+    "nexttrace-mtr"
+    "nexttrace-mtu"
+    "nexttrace-globalping"
+  )
+  local total="${#names[@]}" i num rc status started ended duration
+  local passed=0 failed=0 skipped=0
+  local run_id run_dir summary logfile
+
+  ensure_report_root
+  run_id="$(date -u '+%Y%m%dT%H%M%SZ')-$$"
+  run_dir="$REPORT_ROOT/$run_id"
+  install -d -m 0755 "$run_dir"
+  summary="$run_dir/summary.tsv"
+  printf 'test\tname\tstatus\tduration_sec\trc\n' >"$summary"
+
+  {
+    printf 'host=%s\n' "$(hostname -f 2>/dev/null || hostname)"
+    printf 'utc_start=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf 'kernel=%s\n' "$(uname -srmo)"
+    printf 'tester_source=%s@%s\n' "$SOURCE_REPO" "$SOURCE_REF"
+  } >"$run_dir/meta.txt"
+
+  say 'Автоматический режим: все тесты идут подряд без подтверждений.'
+  printf '%sCtrl+C во время теста — пропустить только текущий и перейти дальше.%s\n' "$C_GRAY" "$C_RESET"
+  printf 'Отчёт: %s\n' "$run_dir"
+
+  for ((i=0; i<total; i++)); do
+    num=$((i+1))
+    logfile="$(printf '%s/%02d-%s.log' "$run_dir" "$num" "${slugs[$i]}")"
+    echo
+    printf '%s============ [%s/%s] %s ============ %s\n'       "$C_CYAN" "$num" "$total" "${names[$i]}" "$C_RESET"
+
+    started="$(date +%s)"
+    set +e
+    run_interruptible "$num" 2>&1 | tee "$logfile"
+    rc=${PIPESTATUS[0]}
+    set -e
+    ended="$(date +%s)"
+    duration=$((ended-started))
+
+    case "$rc" in
+      0)
+        status=PASS
+        passed=$((passed+1))
+        ;;
+      130)
+        status=SKIP
+        skipped=$((skipped+1))
+        ;;
+      *)
+        status=FAIL
+        failed=$((failed+1))
+        warn "Тест $num завершился с rc=$rc"
+        ;;
+    esac
+    printf '%s\t%s\t%s\t%s\t%s\n' "$num" "${names[$i]}" "$status" "$duration" "$rc" >>"$summary"
+  done
+
+  printf '%s\n' "$run_dir" >"$REPORT_ROOT/latest.path"
+  generate_report "$run_dir"
+
+  echo
+  printf '%sИтог:%s PASS=%s FAIL=%s SKIP=%s TOTAL=%s\n'     "$C_GREEN" "$C_RESET" "$passed" "$failed" "$skipped" "$total"
+  printf 'Analysis:  %s/analysis.txt\n' "$run_dir"
+  printf 'AI report: %s/AI_REPORT.txt\n' "$run_dir"
+  printf 'Команда:   sudo remnanode-next multitest analyze\n'
+  (( failed == 0 ))
+}
+
+menu(){
+  local choice rc
+  while true; do
+    echo
+    printf '%s============================================================%s\n' "$C_CYAN" "$C_RESET"
+    say 'REMNANODE NEXT — SERVER MULTITEST'
+    say "Derived from: $SOURCE_REPO @ $SOURCE_REF"
+    printf '%s============================================================%s\n' "$C_CYAN" "$C_RESET"
+    print_list
+    say ' 0) Назад'
+    echo
+    printf 'Выбор: '
+    read -r choice < "$TTY" || choice=0
+    case "$choice" in
+      1|2|3|4|5|6|7|8|9|10|11|12)
+        rc=0
+        run_interruptible "$choice" || rc=$?
+        (( rc == 0 || rc == 130 )) || warn "Тест завершился с rc=$rc"
+        pause
+        ;;
+      98)
+        show_latest_analysis || true
+        pause
+        ;;
+      99)
+        run_all || true
+        ;;
+      0|'')
+        return 0
+        ;;
+      *)
+        warn 'Неверный выбор.'
+        ;;
+    esac
+  done
+}
+
+usage(){
+  cat <<'EOF'
+Usage:
+  server-multitest.sh menu
+  server-multitest.sh list
+  server-multitest.sh all
+  server-multitest.sh analyze
+  server-multitest.sh report
+  server-multitest.sh 1..12
+EOF
+}
+
+main(){
+  case "${1:-menu}" in
+    list) print_list ;;
+    -h|--help|help) usage ;;
+    menu|'') need_root; menu ;;
+    all|99) need_root; run_all ;;
+    analyze) need_root; show_latest_analysis ;;
+    report) need_root; show_latest_report ;;
+    1|2|3|4|5|6|7|8|9|10|11|12) need_root; run_interruptible "$1" ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+main "$@"
+s/\\x1B\\[[0-9;]*[mK]//g' "$dir/04-iperf-ru.log"       | grep -aE 'Server[[:space:]]+Download[[:space:]]+Upload[[:space:]]+Ping|Mbps|Execution time'       | tail -30 || true
   fi
 
   if [[ -f "$dir/05-yabs-disk.log" ]]; then
