@@ -16,8 +16,8 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="dd7474f8f72b7d4b56221e89bb969ac75b2dff00"
 NETWORK_BLOB_SHA="8616189227534a4c651000d233162b1603a50d7b"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="657fb27948aa7c8023fbc61c276bb49c7c7a7c82"
-TESTER_BLOB_SHA="f64c4b2f02ebffc870d8aee0342d87bd8c48fab8"
+TESTER_REF="6679bcb2cce285467678a1faf9b95fe79cbd0f2e"
+TESTER_BLOB_SHA="851b5dd69d43cd38d8e0377c02a199053c420b5b"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 APP_DIR="/opt/remnanode"
@@ -180,6 +180,9 @@ FILES
   grep -Fq 'summary.tsv' "$tester" || die 'Server Multitest: summary.tsv отсутствует.'
   grep -Fq 'show_latest_analysis(){' "$tester" || die 'Server Multitest: analyze command отсутствует.'
   grep -Fq '98) Анализ последнего прогона' "$tester" || die 'Server Multitest: analysis menu item отсутствует.'
+  grep -Fq 'ОЦЕНКА НОДЫ — БЫСТРАЯ ЛОКАЛЬНАЯ АНАЛИТИКА' "$tester" || die 'Server Multitest: inline scorecard отсутствует.'
+  grep -Fq 'АНАЛИТИКА ПОСЛЕ ТЕСТОВ' "$tester" || die 'Server Multitest: automatic inline analysis отсутствует.'
+  grep -Fq 'Плановый сетевой бюджет с 30%% запасом' "$tester" || die 'Server Multitest: XHTTP planning heuristic отсутствует.'
   ! sed -n '/run_all(){/,/^}/p' "$tester" | grep -Fq 'read -r action' || die 'Server Multitest: all mode снова требует Enter.'
   if grep -Eq '(^|[^[:alnum:]])http://' "$tester"; then
     die 'Server Multitest содержит небезопасный HTTP URL.'
