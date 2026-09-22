@@ -558,6 +558,57 @@ report_key_metrics(){
   fi
 }
 
+print_node_scorecard(){
+  local dir="$1" summary="$dir/summary.tsv"
+  local speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" fail_count="" safe_mbps=""
+
+  [[ -f "$dir/09-network-bench.log" ]] &&     speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
+
+  if [[ -f "$dir/08-sysbench-cpu.log" ]]; then
+    cpu_single="$(awk '
+      /CPU single-thread:/ {mode="single"; next}
+      /CPU all-thread/ {mode="all"; next}
+      mode=="single" && /events per second:/ {print $4; exit}
+    ' "$dir/08-sysbench-cpu.log" 2>/dev/null || true)"
+    cpu_all="$(awk '
+      /CPU all-thread/ {mode="all"; next}
+      mode=="all" && /events per second:/ {print $4; exit}
+    ' "$dir/08-sysbench-cpu.log" 2>/dev/null || true)"
+  fi
+
+  [[ -f "$dir/11-nexttrace-mtu.log" ]] &&     mtu="$(awk '/Path MTU:[[:space:]]*[0-9]+/{print $3; exit}' "$dir/11-nexttrace-mtu.log" 2>/dev/null || true)"
+
+  [[ -f "$dir/07-ipquality.log" ]] &&     blacklisted="$(awk '/DNSBL database:/{
+      for (i=1;i<=NF;i++) if ($i=="Blacklisted") {print $(i+1); exit}
+    }' "$dir/07-ipquality.log" 2>/dev/null || true)"
+
+  [[ -f "$summary" ]] &&     fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
+
+  echo '======================================================================'
+  echo ' ОЦЕНКА НОДЫ — БЫСТРАЯ ЛОКАЛЬНАЯ АНАЛИТИКА'
+  echo '======================================================================'
+  printf 'Тесты:           FAIL=%s\n' "${fail_count:-?}"
+  printf 'Сеть:            %s\n' "$([[ -n "$speed" ]] && printf '%s Mbit/s' "$speed" || printf 'нет данных')"
+  printf 'CPU single:      %s\n' "$([[ -n "$cpu_single" ]] && printf '%s events/s' "$cpu_single" || printf 'нет данных')"
+  printf 'CPU all-thread:  %s\n' "$([[ -n "$cpu_all" ]] && printf '%s events/s' "$cpu_all" || printf 'нет данных')"
+  printf 'Path MTU:        %s\n' "${mtu:-нет данных}"
+  printf 'DNSBL blacklist: %s\n' "${blacklisted:-нет данных}"
+
+  if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    safe_mbps="$(awk -v s="$speed" 'BEGIN{printf "%.1f", s*0.70}')"
+    echo
+    printf 'Плановый сетевой бюджет с 30%% запасом: %s Mbit/s\n' "$safe_mbps"
+    awk -v s="$safe_mbps" 'BEGIN{
+      printf "Эквивалент одновременной средней нагрузки: ~%d клиентов @3 Mbit/s или ~%d @5 Mbit/s.\n", int(s/3), int(s/5)
+    }'
+  fi
+
+  echo
+  echo 'Важно: это локальная эвристика по измеренной сети/CPU, а не гарантированный лимит пользователей.'
+  echo 'Для XHTTP реальный предел зависит от профиля трафика, TLS/Reality, числа активных сессий и oversubscription VPS.'
+  echo '======================================================================'
+}
+
 generate_report(){
   local dir="$1"
   local summary analysis ai
@@ -584,6 +635,8 @@ generate_report(){
     echo '=== TEST STATUS ==='
     awk -F '\t' 'NR>1{printf "%-4s %-52s %-6s %5ss rc=%s\n",$1,$2,$3,$4,$5}' "$summary"
 
+    echo
+    print_node_scorecard "$dir"
     echo
     echo '=== AUTOMATIC FINDINGS ==='
     if (( fail > 0 )); then
@@ -750,9 +803,14 @@ run_all(){
 
   echo
   printf '%sИтог:%s PASS=%s FAIL=%s SKIP=%s TOTAL=%s\n'     "$C_GREEN" "$C_RESET" "$passed" "$failed" "$skipped" "$total"
+  echo
+  echo '==================== АНАЛИТИКА ПОСЛЕ ТЕСТОВ ===================='
+  cat "$run_dir/analysis.txt"
+  echo '================================================================='
+  echo
   printf 'Analysis:  %s/analysis.txt\n' "$run_dir"
   printf 'AI report: %s/AI_REPORT.txt\n' "$run_dir"
-  printf 'Команда:   sudo remnanode-next multitest analyze\n'
+  printf 'Повторно:  sudo remnanode-next multitest analyze\n'
   (( failed == 0 ))
 }
 
