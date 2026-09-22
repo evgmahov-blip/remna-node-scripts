@@ -170,7 +170,7 @@ run_external_script_timeout(){
   tmp="$(mktemp "/tmp/remna-multitest.XXXXXX.sh")"
   echo
   printf '%s================ %s ================%s\n' "$C_CYAN" "$name" "$C_RESET"
-  say "Execution timeout: ${seconds}s"
+  say "Max runtime: ${seconds}s"
   if [[ -n "$expected_blob" ]]; then
     say "Entry script pinned: $expected_blob"
   else
@@ -317,10 +317,10 @@ test_ipquality(){
   local script json rc=0
   script="$(mktemp "/tmp/remna-ipquality.XXXXXX.sh")"
   json="$(mktemp "/tmp/remna-ipquality.XXXXXX.json")"
-  trap 'rm -f "$script" "$json"' RETURN
 
   printf '%s================ IPQuality ================%s\n' "$C_CYAN" "$C_RESET"
   if ! download_external_script "IPQuality" "$IPQUALITY_URL" "$script" "$IPQUALITY_BLOB_SHA"; then
+    rm -f "$script" "$json"
     return 1
   fi
 
@@ -331,6 +331,7 @@ test_ipquality(){
 
   if ! jq -e . "$json" >/dev/null 2>&1; then
     fail "IPQuality не вернул валидный JSON (rc=$rc)."
+    rm -f "$script" "$json"
     return 1
   fi
 
@@ -350,8 +351,7 @@ test_ipquality(){
       " blacklisted=" + ((.Mail.DNSBlacklist.Blacklisted // "?")|tostring)
   ' "$json"
 
-  # Валидный JSON-отчёт важнее внутреннего rc upstream-скрипта:
-  # внешние API могут дать частичный результат и ненулевой rc.
+  rm -f "$script" "$json"
   return 0
 }
 
