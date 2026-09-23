@@ -730,8 +730,8 @@ report_key_metrics(){
 print_node_scorecard(){
   local dir="$1"
   local summary
-  local speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" fail_count="" safe_mbps=""
-  local at3="" at5=""
+  local speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" marked="" ip_verdict="" risk_factors="" geo="" health_summary=""
+  local fail_count="" safe_mbps="" at3="" at5=""
 
   summary="$dir/summary.tsv"
 
@@ -786,7 +786,7 @@ print_node_scorecard(){
   fi
 
   if [[ "$blacklisted" == "0" ]]; then
-    echo 'IP reputation:    без DNSBL blacklist по текущему тесту'
+    echo 'IP reputation:    DNSBL blacklist=0 по текущему тесту'
   fi
   if [[ "$mtu" == "1500" ]]; then
     echo 'MTU:              нормальный для XHTTP/Hysteria2'
