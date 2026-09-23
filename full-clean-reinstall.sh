@@ -465,24 +465,114 @@ MENU
 
 show_status(){
   sync_next_sources
-  echo '================ REMNANODE NEXT STATUS ================'
-  printf 'Transport : %s\n' "$(cat "$APP_DIR/.transport" 2>/dev/null || echo 'не выбран')"
-  printf 'Domain    : %s\n' "$(cat "$APP_DIR/.node_domain" 2>/dev/null || echo 'не задан')"
-  printf 'Node      : '
-  if command -v docker >/dev/null 2>&1; then docker ps --filter name='^/remnanode$' --format '{{.Status}}' 2>/dev/null | head -1 || true; else echo 'docker отсутствует'; fi
-  printf 'Nginx     : '
-  if command -v docker >/dev/null 2>&1; then docker ps --filter name='^/remnawave-nginx$' --format '{{.Status}}' 2>/dev/null | head -1 || true; else echo 'docker отсутствует'; fi
-  echo 'Listeners :'
-  ss -lntup 2>/dev/null | grep -E '(:443|:2222)[[:space:]]' || true
-  printf 'Network   : %s / %s\n' "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)" "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo unknown)"
-  echo 'Profiles  :'
-  find "$APP_DIR/remnawave-profiles" -maxdepth 1 -type f -name '*.json' -printf '  %f\n' 2>/dev/null | sort || true
-  if [[ -x "$RKN" ]]; then
-    echo 'RKN       :'
-    "$RKN" status || true
-  fi
-}
+  local domain="" transport="" node_state="" nginx_state="" cert="" cert_end="" cert_days=""
+  local disk="" mem="" load="" ipv6_state="" backup="" backup_age="" mt_dir="" mt_result=""
+  local ok_count=0 warn_count=0 fail_count=0
 
+  domain="$(cat "$APP_DIR/.node_domain" 2>/dev/null || true)"
+  transport="$(cat "$APP_DIR/.transport" 2>/dev/null || true)"
+
+  echo '======================================================================'
+  echo ' REMNANODE NEXT — NODE HEALTH'
+  echo '======================================================================'
+  printf 'Transport : %s\n' "$transport"
+  printf 'Domain    : %s\n' "$domain"
+
+  if command -v docker >/dev/null 2>&1; then
+    node_state="$(docker ps --filter name='^/remnanode$' --format '{{.Status}}' 2>/dev/null | head -1)"
+    nginx_state="$(docker ps --filter name='^/remnawave-nginx$' --format '{{.Status}}' 2>/dev/null | head -1)"
+  fi
+  if [[ -n "$node_state" ]]; then echo "[OK]   rw-core/container: $node_state"; ok_count=$((ok_count+1)); else echo '[FAIL] rw-core/container: not running'; fail_count=$((fail_count+1)); fi
+  if [[ -n "$nginx_state" ]]; then echo "[OK]   nginx: $nginx_state"; ok_count=$((ok_count+1)); else echo '[WARN] nginx: not running/not used'; warn_count=$((warn_count+1)); fi
+
+  if ss -lnt 2>/dev/null | grep -Eq '(:|\])443[[:space:]]'; then echo '[OK]   TCP/443: LISTEN'; ok_count=$((ok_count+1)); else echo '[FAIL] TCP/443: no listener'; fail_count=$((fail_count+1)); fi
+  if [[ "$transport" == *hysteria* || "$transport" == "combined" ]]; then
+    if ss -lnu 2>/dev/null | grep -Eq '(:|\])443[[:space:]]'; then echo '[OK]   UDP/443: LISTEN'; ok_count=$((ok_count+1)); else echo '[FAIL] UDP/443: Hysteria2 selected, no listener'; fail_count=$((fail_count+1)); fi
+  else
+    echo '[INFO] UDP/443: not required by current transport'
+  fi
+
+  if [[ -n "$domain" ]] && getent ahostsv4 "$domain" >/dev/null 2>&1; then
+    echo '[OK]   DNS A: resolves'
+    ok_count=$((ok_count+1))
+  elif [[ -n "$domain" ]]; then
+    echo '[WARN] DNS A: resolve failed'
+    warn_count=$((warn_count+1))
+  fi
+
+  for cert in "$APP_DIR/certs/fullchain.pem" "/etc/xray/certs/fullchain.pem"; do
+    [[ -s "$cert" ]] && break
+  done
+  if [[ -s "$cert" ]] && command -v openssl >/dev/null 2>&1; then
+    cert_end="$(openssl x509 -in "$cert" -noout -enddate 2>/dev/null | cut -d= -f2- || true)"
+    if [[ -n "$cert_end" ]]; then
+      cert_days=$(( ($(date -d "$cert_end" +%s 2>/dev/null || echo 0) - $(date +%s)) / 86400 ))
+      printf 'TLS       : %s days, expires %s\n' "$cert_days" "$cert_end"
+      if (( cert_days < 0 )); then echo '[FAIL] TLS expired'; fail_count=$((fail_count+1))
+      elif (( cert_days < 14 )); then echo '[WARN] TLS expires soon'; warn_count=$((warn_count+1))
+      else echo '[OK]   TLS expiry'; ok_count=$((ok_count+1)); fi
+      if [[ -n "$domain" ]] && openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null | grep -Fq "DNS:$domain"; then
+        echo '[OK]   TLS SAN covers node domain'
+        ok_count=$((ok_count+1))
+      elif [[ -n "$domain" ]]; then
+        echo '[WARN] TLS SAN does not show node domain'
+        warn_count=$((warn_count+1))
+      fi
+    fi
+  else
+    echo '[WARN] Local certificate file not found'
+    warn_count=$((warn_count+1))
+  fi
+
+  disk="$(df -P / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')"
+  mem="$(awk '/MemAvailable:/{printf "%.0f MB", $2/1024}' /proc/meminfo 2>/dev/null || true)"
+  load="$(awk '{print $1}' /proc/loadavg 2>/dev/null || true)"
+  printf 'Resources : disk=%s%% mem_available=%s load1=%s\n' "$disk" "$mem" "$load"
+  if [[ "$disk" =~ ^[0-9]+$ ]] && (( disk >= 90 )); then echo '[WARN] Root disk >=90% used'; warn_count=$((warn_count+1)); else ok_count=$((ok_count+1)); fi
+
+  if [[ "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo 1)" == "0" ]]; then
+    ipv6_state="$(ip -6 route show default 2>/dev/null | head -1)"
+    if [[ -n "$ipv6_state" ]]; then echo '[OK]   IPv6 enabled + default route'; ok_count=$((ok_count+1)); else echo '[WARN] IPv6 enabled but no default route'; warn_count=$((warn_count+1)); fi
+  else
+    echo '[INFO] IPv6 disabled'
+  fi
+  printf 'Network   : %s / %s\n' "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)" "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo unknown)"
+
+  backup="$(ls -1t /root/remnanode-next-backup-*.tar.gz 2>/dev/null | head -1 || true)"
+  if [[ -n "$backup" ]]; then
+    backup_age=$(( ($(date +%s) - $(stat -c %Y "$backup" 2>/dev/null || echo 0)) / 86400 ))
+    printf 'Backup    : %s (%s days ago)\n' "$backup" "$backup_age"
+    if (( backup_age <= 7 )); then ok_count=$((ok_count+1)); else warn_count=$((warn_count+1)); fi
+  else
+    echo '[WARN] Backup: none'
+    warn_count=$((warn_count+1))
+  fi
+
+  mt_dir="$(cat /var/log/remnanode-next/multitest/latest.path 2>/dev/null || true)"
+  if [[ -n "$mt_dir" && -f "$mt_dir/analysis.txt" ]]; then
+    mt_result="$(grep '^Result:' "$mt_dir/analysis.txt" | head -1 || true)"
+    printf 'Multitest : %s\n' "$mt_result"
+  else
+    echo 'Multitest : no saved run'
+  fi
+
+  if [[ -x "$RKN" ]]; then
+    echo
+    echo '--- SECURITY ---'
+    "$RKN" status || { echo '[WARN] RKN status failed'; warn_count=$((warn_count+1)); }
+  fi
+
+  echo
+  printf 'HEALTH SUMMARY: OK=%s WARN=%s FAIL=%s\n' "$ok_count" "$warn_count" "$fail_count"
+  if (( fail_count > 0 )); then
+    echo 'VERDICT: ATTENTION — есть критичные проблемы.'
+  elif (( warn_count > 0 )); then
+    echo 'VERDICT: REVIEW — нода работает, но есть предупреждения.'
+  else
+    echo 'VERDICT: HEALTHY'
+  fi
+  echo '======================================================================'
+}
 hysteria_diag(){
   local domain runtime_tmp="" runtime_ok=0 drift=0
   domain="$(cat "$APP_DIR/.node_domain" 2>/dev/null || true)"
