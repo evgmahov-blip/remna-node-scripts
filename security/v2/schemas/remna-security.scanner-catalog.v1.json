@@ -1,0 +1,5 @@
+{
+  "title": "remna-security.scanner-catalog.v1",
+  "type": "object",
+  "required": ["schema", "categories", "default_enabled"]
+}

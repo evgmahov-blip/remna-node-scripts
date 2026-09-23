@@ -498,3 +498,7 @@ grep -q 'forbidden' "$WORK/live.err" || fail "live apply missing refusal"
 ok forbid-live
 
 printf 'PASS %s\n' "$PASS"
+
+echo "security v2 offline"
+bash "$ROOT/tests/security/v2/run.sh"
+ok v2

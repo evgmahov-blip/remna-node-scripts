@@ -1,0 +1,9 @@
+{
+  "title": "remna-security.quic-noise-profile.v1",
+  "type": "object",
+  "required": ["schema", "profile_id", "version", "immutable", "content_hash", "packet_size"],
+  "properties": {
+    "immutable": {"const": true},
+    "content_hash": {"type": "string", "minLength": 64, "maxLength": 64}
+  }
+}

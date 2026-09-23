@@ -1,0 +1,9 @@
+{
+  "title": "remna-security.decoy-status.v1",
+  "type": "object",
+  "required": ["schema", "seed", "generation", "runtime_trackers", "external_assets"],
+  "properties": {
+    "runtime_trackers": {"const": false},
+    "external_assets": {"const": false}
+  }
+}

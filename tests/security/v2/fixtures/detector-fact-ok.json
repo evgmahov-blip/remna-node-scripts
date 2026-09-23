@@ -1,0 +1,10 @@
+{
+  "schema": "remna-security.detector-fact.v1",
+  "observed_at": 1700000000,
+  "source": "inbound",
+  "severity": "high",
+  "confidence": 0.9,
+  "ttl_seconds": 300,
+  "dedup_key": "inbound:scanner:203.0.113.8",
+  "occurrence_count": 1
+}

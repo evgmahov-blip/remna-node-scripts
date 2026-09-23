@@ -717,6 +717,11 @@ main() {
   else
     set -- "${CMD[@]}"
   fi
+  if [ "${1:-}" = "v2" ]; then
+    shift || true
+    export PYTHONPATH="$(CDPATH= cd -- "$HERE/.." && pwd)${PYTHONPATH:+:$PYTHONPATH}"
+    exec python3 "$HERE/v2/cli.py" "$@"
+  fi
   lock
   case "${1:-menu}" in
     menu|'') menu ;;

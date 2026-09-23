@@ -1,0 +1,9 @@
+{
+  "title": "remna-security.layer-generation.v1",
+  "type": "object",
+  "required": ["schema", "layer", "generation_id", "transaction_id", "content_sha256", "rollback_owner"],
+  "properties": {
+    "layer": {"enum": ["inbound", "transport", "egress"]},
+    "rollback_owner": {"enum": ["inbound", "transport", "egress"]}
+  }
+}

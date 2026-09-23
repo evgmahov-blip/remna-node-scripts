@@ -1,0 +1,9 @@
+{
+  "schema": "remna-security.detector-fact.v1",
+  "observed_at": "yesterday",
+  "source": "warp-mode",
+  "severity": "catastrophic",
+  "confidence": 2,
+  "ttl_seconds": 0,
+  "occurrence_count": 0
+}

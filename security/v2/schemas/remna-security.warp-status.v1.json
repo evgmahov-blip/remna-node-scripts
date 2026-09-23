@@ -1,0 +1,6 @@
+{
+  "title": "remna-security.warp-status.v1",
+  "type": "object",
+  "required": ["schema", "registered", "redacted", "orphan_risk", "has_lkg"],
+  "properties": {"redacted": {"const": true}}
+}

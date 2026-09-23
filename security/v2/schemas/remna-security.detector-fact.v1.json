@@ -1,0 +1,16 @@
+{
+  "title": "remna-security.detector-fact.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "observed_at", "source", "severity", "confidence", "ttl_seconds", "dedup_key", "occurrence_count"],
+  "properties": {
+    "schema": {"const": "remna-security.detector-fact.v1"},
+    "observed_at": {"type": "integer"},
+    "source": {"enum": ["inbound", "transport", "egress", "operator", "scanner", "health"]},
+    "severity": {"enum": ["info", "low", "medium", "high", "critical"]},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "ttl_seconds": {"type": "integer", "minimum": 1},
+    "dedup_key": {"type": "string", "minLength": 1},
+    "occurrence_count": {"type": "integer", "minimum": 1}
+  }
+}

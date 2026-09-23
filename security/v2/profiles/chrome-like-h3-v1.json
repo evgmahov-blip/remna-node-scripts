@@ -1,0 +1,24 @@
+{
+  "alpn": ["h3"],
+  "cipher_suites": [4865, 4866, 4867],
+  "dcid_len": 8,
+  "extension_order": [
+    "server_name",
+    "supported_groups",
+    "signature_algorithms",
+    "alpn",
+    "supported_versions",
+    "key_share",
+    "psk_key_exchange_modes"
+  ],
+  "groups": [29, 23],
+  "immutable": true,
+  "packet_size": 400,
+  "profile_id": "chrome-like-h3-v1",
+  "psk_mode": 1,
+  "scid_len": 8,
+  "signature_algorithms": [1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+  "sni": "www.example.com",
+  "supported_versions": ["0304"],
+  "version": 1
+}

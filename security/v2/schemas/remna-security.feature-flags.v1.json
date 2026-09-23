@@ -1,0 +1,12 @@
+{
+  "title": "remna-security.feature-flags.v1",
+  "type": "object",
+  "required": ["schema", "configured", "effective", "validation", "auto_policy_hard_off"],
+  "properties": {
+    "auto_policy_hard_off": {"const": true},
+    "effective": {
+      "type": "object",
+      "properties": {"FEATURE_AUTO_POLICY": {"const": 0}}
+    }
+  }
+}

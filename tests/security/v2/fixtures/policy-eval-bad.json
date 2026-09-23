@@ -1,0 +1,12 @@
+{
+  "schema": "remna-security.policy-evaluation.v1",
+  "current_state": {},
+  "recommended_state": {},
+  "triggering_facts": [],
+  "target_layers": ["warp"],
+  "proposed_change": {"action": "enable_warp"},
+  "risk": "none",
+  "approval_required": false,
+  "rollback_id": "tx",
+  "pure": false
+}

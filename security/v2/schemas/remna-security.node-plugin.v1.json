@@ -1,0 +1,6 @@
+{
+  "title": "remna-security.node-plugin.v1",
+  "type": "object",
+  "required": ["schema", "enabled", "authoritative_ingress", "mode"],
+  "properties": {"authoritative_ingress": {"const": false}}
+}

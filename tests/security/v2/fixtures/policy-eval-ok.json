@@ -1,0 +1,12 @@
+{
+  "schema": "remna-security.policy-evaluation.v1",
+  "current_state": {"transaction_id": "tx-1", "egress": "direct"},
+  "recommended_state": {"transaction_id": "tx-1", "egress": "direct", "review": "pending"},
+  "triggering_facts": ["inbound:scanner:203.0.113.8"],
+  "target_layers": ["inbound"],
+  "proposed_change": {"action": "request_review"},
+  "risk": "high",
+  "approval_required": true,
+  "rollback_id": "tx-1",
+  "pure": true
+}

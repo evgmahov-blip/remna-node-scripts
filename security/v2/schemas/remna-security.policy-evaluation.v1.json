@@ -1,0 +1,11 @@
+{
+  "title": "remna-security.policy-evaluation.v1",
+  "type": "object",
+  "required": ["schema", "current_state", "recommended_state", "triggering_facts", "target_layers", "proposed_change", "risk", "approval_required", "rollback_id", "pure"],
+  "properties": {
+    "pure": {"const": true},
+    "approval_required": {"const": true},
+    "target_layers": {"type": "array", "items": {"enum": ["inbound", "transport", "egress"]}},
+    "risk": {"enum": ["none", "low", "medium", "high"]}
+  }
+}

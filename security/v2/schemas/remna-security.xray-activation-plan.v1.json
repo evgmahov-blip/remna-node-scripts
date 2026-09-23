@@ -1,0 +1,6 @@
+{
+  "title": "remna-security.xray-activation-plan.v1",
+  "type": "object",
+  "required": ["schema", "stages", "reload_method", "execute", "refused"],
+  "properties": {"execute": {"const": false}}
+}

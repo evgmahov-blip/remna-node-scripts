@@ -1,0 +1,6 @@
+{
+  "title": "remna-security.xray-activation-result.v1",
+  "type": "object",
+  "required": ["schema", "activated", "stage_reached", "rolled_back"],
+  "properties": {"activated": {"const": false}}
+}

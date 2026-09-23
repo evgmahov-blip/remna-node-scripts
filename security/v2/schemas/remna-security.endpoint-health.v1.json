@@ -1,0 +1,9 @@
+{
+  "title": "remna-security.endpoint-health.v1",
+  "type": "object",
+  "required": ["schema", "endpoint", "origin", "status", "success_streak", "failure_streak"],
+  "properties": {
+    "origin": {"enum": ["configured", "lkg", "registration", "discovered"]},
+    "status": {"enum": ["unknown", "candidate", "healthy", "demoted", "cooldown"]}
+  }
+}
