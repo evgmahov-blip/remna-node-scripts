@@ -449,8 +449,11 @@ jobs:
           grep -Fq 'NextTrace Globalping' README.md
           grep -Fq 'ничего дополнительно нажимать не нужно' README.md
           grep -Fq 'multitest analyze' README.md
-          grep -Fq 'в терминале сразу выводится короткий блок' README.md
+          grep -Fq 'в терминале выводится короткая **операторская карточка**' README.md
           grep -Fq 'ИТОГ ПО НОДЕ' README.md
+          grep -Fq 'ОТЛИЧНО / НОРМАЛЬНО / ВНИМАНИЕ / ПЛОХО' README.md
+          grep -Fq 'IP / REPUTATION' README.md
+          grep -Fq 'TLS / RUNTIME' README.md
           grep -Fq 'подсвечиваются зелёным' README.md
           grep -Fq 'JSON/privacy-режиме' README.md
           grep -Fq 'multitest report' README.md
