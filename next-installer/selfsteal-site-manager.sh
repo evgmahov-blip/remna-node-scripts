@@ -518,6 +518,3 @@ main(){
 }
 
 main "$@"
-
-
-[executed on device: ainoc-control (04307858-cc04-403f-aac8-a832dde44909)]
