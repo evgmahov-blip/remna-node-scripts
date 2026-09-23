@@ -7,7 +7,7 @@ WWW_DIR="${WWW_DIR:-/var/www/html}"
 STATE_FILE="$APP_DIR/.selfsteal_site"
 RADIO_ADMIN_FILE="$APP_DIR/.selfsteal_radio_admin"
 RADIO_AUTH_FILE="$APP_DIR/.selfsteal_radio_auth"
-RADIO_NGINX_GATE="$APP_DIR/nginx-extra/selfsteal-radio.conf"
+RADIO_NGINX_GATE="$APP_DIR/nginx-extra/locations/selfsteal-radio.conf"
 STREAM_SALT_FILE="$APP_DIR/.selfsteal_stream_salt"
 STREAM_AUDIO_CACHE="${STREAM_AUDIO_CACHE:-$APP_DIR/stream-audio-cache}"
 STREAM_AUDIO_FIXTURE_DIR="${STREAM_AUDIO_FIXTURE_DIR:-}"
@@ -369,6 +369,43 @@ deploy_stream(){
   log '[OK] STREAM audio: 3 русских LibriVox + Beethoven + Chopin + Bach; runtime внешних origin нет'
 }
 
+ensure_selfsteal_location_include(){
+  local conf="$APP_DIR/nginx.conf" backup=""
+  [[ -s "$conf" ]] || { fail "Не найден nginx.conf: $conf"; return 1; }
+  if grep -Fq 'include /etc/nginx/telemt-panel/locations/*.conf;' "$conf"; then
+    mkdir -p "$APP_DIR/nginx-extra/locations"
+    return 0
+  fi
+
+  backup="$conf.radio-include.bak"
+  cp -a -- "$conf" "$backup"
+  python3 - "$conf" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+needle = "    root /var/www/html;\n    index index.html;\n"
+if needle not in s:
+    raise SystemExit("SelfSteal server marker not found")
+s = s.replace(
+    needle,
+    needle + "    include /etc/nginx/telemt-panel/locations/*.conf;\n",
+    1,
+)
+open(p, "w", encoding="utf-8").write(s)
+PY
+  mkdir -p "$APP_DIR/nginx-extra/locations"
+
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnawave-nginx; then
+    if ! docker exec remnawave-nginx nginx -t >/dev/null 2>&1; then
+      cp -a -- "$backup" "$conf"
+      rm -f -- "$backup"
+      fail 'SelfSteal location include не прошёл nginx -t; nginx.conf восстановлен'
+      return 1
+    fi
+  fi
+  rm -f -- "$backup"
+}
+
 radio_auth_token(){
   local token tmp
   mkdir -p "$APP_DIR"
@@ -386,8 +423,9 @@ radio_auth_token(){
 
 install_radio_nginx_gate(){
   local admin_name="$1" token="$2" tmp
-  mkdir -p "$APP_DIR/nginx-extra"
-  tmp="$(mktemp "$APP_DIR/nginx-extra/.selfsteal-radio.XXXXXX")" || return 1
+  ensure_selfsteal_location_include || return 1
+  mkdir -p "$APP_DIR/nginx-extra/locations"
+  tmp="$(mktemp "$APP_DIR/nginx-extra/locations/.selfsteal-radio.XXXXXX")" || return 1
   cat > "$tmp" <<EOF
 location = /$admin_name {
     if (\$arg_k = "$token") {
