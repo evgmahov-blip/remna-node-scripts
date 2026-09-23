@@ -336,25 +336,54 @@ test_ipquality(){
   fi
 
   jq -r '
-    "ASN: " + (.Info.ASN // "?"),
-    "Region: " + (.Info.Region.Code // "?") + " " + (.Info.Region.Name // ""),
-    "Usage: " + ([.Type.Usage[]?] | unique | join(", ")),
-    "Risk: IP2Location=" + (.Score.IP2LOCATION // "?") +
-      " AbuseIPDB=" + (.Score.AbuseIPDB // "?") +
-      " Scamalytics=" + (.Score.SCAMALYTICS // "?"),
-    "Proxy flags: " + ([.Factor.Proxy | to_entries[] | select(.value == true) | .key] |
-      if length == 0 then "none" else join(",") end),
-    "Media: " + ([.Media | to_entries[] |
-      (.key + "=" + (.value.Status // "?") + "/" + (.value.Region // "-"))] | join(" ")),
-    "DNSBL: clean=" + ((.Mail.DNSBlacklist.Clean // "?")|tostring) +
+    def count_true(o): [o | to_entries[]? | select(.value == true)] | length;
+    def count_known(o): [o | to_entries[]? | select(.value == true or .value == false)] | length;
+    def values(o): [o | to_entries[]? | select(.value != null and .value != "null") | (.key + "=" + (.value|tostring))] | join(" ");
+    "ASN: " + (.Info.ASN // "?") + " / " + (.Info.Organization // "?"),
+    "Geo: " + (.Info.Region.Code // "?") + " " + (.Info.Region.Name // "") +
+      " / registered=" + (.Info.RegisteredRegion.Code // "?") + " / " + (.Info.Type // "?"),
+    "Geo consensus: " + values(.Factor.CountryCode),
+    "Usage consensus: " + values(.Type.Usage),
+    "Risk scores: " + values(.Score),
+    "Risk factors: proxy=" + ((count_true(.Factor.Proxy))|tostring) + "/" + ((count_known(.Factor.Proxy))|tostring) +
+      " vpn=" + ((count_true(.Factor.VPN))|tostring) + "/" + ((count_known(.Factor.VPN))|tostring) +
+      " tor=" + ((count_true(.Factor.Tor))|tostring) + "/" + ((count_known(.Factor.Tor))|tostring) +
+      " abuser=" + ((count_true(.Factor.Abuser))|tostring) + "/" + ((count_known(.Factor.Abuser))|tostring) +
+      " robot=" + ((count_true(.Factor.Robot))|tostring) + "/" + ((count_known(.Factor.Robot))|tostring) +
+      " datacenter=" + ((count_true(.Factor.Server))|tostring) + "/" + ((count_known(.Factor.Server))|tostring),
+    "Media: " + ([.Media | to_entries[] | (.key + "=" + (.value.Status // "?") + "/" + (.value.Region // "-"))] | join(" ")),
+    "Mail: port25=" + ((.Mail.Port25 // "?")|tostring),
+    "DNSBL: total=" + ((.Mail.DNSBlacklist.Total // "?")|tostring) +
+      " clean=" + ((.Mail.DNSBlacklist.Clean // "?")|tostring) +
       " marked=" + ((.Mail.DNSBlacklist.Marked // "?")|tostring) +
       " blacklisted=" + ((.Mail.DNSBlacklist.Blacklisted // "?")|tostring)
   ' "$json"
 
+  local blacklisted marked proxy_hits vpn_hits tor_hits abuser_hits geo_regions
+  blacklisted="$(jq -r '.Mail.DNSBlacklist.Blacklisted // -1' "$json")"
+  marked="$(jq -r '.Mail.DNSBlacklist.Marked // -1' "$json")"
+  proxy_hits="$(jq '[.Factor.Proxy | to_entries[]? | select(.value == true)] | length' "$json")"
+  vpn_hits="$(jq '[.Factor.VPN | to_entries[]? | select(.value == true)] | length' "$json")"
+  tor_hits="$(jq '[.Factor.Tor | to_entries[]? | select(.value == true)] | length' "$json")"
+  abuser_hits="$(jq '[.Factor.Abuser | to_entries[]? | select(.value == true)] | length' "$json")"
+  geo_regions="$(jq '[.Factor.CountryCode | to_entries[]? | select(.value != null and .value != "null") | .value] | unique | length' "$json")"
+
+  if [[ "$blacklisted" =~ ^[0-9]+$ ]] && (( blacklisted >= 3 )); then
+    echo "IP VERDICT: BAD — DNSBL blacklist=$blacklisted; адрес лучше не считать чистым для новой ноды."
+  elif (( abuser_hits >= 3 || tor_hits >= 2 || proxy_hits >= 4 )); then
+    echo 'IP VERDICT: BAD — несколько независимых risk-факторов считают адрес проблемным.'
+  elif { [[ "$blacklisted" =~ ^[0-9]+$ ]] && (( blacklisted > 0 )); } ||
+       { [[ "$marked" =~ ^[0-9]+$ ]] && (( marked >= 50 )); } ||
+       (( abuser_hits > 0 || tor_hits > 0 || proxy_hits >= 2 || vpn_hits >= 3 || geo_regions > 1 )); then
+    echo 'IP VERDICT: REVIEW — есть сигналы риска/расхождения; смотри Risk/Geo/DNSBL выше.'
+  else
+    echo 'IP VERDICT: CLEAN — критичных сигналов по доступным источникам не найдено.'
+  fi
+  printf 'IP evidence: proxy=%s vpn=%s tor=%s abuser=%s geo_regions=%s\n' "$proxy_hits" "$vpn_hits" "$tor_hits" "$abuser_hits" "$geo_regions"
+
   rm -f "$script" "$json"
   return 0
 }
-
 test_sysbench_cpu(){
   need_cmd sysbench sysbench
   need_cmd nproc coreutils
@@ -554,7 +583,7 @@ report_key_metrics(){
   if [[ -f "$dir/07-ipquality.log" ]]; then
     echo
     echo '[IP quality / unlock]'
-    grep -aE '^(ASN|Region|Usage|Risk|Proxy flags|Media|DNSBL):' "$dir/07-ipquality.log" | tail -20 || true
+    grep -aE '^(ASN|Geo|Geo consensus|Usage consensus|Risk scores|Risk factors|Media|Mail|DNSBL|IP VERDICT|IP evidence):' "$dir/07-ipquality.log" | tail -30 || true
   fi
 
   if [[ -f "$dir/08-sysbench-cpu.log" ]]; then
@@ -612,7 +641,13 @@ print_node_scorecard(){
 
   [[ -f "$dir/11-nexttrace-mtu.log" ]] &&     mtu="$(awk '/Path MTU:[[:space:]]*[0-9]+/{print $3; exit}' "$dir/11-nexttrace-mtu.log" 2>/dev/null || true)"
 
-  [[ -f "$dir/07-ipquality.log" ]] &&     blacklisted="$(sed -nE 's/^DNSBL:.*blacklisted=([0-9]+).*/\1/p' "$dir/07-ipquality.log" | head -1)"
+  if [[ -f "$dir/07-ipquality.log" ]]; then
+    blacklisted="$(sed -nE 's/^DNSBL:.*blacklisted=([0-9]+).*/\1/p' "$dir/07-ipquality.log" | head -1)"
+    marked="$(sed -nE 's/^DNSBL:.*marked=([0-9]+).*/\1/p' "$dir/07-ipquality.log" | head -1)"
+    ip_verdict="$(sed -n 's/^IP VERDICT: //p' "$dir/07-ipquality.log" | head -1)"
+    risk_factors="$(sed -n 's/^Risk factors: //p' "$dir/07-ipquality.log" | head -1)"
+    geo="$(sed -n 's/^Geo: //p' "$dir/07-ipquality.log" | head -1)"
+  fi
 
   [[ -f "$summary" ]] &&     fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
 
@@ -624,7 +659,10 @@ print_node_scorecard(){
   printf 'CPU single:       %s\n' "$([[ -n "$cpu_single" ]] && printf '%s events/s' "$cpu_single" || printf 'нет данных')"
   printf 'CPU all-thread:   %s\n' "$([[ -n "$cpu_all" ]] && printf '%s events/s' "$cpu_all" || printf 'нет данных')"
   printf 'MTU:              %s\n' "${mtu:-нет данных}"
-  printf 'DNSBL blacklist:  %s\n' "${blacklisted:-нет данных}"
+  printf 'Geo/IP location:  %s\n' "${geo:-нет данных}"
+  printf 'DNSBL:            blacklisted=%s marked=%s\n' "${blacklisted:-?}" "${marked:-?}"
+  printf 'IP verdict:       %s\n' "${ip_verdict:-нет данных}"
+  printf 'Risk factors:     %s\n' "${risk_factors:-нет данных}"
 
   if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     safe_mbps="$(awk -v s="$speed" 'BEGIN{printf "%.1f", s*0.70}')"
@@ -730,7 +768,7 @@ print_colored_analysis(){
       *" SKIP "*|SKIP=*|*"SKIP="*)
         printf '%s%s%s\n' "$C_YELLOW" "$line" "$C_RESET"
         ;;
-      "Сеть:"*|"CPU single:"*|"CPU all-thread:"*|"MTU:"*|"DNSBL blacklist:"*|"Рабочий бюджет:"*|"XHTTP ориентир:"*|"IP reputation:"*)
+      "Сеть:"*|"CPU single:"*|"CPU all-thread:"*|"MTU:"*|"Geo/IP location:"*|"DNSBL:"*|"IP verdict:"*|"Risk factors:"*|"Рабочий бюджет:"*|"XHTTP ориентир:"*|"IP reputation:"*)
         printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
         ;;
       "  Нет.")
