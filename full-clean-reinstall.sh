@@ -19,6 +19,9 @@ NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-insta
 TESTER_REF="38c1b9d17287ce1fa1c6c6e872e340c1a2bcb666"
 TESTER_BLOB_SHA="e75776711585252df5a1151fd7534f8fa1fd3d59"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
+SELFSTEAL_OVERLAY_REF="2ade53f11a36a301ca65dff9743d9ee26e328200"
+SELFSTEAL_OVERLAY_BLOB_SHA="01927915f487367223a1c0eed7a7d7a32f833a44"
+SELFSTEAL_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${SELFSTEAL_OVERLAY_REF}/next-installer/selfsteal-site-manager.sh"
 
 APP_DIR="/opt/remnanode"
 NEXT_DIR="$APP_DIR/next-installer"
@@ -143,6 +146,20 @@ FILES
 
   verify_source_file "$tmp/next-installer/rkn-watcher-manager.sh" "$EXPECTED_RKN"
   verify_source_file "$tmp/next-installer/selfsteal-site-manager.sh" "$EXPECTED_SELFSTEAL"
+
+  local selfsteal_overlay
+  selfsteal_overlay="$tmp/selfsteal-site-manager.fixed.sh"
+  curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 3 \
+    "$SELFSTEAL_OVERLAY_URL" -o "$selfsteal_overlay" || die 'Не удалось скачать SelfSteal preferences overlay.'
+  [[ "$(git_blob_sha "$selfsteal_overlay")" == "$SELFSTEAL_OVERLAY_BLOB_SHA" ]] || die 'SelfSteal preferences overlay не прошёл Git blob SHA.'
+  bash -n "$selfsteal_overlay" || die 'SelfSteal preferences overlay не прошёл bash -n.'
+  grep -Fq 'PREFERRED_PERCENT=' "$selfsteal_overlay" || die 'SelfSteal overlay: favorite weight отсутствует.'
+  grep -Fq 'template:rybaliti-2.0' "$selfsteal_overlay" || die 'SelfSteal overlay: rybaliti favorite отсутствует.'
+  grep -Fq 'template:worldzoo-stream-template' "$selfsteal_overlay" || die 'SelfSteal overlay: worldzoo favorite отсутствует.'
+  grep -Fq 'deploy_random_preferred' "$selfsteal_overlay" || die 'SelfSteal overlay: weighted random отсутствует.'
+  install -m 0700 "$selfsteal_overlay" "$tmp/next-installer/selfsteal-site-manager.sh"
+  ok 'SelfSteal preferences overlay: 80% STREAM/rybaliti/worldzoo, 20% остальные.'
+
   verify_source_file "$tmp/next-installer/xhttp-signature-manager.sh" "$EXPECTED_SIGNATURE"
 
   local v2cleanup
