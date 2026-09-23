@@ -734,11 +734,27 @@ print_node_scorecard(){
   local dir="$1"
   local summary
   local speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" marked="" ip_verdict="" risk_factors="" geo="" health_summary=""
-  local fail_count="" safe_mbps="" at3="" at5=""
+  local fail_count="" safe_mbps="" at3="" at5="" disk_status="" cpu_status="" route_status="" dpi_status="" geoblock_status=""
+  local network_status="" ip_status="" media_status="" health_status="" overall_status="ОТЛИЧНО"
+  local dpi_bad=0 dpi_ok=0 geoblock_bad=0 media_block=0 health_critical="" health_warnings=""
+  local t5="" t8="" t9="" t10="" t11="" t12="" t13=""
 
   summary="$dir/summary.tsv"
 
-  [[ -f "$dir/09-network-bench.log" ]] &&     speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
+  test_status(){
+    awk -F '\t' -v n="$1" 'NR>1 && $1==n{print $3; exit}' "$summary" 2>/dev/null || true
+  }
+
+  worse_overall(){
+    case "$1" in
+      "ПЛОХО") overall_status="ПЛОХО" ;;
+      "ВНИМАНИЕ") [[ "$overall_status" != "ПЛОХО" ]] && overall_status="ВНИМАНИЕ" ;;
+      "НОРМАЛЬНО") [[ "$overall_status" == "ОТЛИЧНО" ]] && overall_status="НОРМАЛЬНО" ;;
+    esac
+  }
+
+  [[ -f "$dir/09-network-bench.log" ]] &&
+    speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
 
   if [[ -f "$dir/08-sysbench-cpu.log" ]]; then
     cpu_single="$(awk '
@@ -752,7 +768,8 @@ print_node_scorecard(){
     ' "$dir/08-sysbench-cpu.log" 2>/dev/null || true)"
   fi
 
-  [[ -f "$dir/11-nexttrace-mtu.log" ]] &&     mtu="$(awk '/Path MTU:[[:space:]]*[0-9]+/{print $3; exit}' "$dir/11-nexttrace-mtu.log" 2>/dev/null || true)"
+  [[ -f "$dir/11-nexttrace-mtu.log" ]] &&
+    mtu="$(awk '/Path MTU:[[:space:]]*[0-9]+/{print $3; exit}' "$dir/11-nexttrace-mtu.log" 2>/dev/null || true)"
 
   if [[ -f "$dir/07-ipquality.log" ]]; then
     blacklisted="$(sed -nE 's/^DNSBL:.*blacklisted=([0-9]+).*/\1/p' "$dir/07-ipquality.log" | head -1)"
@@ -760,43 +777,161 @@ print_node_scorecard(){
     ip_verdict="$(sed -n 's/^IP VERDICT: //p' "$dir/07-ipquality.log" | head -1)"
     risk_factors="$(sed -n 's/^Risk factors: //p' "$dir/07-ipquality.log" | head -1)"
     geo="$(sed -n 's/^Geo: //p' "$dir/07-ipquality.log" | head -1)"
+    media_block="$(grep -a '^Media:' "$dir/07-ipquality.log" 2>/dev/null | grep -oE '=(Block|No|Failed|Unavailable)(/[^ ]*)?' | wc -l | tr -d ' ' || true)"
   fi
 
-  [[ -f "$dir/13-node-health.log" ]] && health_summary="$(sed -n 's/^Health summary: //p' "$dir/13-node-health.log" | head -1)"
+  if [[ -f "$dir/13-node-health.log" ]]; then
+    health_summary="$(sed -n 's/^Health summary: //p' "$dir/13-node-health.log" | head -1)"
+    health_critical="$(sed -nE 's/^Health summary: critical=([0-9]+).*/\1/p' "$dir/13-node-health.log" | head -1)"
+    health_warnings="$(sed -nE 's/^Health summary:.*warnings=([0-9]+).*/\1/p' "$dir/13-node-health.log" | head -1)"
+  fi
 
-  [[ -f "$summary" ]] &&     fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
+  if [[ -f "$dir/03-censor-dpi.log" ]]; then
+    dpi_bad="$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$dir/03-censor-dpi.log" |
+      grep -Ec '(^|[[:space:]])(Blocked|Denied|Spoofed)([[:space:]]|$)' || true)"
+    dpi_ok="$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$dir/03-censor-dpi.log" |
+      grep -Ec '(^|[[:space:]])(Available|Clean)([[:space:]]|$)' || true)"
+  fi
+
+  if [[ -f "$dir/02-censor-geoblock.log" ]]; then
+    geoblock_bad="$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$dir/02-censor-geoblock.log" |
+      grep -Ec '(^|[[:space:]])(Blocked|Denied|Spoofed)([[:space:]]|$)' || true)"
+  fi
+
+  [[ -f "$summary" ]] &&
+    fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
+
+  t5="$(test_status 5)"
+  t8="$(test_status 8)"
+  t9="$(test_status 9)"
+  t10="$(test_status 10)"
+  t11="$(test_status 11)"
+  t12="$(test_status 12)"
+  t13="$(test_status 13)"
+
+  case "$ip_verdict" in
+    CLEAN*) ip_status="ОТЛИЧНО" ;;
+    REVIEW*) ip_status="ВНИМАНИЕ" ;;
+    BAD*) ip_status="ПЛОХО" ;;
+    *) ip_status="ВНИМАНИЕ" ;;
+  esac
+  worse_overall "$ip_status"
+
+  if [[ "$t9" == "FAIL" ]]; then
+    network_status="ПЛОХО"
+  elif [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    if awk -v s="$speed" 'BEGIN{exit !(s>=500)}'; then
+      network_status="ОТЛИЧНО"
+    elif awk -v s="$speed" 'BEGIN{exit !(s>=150)}'; then
+      network_status="НОРМАЛЬНО"
+    elif awk -v s="$speed" 'BEGIN{exit !(s>=50)}'; then
+      network_status="ВНИМАНИЕ"
+    else
+      network_status="ПЛОХО"
+    fi
+  else
+    network_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$network_status"
+
+  if [[ "$t8" == "FAIL" ]]; then
+    cpu_status="ПЛОХО"
+  elif [[ -n "$cpu_single" && -n "$cpu_all" ]]; then
+    cpu_status="НОРМАЛЬНО"
+  else
+    cpu_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$cpu_status"
+
+  if [[ "$t5" == "FAIL" ]]; then
+    disk_status="ПЛОХО"
+  elif [[ "$t5" == "PASS" ]]; then
+    disk_status="НОРМАЛЬНО"
+  else
+    disk_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$disk_status"
+
+  if [[ "$t10" == "PASS" && "$t11" == "PASS" && "$t12" == "PASS" ]]; then
+    if [[ "$mtu" == "1500" ]]; then
+      route_status="ОТЛИЧНО"
+    elif [[ "$mtu" =~ ^[0-9]+$ ]] && (( mtu >= 1400 )); then
+      route_status="НОРМАЛЬНО"
+    else
+      route_status="ВНИМАНИЕ"
+    fi
+  elif [[ "$t10" == "FAIL" && "$t12" == "FAIL" ]]; then
+    route_status="ПЛОХО"
+  else
+    route_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$route_status"
+
+  if [[ "$dpi_bad" =~ ^[0-9]+$ ]] && (( dpi_bad >= 3 )); then
+    dpi_status="ПЛОХО"
+  elif [[ "$dpi_bad" =~ ^[0-9]+$ ]] && (( dpi_bad > 0 )); then
+    dpi_status="ВНИМАНИЕ"
+  elif [[ "$dpi_ok" =~ ^[0-9]+$ ]] && (( dpi_ok > 0 )); then
+    dpi_status="ОТЛИЧНО"
+  else
+    dpi_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$dpi_status"
+
+  if [[ "$media_block" =~ ^[0-9]+$ ]] && (( media_block == 0 )) &&
+     [[ "$geoblock_bad" =~ ^[0-9]+$ ]] && (( geoblock_bad == 0 )); then
+    media_status="ОТЛИЧНО"
+  elif [[ "$media_block" =~ ^[0-9]+$ ]] && (( media_block >= 3 )); then
+    media_status="ПЛОХО"
+  else
+    media_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$media_status"
+
+  if [[ "$t13" == "FAIL" ]] || { [[ "$health_critical" =~ ^[0-9]+$ ]] && (( health_critical > 0 )); }; then
+    health_status="ПЛОХО"
+  elif [[ "$health_critical" == "0" && "$health_warnings" == "0" ]]; then
+    health_status="ОТЛИЧНО"
+  elif [[ "$health_critical" == "0" && "$health_warnings" =~ ^[0-9]+$ ]]; then
+    health_status="ВНИМАНИЕ"
+  else
+    health_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$health_status"
 
   echo '======================================================================'
-  echo ' ИТОГ ПО НОДЕ'
+  echo ' ИТОГ ПО НОДЕ — ОПЕРАТОРСКАЯ ОЦЕНКА'
   echo '======================================================================'
-  printf 'FAIL:             %s\n' "${fail_count:-?}"
-  printf 'Сеть:             %s\n' "$([[ -n "$speed" ]] && printf '%s Mbit/s' "$speed" || printf 'нет данных')"
-  printf 'CPU single:       %s\n' "$([[ -n "$cpu_single" ]] && printf '%s events/s' "$cpu_single" || printf 'нет данных')"
-  printf 'CPU all-thread:   %s\n' "$([[ -n "$cpu_all" ]] && printf '%s events/s' "$cpu_all" || printf 'нет данных')"
-  printf 'MTU:              %s\n' "${mtu:-нет данных}"
-  printf 'Geo/IP location:  %s\n' "${geo:-нет данных}"
-  printf 'DNSBL:            blacklisted=%s marked=%s\n' "${blacklisted:-?}" "${marked:-?}"
-  printf 'IP verdict:       %s\n' "${ip_verdict:-нет данных}"
-  printf 'Risk factors:     %s\n' "${risk_factors:-нет данных}"
-  printf 'Node health:      %s\n' "${health_summary:-нет данных}"
-
+  printf ' ОБЩИЙ ИТОГ       [%s]\n' "$overall_status"
+  printf ' Тесты             FAIL=%s из 13\n' "${fail_count:-?}"
+  echo '----------------------------------------------------------------------'
+  printf ' IP / REPUTATION   [%-9s] %s\n' "$ip_status" "${ip_verdict:-нет verdict}"
+  printf '                    Geo: %s\n' "${geo:-нет данных}"
+  printf '                    DNSBL: blacklisted=%s marked=%s\n' "${blacklisted:-?}" "${marked:-?}"
+  printf '                    Risk: %s\n' "${risk_factors:-нет данных}"
+  echo '----------------------------------------------------------------------'
+  printf ' СЕТЬ              [%-9s] %s\n' "$network_status" "$([[ -n "$speed" ]] && printf '%s Mbit/s' "$speed" || printf 'скорость не получена')"
   if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     safe_mbps="$(awk -v s="$speed" 'BEGIN{printf "%.1f", s*0.70}')"
     at3="$(awk -v s="$safe_mbps" 'BEGIN{print int(s/3)}')"
     at5="$(awk -v s="$safe_mbps" 'BEGIN{print int(s/5)}')"
-    printf 'Рабочий бюджет:   %s Mbit/s (70%% измеренной скорости)\n' "$safe_mbps"
-    printf 'XHTTP ориентир:   ~%s активных @3 Mbit/s / ~%s @5 Mbit/s\n' "$at3" "$at5"
+    printf '                    рабочий бюджет ~%s Mbit/s; XHTTP ~%s @3M / ~%s @5M\n' "$safe_mbps" "$at3" "$at5"
   fi
-
-  if [[ "$blacklisted" == "0" ]]; then
-    echo 'IP reputation:    DNSBL blacklist=0 по текущему тесту'
-  fi
-  if [[ "$mtu" == "1500" ]]; then
-    echo 'MTU:              нормальный для XHTTP/Hysteria2'
-  fi
+  echo '----------------------------------------------------------------------'
+  printf ' CPU               [%-9s] single=%s all=%s events/s\n' "$cpu_status" "${cpu_single:-?}" "${cpu_all:-?}"
+  printf ' ДИСК              [%-9s] fio test=%s\n' "$disk_status" "${t5:-нет данных}"
+  echo '----------------------------------------------------------------------'
+  printf ' МАРШРУТЫ / MTU    [%-9s] MTR=%s PMTU=%s Globalping=%s MTU=%s\n' "$route_status" "${t10:-?}" "${t11:-?}" "${t12:-?}" "${mtu:-?}"
+  printf ' DPI               [%-9s] bad-signals=%s clean-signals=%s\n' "$dpi_status" "$dpi_bad" "$dpi_ok"
+  printf ' GEO / MEDIA       [%-9s] geoblock-signals=%s media-blocks=%s\n' "$media_status" "$geoblock_bad" "$media_block"
+  echo '----------------------------------------------------------------------'
+  printf ' TLS / RUNTIME     [%-9s] %s\n' "$health_status" "${health_summary:-нет данных}"
+  echo '======================================================================'
+  echo ' ЛЕГЕНДА: ОТЛИЧНО = чисто/сильный результат; НОРМАЛЬНО = рабочий результат;'
+  echo '         ВНИМАНИЕ = есть отклонения или неполные данные; ПЛОХО = критичный сигнал.'
+  echo ' CPU/диск не получают искусственный рейтинг производительности: показываются фактические метрики.'
   echo '======================================================================'
 }
-
 generate_report(){
   local dir="$1"
   local summary analysis ai
