@@ -97,10 +97,21 @@ template_allowed(){
 }
 
 finish_site(){
-  local selected="$1"
+  local selected="$1" had_gate=0
   set_state "$selected"
   if [[ "$selected" != radio ]]; then
+    [[ -f "$RADIO_NGINX_GATE" ]] && had_gate=1
     rm -f "$RADIO_ADMIN_FILE" "$RADIO_AUTH_FILE" "$RADIO_NGINX_GATE"
+    if (( had_gate )) && command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnawave-nginx; then
+      docker exec remnawave-nginx nginx -t >/dev/null 2>&1 || {
+        fail 'Nginx config после удаления RADIO gate не прошёл nginx -t'
+        return 1
+      }
+      docker exec remnawave-nginx nginx -s reload >/dev/null 2>&1 || {
+        fail 'Не удалось reload nginx после удаления RADIO gate'
+        return 1
+      }
+    fi
   fi
   restart_nginx
 }
