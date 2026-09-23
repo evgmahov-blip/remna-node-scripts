@@ -36,6 +36,22 @@ TESTER="$NEXT_DIR/server-multitest.sh"
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
 
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  C_RESET=$'\033[0m'
+  C_BOLD=$'\033[1m'
+  C_CYAN=$'\033[36m'
+  C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'
+  C_DIM=$'\033[2m'
+else
+  C_RESET=''
+  C_BOLD=''
+  C_CYAN=''
+  C_GREEN=''
+  C_YELLOW=''
+  C_DIM=''
+fi
+
 EXPECTED_SETUP="728ed22841a1c494a9d9fce026109f6151fe16a2b861496d267005bd4850477c"
 EXPECTED_GUARDS="620797d0677d091d6550894e32fea58ce7f2adf2f125d6f6ccfb217a7b3382fd"
 EXPECTED_TRANSPORT="441c82fb0eb3b155986d7b84bd66aa82bb1d028b8a9c49e02f1fbac326fac2e2"
@@ -788,33 +804,37 @@ main_menu(){
   sync_next_sources
   local c
   while true; do
-    cat <<'MENU'
+    cat <<MENU
 
-REMNANODE NEXT — MAIN
-REPO: https://github.com/evgmahov-blip/remna-node-scripts
-CLI:  sudo remnanode-next
+${C_BOLD}${C_CYAN}REMNANODE NEXT${C_RESET} — управление нодой
+${C_DIM}CLI: sudo remnanode-next${C_RESET}
 ────────────────────────────────────────────────────────────
- [1]  Установка / продолжить настройку NEXT
- [2]  Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)
- [3]  Config Profile + НАСТРОЙКИ HOST REMNAWAVE
+${C_BOLD}${C_GREEN}БЫСТРЫЕ ДЕЙСТВИЯ${C_RESET}
+ [1]  УСТАНОВИТЬ / продолжить настройку NEXT
+ [9]  СТАТУС НОДЫ
+ ${C_BOLD}${C_GREEN}[15] МУЛЬТИТЕСТЫ СЕРВЕРА${C_RESET}
+      CPU / диск / сеть / DPI / маршруты / IP quality
+      RUN: sudo remnanode-next multitest
+
+${C_BOLD}${C_CYAN}ТРАНСПОРТ / REMNAWAVE${C_RESET}
+ [2]  Транспорт и профили — XHTTP / RAW / Hysteria2 / combined
+ [3]  Config Profile + настройки HOST в Remnawave
  [4]  SelfSteal / маскировочный сайт
  [5]  XHTTP signature
+
+${C_BOLD}${C_CYAN}ЗАЩИТА / СЕТЬ / ДИАГНОСТИКА${C_RESET}
  [6]  РКН защита — SAFE scanner guard (DEFAULT)
+ [13] Сеть / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
+ [14] Hysteria2 диагностика — UDP/443 + DNS + RKN counters
+
+${C_BOLD}${C_YELLOW}ОБСЛУЖИВАНИЕ / ВОССТАНОВЛЕНИЕ${C_RESET}
  [7]  Runtime repair / guards
  [8]  Базовое управление Remnanode
- [9]  Статус
  [10] Safe clean текущей NEXT-ноды
  [11] Safe reinstall текущей NEXT-ноды
- [12] NEXT V2 — существующая/legacy нода → очистка хвостов → NEXT
+ [12] Существующая/legacy нода → очистка хвостов → NEXT V2
 
- [13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
-      RUN:    sudo remnanode-next network
-      BBR3:   https://github.com/ivan-nginx/bbr3
- [14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters
- [15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА
-      RUN:    sudo remnanode-next multitest
-      TEST:   sudo remnanode-next multitest 1..12
-
+${C_DIM}Быстрые команды: multitest | status | network | hysteria-diag${C_RESET}
  [0]  Выход
 ────────────────────────────────────────────────────────────
 MENU
