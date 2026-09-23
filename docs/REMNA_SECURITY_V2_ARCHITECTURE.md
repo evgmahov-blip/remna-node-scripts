@@ -635,3 +635,309 @@ Separate decision. Not authorized by this architecture.
 ```
 
 The policy engine coordinates the layers, but each layer keeps independent ownership, status, tests and rollback.
+
+
+## 18. Mandatory contracts before Phase B
+
+These clarifications close the architecture-review gaps. They are requirements, not optional implementation notes.
+
+### 18.1 WARP credential lifecycle
+
+The implementation must not assume undocumented token expiry semantics. It must record only verified lifecycle facts:
+
+- account creation timestamp;
+- last successful authentication/use;
+- any expiry/validity metadata actually returned by the WARP API;
+- last rotation timestamp;
+- last failure class;
+- account generation id.
+
+Rotation may be triggered by:
+
+1. explicit operator request;
+2. verified authentication/authorization failure;
+3. a separately configured maximum local credential age;
+4. a future server-provided expiry signal, if verified.
+
+Non-idempotent registration is never blindly retried after an ambiguous timeout. A new registration creates a new local generation and does not destroy the last-known-good generation until the new account and route have passed selftest.
+
+Cleanup must not invent Cloudflare API operations. If account disable/delete is not verified to exist and work safely, the implementation records an orphan-risk event instead of pretending cleanup succeeded.
+
+### 18.2 Detector → policy evaluation gate
+
+Detector facts never mutate runtime.
+
+The policy engine has two outputs:
+
+- `current_state`: what is active;
+- `recommended_state`: a pure evaluation result.
+
+A recommended transition is represented as a machine-readable plan with:
+
+- triggering facts;
+- target layer(s);
+- proposed change;
+- expected rollback id;
+- risk class;
+- whether human approval is required.
+
+Example:
+
+```text
+fact: warp_endpoint_degraded
+current egress: warp
+recommendation: endpoint failover to healthy last-good
+runtime mutation: NONE
+approval: REQUIRED
+```
+
+`FEATURE_AUTO_POLICY=0` is the hard default and Phase B/C code must refuse automatic mutations while it is false. Enabling any future automatic policy is a separate reviewed feature, not a config toggle that silently activates behavior.
+
+### 18.3 Endpoint discovery trust and health algorithm
+
+Endpoint sources have ordered trust:
+
+1. operator-pinned endpoint;
+2. last-known-good endpoint from a previously successful WARP session;
+3. endpoint returned by verified local registration metadata;
+4. discovered candidates.
+
+Mutable discovery never makes an endpoint active by itself.
+
+Health state requires more than DNS resolution. A candidate becomes `healthy` only after a WARP-specific end-to-end probe succeeds through that candidate. The implementation may use a temporary test outbound/network namespace, but success must prove that traffic exits through the tested WARP path.
+
+Minimum contract:
+
+- bounded timeout;
+- at least 2 successful probes before promoting an unknown candidate;
+- consecutive failures before demotion;
+- hysteresis/cooldown to prevent endpoint flapping;
+- explicit `unknown` state after reboot until validated;
+- no untested endpoint selected automatically;
+- probe destination(s) must not be a single permanent external dependency.
+
+Exact probe targets and thresholds are Phase B implementation details and must be configurable/tested.
+
+### 18.4 Cross-layer ownership and rollback
+
+Each plane has its own state generation:
+
+- `inbound_generation`;
+- `transport_generation`;
+- `egress_generation`.
+
+A policy recommendation may contain changes for more than one plane, but activation is a transaction of independently owned steps.
+
+Example: WARP endpoint failure while inbound `hardened` is active:
+
+- egress may fail over or roll back;
+- inbound remains hardened;
+- transport remains unchanged;
+- an egress rollback must not restore old firewall sets;
+- an inbound rollback must not touch WARP credentials or transport profiles.
+
+If a multi-plane change is ever approved, each plane receives its own rollback snapshot under a common transaction id. Partial failure rolls back only the steps already changed, in reverse order, without crossing ownership boundaries.
+
+### 18.5 QUIC-noise profile contract
+
+Noise profiles are versioned immutable definitions, for example:
+
+```text
+quic-v1-browserlike-v1
+quic-v1-browserlike-v2
+```
+
+A profile declares which structural fields are stable and which values are randomized.
+
+Stable within one profile version may include:
+
+- QUIC version;
+- ALPN family;
+- TLS version;
+- cipher-suite set/order where required by the profile;
+- supported extension set;
+- signature-algorithm profile;
+- general transport-parameter shape.
+
+Randomized per generation may include:
+
+- DCID/SCID where valid;
+- packet number within the profile rules;
+- TLS random;
+- X25519 key share;
+- SNI selected from the profile's approved pool;
+- selected QUIC transport parameter values within bounded sets;
+- extension ordering only if the selected fingerprint profile permits it;
+- padding position/amount within valid packet-size rules;
+- Xray `rand` noise realization.
+
+The implementation must not claim one fixed JA4 is permanently browser-safe. Tests validate the selected profile fixture and cryptographic correctness.
+
+Profile retirement is manual by default. A detector may report suspected profile degradation, but automatic profile rotation remains disabled. Rotation uses the normal egress transaction and rollback path.
+
+Test requirement: generate at least 100 packets per profile fixture, decrypt/parse every packet, confirm required structural invariants, and confirm non-identical packet bytes across the sample.
+
+### 18.6 JSON redaction contract
+
+Machine APIs expose the minimum information needed for operations.
+
+Always secret:
+
+- WireGuard private key;
+- WARP bearer token;
+- raw authorization headers;
+- full secret-bearing generated configs.
+
+Normally visible:
+
+- backend name;
+- account generation id;
+- endpoint address/pool health;
+- public peer key if operationally required;
+- non-secret interface addresses;
+- timestamps;
+- failure class;
+- profile version;
+- redacted content hashes.
+
+Account identifiers are treated as sensitive metadata: ordinary status may expose only a stable local generation id or truncated/hash representation. No generic `--expose-sensitive` mode is required for V2.
+
+### 18.7 Persistent last-known-good and snapshots
+
+State is stored under the owned root, conceptually:
+
+```text
+/opt/remna-protection/
+  snapshots/
+  egress/
+  data/lkg/
+```
+
+Snapshot writes use:
+
+1. write temp file in the same filesystem;
+2. fsync file;
+3. atomic rename;
+4. fsync parent directory where practical;
+5. only then mark the generation committed.
+
+Every snapshot contains:
+
+- schema version;
+- transaction id;
+- layer;
+- generation;
+- timestamp;
+- non-secret content hashes;
+- pointer to encrypted/root-only secret material where applicable.
+
+Retention default: current + five previous committed generations per layer. Cleanup happens only after a successful committed transaction; failed/uncommitted snapshots are retained long enough for diagnostics and bounded by a separate cleanup policy.
+
+### 18.8 Detector aggregation and staleness
+
+Detector facts include:
+
+- `observed_at`;
+- `source`;
+- `severity`;
+- `confidence`;
+- `ttl_seconds`;
+- deduplication key;
+- occurrence count.
+
+The default aggregation window is one minute. Repeated identical facts inside the window increment a count instead of appending unbounded events. Stale facts expire before policy evaluation. Queue/file size is bounded; overflow drops oldest low-severity expired/duplicate facts first and records an overflow event.
+
+Policy evaluation must not treat expired facts as active evidence.
+
+### 18.9 Atomic Xray/rw-core config activation
+
+Configuration activation is separate from generation and validation.
+
+Required sequence:
+
+1. generate candidate in a temp/root-only file;
+2. parse/semantic validation;
+3. real `rw-core/Xray run -test` against candidate;
+4. snapshot current live config;
+5. atomic rename candidate into place;
+6. perform the documented runtime reload/restart mechanism for the installed core;
+7. verify listeners/routes/end-to-end health;
+8. on failure, atomically restore previous config, reload/restart, and verify rollback.
+
+The concrete reload mechanism must be detected from the installed Remnawave/runtime version; V2 must not assume SIGHUP works unless verified.
+
+### 18.10 Feature flag storage and validation
+
+Feature flags live in one owned root-only policy file managed by the same config engine, not in ad-hoc shell environment.
+
+Rules include:
+
+- `FEATURE_EGRESS_WARP=0` by default;
+- `FEATURE_WARP_QUIC_NOISE=0` by default;
+- QUIC-noise requires WARP feature support;
+- active egress `warp_quic_noise` requires both flags;
+- `FEATURE_AUTO_POLICY=0` remains enforced before every mutating policy operation;
+- incompatible combinations fail preflight instead of being auto-corrected.
+
+Status reports configured and effective flags separately.
+
+### 18.11 Phase D acceptance gate
+
+Phase D remains lab-only and requires explicit human approval.
+
+Minimum field evidence before any production proposal:
+
+- at least 3 independent fixed broadband networks;
+- at least 2 independent mobile networks/operators where available;
+- at least 1 CGNAT path;
+- IPv4-only and dual-stack coverage;
+- at least one constrained-loss/MTU scenario.
+
+Critical paths:
+
+1. direct baseline;
+2. plain WARP;
+3. WARP endpoint failover;
+4. WARP + QUIC-noise;
+5. Hysteria2 baseline;
+6. rollback to the previous known-good state.
+
+A failed critical path blocks production proposal until the failure is explained and classified as either a code defect, provider limitation, or known network policy. No success percentage is allowed to hide an unexplained critical failure.
+
+### 18.12 Noise-profile migration
+
+A profile upgrade is explicit:
+
+1. add a new immutable profile fixture;
+2. run offline cryptographic/fingerprint tests;
+3. run lab field tests;
+4. mark old profile `deprecated`, not deleted;
+5. detector may recommend migration;
+6. operator approves migration;
+7. egress transaction activates the new profile;
+8. rollback can restore the previous profile and endpoint generation.
+
+No scheduled automatic rotation is part of V2 by default.
+
+## 19. Phase A/B definition after review
+
+Phase A is complete only when the following contracts exist in code/docs:
+
+- feature/config schema;
+- detector fact schema and aggregation rules;
+- policy recommendation schema and approval gate;
+- per-layer snapshot/transaction schema;
+- endpoint health interface;
+- WARP secret/redaction schema;
+- versioned QUIC profile schema;
+- Xray activation interface;
+- test matrix definitions.
+
+Phase B remains offline-by-default:
+
+- it may register WARP only when explicitly invoked in a controlled test context;
+- it may generate configs, credentials and QUIC packets locally;
+- it must not alter production routes, firewall state, client transport or live Remnawave profiles;
+- feature flags remain OFF;
+- policy evaluation remains advisory;
+- all runtime mutation commands remain guarded and inactive until later approval.
