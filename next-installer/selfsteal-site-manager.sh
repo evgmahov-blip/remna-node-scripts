@@ -6,6 +6,7 @@ APP_DIR="${APP_DIR:-/opt/remnanode}"
 WWW_DIR="${WWW_DIR:-/var/www/html}"
 STATE_FILE="$APP_DIR/.selfsteal_site"
 RADIO_ADMIN_FILE="$APP_DIR/.selfsteal_radio_admin"
+RADIO_AUTH_FILE="$APP_DIR/.selfsteal_radio_auth"
 STREAM_SALT_FILE="$APP_DIR/.selfsteal_stream_salt"
 STREAM_AUDIO_CACHE="${STREAM_AUDIO_CACHE:-$APP_DIR/stream-audio-cache}"
 STREAM_AUDIO_FIXTURE_DIR="${STREAM_AUDIO_FIXTURE_DIR:-}"
@@ -354,26 +355,90 @@ deploy_stream(){
   log '[OK] STREAM audio: 3 русских LibriVox + Beethoven + Chopin + Bach; runtime внешних origin нет'
 }
 
+radio_auth_token(){
+  local token tmp
+  mkdir -p "$APP_DIR"
+  if [[ -r "$RADIO_AUTH_FILE" ]]; then
+    token="$(tr -d '\r\n' < "$RADIO_AUTH_FILE")"
+    [[ "$token" =~ ^[0-9a-f]{48}$ ]] && { printf '%s' "$token"; return 0; }
+  fi
+  token="$(openssl rand -hex 24)" || return 1
+  tmp="$(mktemp "$APP_DIR/.selfsteal_radio_auth.XXXXXX")" || return 1
+  printf '%s\n' "$token" > "$tmp"
+  chmod 0600 "$tmp"
+  mv -f -- "$tmp" "$RADIO_AUTH_FILE"
+  printf '%s' "$token"
+}
+
 deploy_radio(){
-  local tmpdir admin_name domain
+  local tmpdir admin_name domain uq token
   tmpdir="$(mktemp -d)"
-  fetch_static "$RADIO_BASE/index.html" "$tmpdir/index.html" || { rm -rf -- "$tmpdir"; return 1; }
-  fetch_static "$RADIO_BASE/admin.html" "$tmpdir/admin.html" || { rm -rf -- "$tmpdir"; return 1; }
-  grep -Eqi '<!doctype|<html' "$tmpdir/index.html" || { rm -rf -- "$tmpdir"; fail 'RADIO index.html не похож на HTML'; return 1; }
-  grep -Eqi '<!doctype|<html' "$tmpdir/admin.html" || { rm -rf -- "$tmpdir"; fail 'RADIO admin.html не похож на HTML'; return 1; }
-  if [[ -r "$RADIO_ADMIN_FILE" ]]; then admin_name="$(tr -d '\r\n' < "$RADIO_ADMIN_FILE")"; else admin_name="manage-$(openssl rand -hex 12).html"; fi
+  uq="$tmpdir/uq"
+  mkdir -p "$tmpdir/src" "$uq"
+  fetch_static "$RADIO_BASE/index.html" "$tmpdir/src/index.html" || { rm -rf -- "$tmpdir"; return 1; }
+  fetch_static "$RADIO_BASE/admin.html" "$tmpdir/src/admin.html" || { rm -rf -- "$tmpdir"; return 1; }
+  grep -Eqi '<!doctype|<html' "$tmpdir/src/index.html" || { rm -rf -- "$tmpdir"; fail 'RADIO index.html не похож на HTML'; return 1; }
+  grep -Eqi '<!doctype|<html' "$tmpdir/src/admin.html" || { rm -rf -- "$tmpdir"; fail 'RADIO admin.html не похож на HTML'; return 1; }
+
+  if [[ -r "$RADIO_ADMIN_FILE" ]]; then
+    admin_name="$(tr -d '\r\n' < "$RADIO_ADMIN_FILE")"
+  else
+    admin_name="manage-$(openssl rand -hex 12).html"
+  fi
   [[ "$admin_name" =~ ^manage-[0-9a-f]{24}\.html$ ]] || admin_name="manage-$(openssl rand -hex 12).html"
-  sed '/<div class="toggle-bar">/,/<\/div>/d' "$tmpdir/index.html" > "$tmpdir/index.public.html"
+
+  token="$(radio_auth_token)" || { rm -rf -- "$tmpdir"; fail 'Не удалось создать RADIO auth token'; return 1; }
+
+  sed '/<div class="toggle-bar">/,/<\/div>/d' "$tmpdir/src/index.html" > "$tmpdir/src/index.public.html"
+  mv "$tmpdir/src/index.public.html" "$tmpdir/src/index.html"
+
+  if ! uniquify_dir "$tmpdir/src" "$uq"; then
+    rm -rf -- "$tmpdir"
+    fail 'RADIO uniquify не применился; немутированный RADIO публиковать запрещено'
+    return 1
+  fi
+
+  find "$uq" -mindepth 1 \( -name '.uniquify-manifest.txt' -o -name 'README.md' -o -name 'README.MD' \) -delete
+  [[ -s "$uq/index.html" && -s "$uq/admin.html" ]] || { rm -rf -- "$tmpdir"; fail 'RADIO после uniquify неполный'; return 1; }
+
+  python3 - "$uq/admin.html" "$token" <<'PY'
+import sys
+p, token = sys.argv[1], sys.argv[2]
+s = open(p, encoding="utf-8").read()
+gate = """
+<script>
+(function(){
+  const expected = "__TOKEN__";
+  const got = new URLSearchParams(location.search).get("k") || sessionStorage.getItem("radio_admin_k") || "";
+  if (got !== expected) {
+    document.documentElement.innerHTML = "<head><title>404 Not Found</title></head><body></body>";
+    throw new Error("not found");
+  }
+  sessionStorage.setItem("radio_admin_k", got);
+})();
+</script>
+""".replace("__TOKEN__", token)
+marker = "</head>"
+if marker in s:
+    s = s.replace(marker, gate + marker, 1)
+else:
+    s = gate + s
+open(p, "w", encoding="utf-8").write(s)
+PY
+
+  grep -Fq 'radio_admin_k' "$uq/admin.html" || { rm -rf -- "$tmpdir"; fail 'RADIO admin token gate отсутствует'; return 1; }
+
   prepare_www || { rm -rf -- "$tmpdir"; return 1; }
-  install -m 0644 "$tmpdir/index.public.html" "$WWW_DIR/index.html"
-  install -m 0644 "$tmpdir/admin.html" "$WWW_DIR/$admin_name"
+  install -m 0644 "$uq/index.html" "$WWW_DIR/index.html"
+  install -m 0644 "$uq/admin.html" "$WWW_DIR/$admin_name"
   printf '%s\n' "$admin_name" > "$RADIO_ADMIN_FILE"; chmod 600 "$RADIO_ADMIN_FILE"
   set_state radio
   rm -rf -- "$tmpdir"
   restart_nginx
   domain="$(cat "$APP_DIR/.node_domain" 2>/dev/null || hostname -f 2>/dev/null || hostname)"
-  log "[OK] SelfSteal сайт: RADIO (pinned $RADIO_REF)"
-  log "[INFO] Скрытая админка: https://${domain}/${admin_name}"
+  log "[OK] SelfSteal сайт: RADIO (pinned $RADIO_REF, uniquified)"
+  log '[INFO] RADIO admin protected: secret path + token gate'
+  log "[INFO] Скрытая админка: https://${domain}/${admin_name}?k=${token}"
 }
 
 deploy_template(){
