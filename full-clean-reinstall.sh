@@ -16,8 +16,8 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"
 NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="3a2014701d1775ba07f30b469865fc993cd633d1"
-TESTER_BLOB_SHA="3d445a57ddadf923f03206f7848d37dc65f377ae"
+TESTER_REF="da4976b7668cc9b4269b60bae0d5c1ac3bd2f0f4"
+TESTER_BLOB_SHA="944d237f444606b8fbea7e5ec69a2c10be9b9c38"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 APP_DIR="/opt/remnanode"
@@ -201,7 +201,11 @@ FILES
   grep -Fq 'АНАЛИТИКА ПОСЛЕ ТЕСТОВ' "$tester" || die 'Server Multitest: automatic inline analysis отсутствует.'
   grep -Fq 'Рабочий бюджет:' "$tester" || die 'Server Multitest: XHTTP planning budget отсутствует.'
   grep -Fq 'XHTTP ориентир:' "$tester" || die 'Server Multitest: XHTTP planning estimate отсутствует.'
-  grep -Fq '"DNSBL: clean="' "$tester" || die 'Server Multitest: concise IPQuality output отсутствует.'
+  grep -Fq '"DNSBL: total="' "$tester" || die 'Server Multitest: DNSBL summary отсутствует.'
+  grep -Fq 'IP VERDICT:' "$tester" || die 'Server Multitest: IP reputation verdict отсутствует.'
+  grep -Fq 'Risk factors: proxy=' "$tester" || die 'Server Multitest: risk consensus отсутствует.'
+  grep -Fq '13) Node Health' "$tester" || die 'Server Multitest: Node Health отсутствует.'
+  grep -Fq 'Health summary: critical=' "$tester" || die 'Server Multitest: Node Health summary отсутствует.'
   ! grep -Fq 'INTERPRETATION RULE' "$tester" || die 'Server Multitest: verbose interpretation footer вернулся.'
   ! sed -n '/run_all(){/,/^}/p' "$tester" | grep -Fq 'read -r action' || die 'Server Multitest: all mode снова требует Enter.'
   if grep -Eq '(^|[^[:alnum:]])http://' "$tester"; then
@@ -1093,7 +1097,7 @@ main(){
       restore_backup "$latest"
       ;;
     sync-source) sync_next_sources ;;
-    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|sync-source]' ;;
+    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|backup|backups|restore|sync-source]' ;;
   esac
 }
 
