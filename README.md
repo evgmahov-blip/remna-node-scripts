@@ -58,29 +58,32 @@ sudo remnanode-next
 Меню:
 
 ```text
-REMNANODE NEXT — MAIN
-REPO: https://github.com/evgmahov-blip/remna-node-scripts
-CLI:  sudo remnanode-next
+REMNANODE NEXT — управление нодой
+CLI: sudo remnanode-next
 
- [1]  Установка / продолжить настройку NEXT
- [2]  Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)
- [3]  Config Profile + НАСТРОЙКИ HOST REMNAWAVE
+БЫСТРЫЕ ДЕЙСТВИЯ
+ [1]  УСТАНОВИТЬ / продолжить настройку NEXT
+ [9]  СТАТУС НОДЫ
+ [15] МУЛЬТИТЕСТЫ СЕРВЕРА
+      CPU / диск / сеть / DPI / маршруты / IP quality
+
+ТРАНСПОРТ / REMNAWAVE
+ [2]  Транспорт и профили — XHTTP / RAW / Hysteria2 / combined
+ [3]  Config Profile + настройки HOST в Remnawave
  [4]  SelfSteal / маскировочный сайт
  [5]  XHTTP signature
+
+ЗАЩИТА / СЕТЬ / ДИАГНОСТИКА
  [6]  РКН защита — SAFE scanner guard (DEFAULT)
+ [13] Сеть / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
+ [14] Hysteria2 диагностика — UDP/443 + DNS + RKN counters
+
+ОБСЛУЖИВАНИЕ / ВОССТАНОВЛЕНИЕ
  [7]  Runtime repair / guards
  [8]  Базовое управление Remnanode
- [9]  Статус
  [10] Safe clean текущей NEXT-ноды
  [11] Safe reinstall текущей NEXT-ноды
- [12] NEXT V2 — существующая/legacy нода → очистка хвостов → NEXT
-
- [13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
- [14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters
-      RUN:    sudo remnanode-next hysteria-diag
-
-      NETWORK: sudo remnanode-next network
-      BBR3:   https://github.com/ivan-nginx/bbr3
+ [12] Существующая/legacy нода → очистка хвостов → NEXT V2
 
  [0]  Выход
 ```
