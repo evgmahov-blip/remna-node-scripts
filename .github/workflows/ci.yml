@@ -316,7 +316,7 @@ jobs:
           set -Eeuo pipefail
           grep -Fq 'ПОКАЗАТЬ ГОТОВЫЙ ПРОФИЛЬ / ПРОФИЛИ ДЛЯ КОПИПАСТЫ? [Y/n]:' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next current-profile' full-clean-reinstall.sh
-          grep -Fq 'Config Profile + НАСТРОЙКИ HOST REMNAWAVE' full-clean-reinstall.sh
+          grep -Fq 'Config Profile + настройки HOST в Remnawave' full-clean-reinstall.sh
           grep -Fq '[3] Hysteria2 + TLS' full-clean-reinstall.sh
           grep -Fq '→ JSON Config Profile + HOST HYSTERIA2' full-clean-reinstall.sh
           grep -Fq '[4] XHTTP + Hysteria2' full-clean-reinstall.sh
@@ -327,7 +327,7 @@ jobs:
           grep -Fq '[13] Сеть / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)' full-clean-reinstall.sh
           grep -Fq '[14] Hysteria2 диагностика — UDP/443 + DNS + RKN counters' full-clean-reinstall.sh
           grep -Fq '[15] МУЛЬТИТЕСТЫ СЕРВЕРА' full-clean-reinstall.sh
-          grep -Fq 'sudo remnanode-next multitest 1..13' full-clean-reinstall.sh
+          grep -Fq 'RUN: sudo remnanode-next multitest' full-clean-reinstall.sh
           grep -Fq '[16] Backup / Restore' full-clean-reinstall.sh
           grep -Fq 'backup_menu(){' full-clean-reinstall.sh
           grep -Fq 'verify_backup(){' full-clean-reinstall.sh
