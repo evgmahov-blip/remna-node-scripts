@@ -303,7 +303,7 @@ jobs:
           grep -Fq 'TESTER_REF="7457c2ea2f97ab0df04ece479e96493784351be3"' full-clean-reinstall.sh
           grep -Fq 'TESTER_BLOB_SHA="aade689ba980d65a2bc6c845afd1687b3c666a5f"' full-clean-reinstall.sh
           grep -Fq 'run_existing_node_v2(){' full-clean-reinstall.sh
-          grep -Fq 'NEXT V2 — существующая/legacy нода' full-clean-reinstall.sh
+          grep -Fq 'NEXT V2 — установка на существующую/legacy ноду.' full-clean-reinstall.sh
           grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
           grep -Fq 'exec bash "$TMP" migrate-existing' clean-install.sh
           grep -Fq 'exec bash "$TMP" install' install.sh
