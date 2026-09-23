@@ -7,6 +7,7 @@ WWW_DIR="${WWW_DIR:-/var/www/html}"
 STATE_FILE="$APP_DIR/.selfsteal_site"
 RADIO_ADMIN_FILE="$APP_DIR/.selfsteal_radio_admin"
 RADIO_AUTH_FILE="$APP_DIR/.selfsteal_radio_auth"
+RADIO_NGINX_GATE="$APP_DIR/nginx-extra/selfsteal-radio.conf"
 STREAM_SALT_FILE="$APP_DIR/.selfsteal_stream_salt"
 STREAM_AUDIO_CACHE="${STREAM_AUDIO_CACHE:-$APP_DIR/stream-audio-cache}"
 STREAM_AUDIO_FIXTURE_DIR="${STREAM_AUDIO_FIXTURE_DIR:-}"
@@ -98,7 +99,9 @@ template_allowed(){
 finish_site(){
   local selected="$1"
   set_state "$selected"
-  [[ "$selected" == radio ]] || rm -f "$RADIO_ADMIN_FILE"
+  if [[ "$selected" != radio ]]; then
+    rm -f "$RADIO_ADMIN_FILE" "$RADIO_AUTH_FILE" "$RADIO_NGINX_GATE"
+  fi
   restart_nginx
 }
 
@@ -370,6 +373,36 @@ radio_auth_token(){
   printf '%s' "$token"
 }
 
+install_radio_nginx_gate(){
+  local admin_name="$1" token="$2" tmp
+  mkdir -p "$APP_DIR/nginx-extra"
+  tmp="$(mktemp "$APP_DIR/nginx-extra/.selfsteal-radio.XXXXXX")" || return 1
+  cat > "$tmp" <<EOF
+location = /$admin_name {
+    if (\$arg_k = "$token") {
+        add_header Set-Cookie "radio_admin=$token; Path=/$admin_name; Max-Age=2592000; HttpOnly; Secure; SameSite=Strict" always;
+        return 302 /$admin_name;
+    }
+    if (\$cookie_radio_admin != "$token") { return 404; }
+    try_files \$uri =404;
+}
+EOF
+  chmod 0600 "$tmp"
+  mv -f -- "$tmp" "$RADIO_NGINX_GATE"
+
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnawave-nginx; then
+    docker exec remnawave-nginx nginx -t >/dev/null 2>&1 || {
+      rm -f "$RADIO_NGINX_GATE"
+      fail 'RADIO nginx cookie gate не прошёл nginx -t'
+      return 1
+    }
+    docker exec remnawave-nginx nginx -s reload >/dev/null 2>&1 || {
+      fail 'Не удалось reload nginx после RADIO cookie gate'
+      return 1
+    }
+  fi
+}
+
 deploy_radio(){
   local tmpdir admin_name domain uq token
   tmpdir="$(mktemp -d)"
@@ -386,7 +419,6 @@ deploy_radio(){
     admin_name="manage-$(openssl rand -hex 12).html"
   fi
   [[ "$admin_name" =~ ^manage-[0-9a-f]{24}\.html$ ]] || admin_name="manage-$(openssl rand -hex 12).html"
-
   token="$(radio_auth_token)" || { rm -rf -- "$tmpdir"; fail 'Не удалось создать RADIO auth token'; return 1; }
 
   sed '/<div class="toggle-bar">/,/<\/div>/d' "$tmpdir/src/index.html" > "$tmpdir/src/index.public.html"
@@ -397,50 +429,25 @@ deploy_radio(){
     fail 'RADIO uniquify не применился; немутированный RADIO публиковать запрещено'
     return 1
   fi
-
   find "$uq" -mindepth 1 \( -name '.uniquify-manifest.txt' -o -name 'README.md' -o -name 'README.MD' \) -delete
   [[ -s "$uq/index.html" && -s "$uq/admin.html" ]] || { rm -rf -- "$tmpdir"; fail 'RADIO после uniquify неполный'; return 1; }
-
-  python3 - "$uq/admin.html" "$token" <<'PY'
-import sys
-p, token = sys.argv[1], sys.argv[2]
-s = open(p, encoding="utf-8").read()
-gate = """
-<script>
-(function(){
-  const expected = "__TOKEN__";
-  const got = new URLSearchParams(location.search).get("k") || sessionStorage.getItem("radio_admin_k") || "";
-  if (got !== expected) {
-    document.documentElement.innerHTML = "<head><title>404 Not Found</title></head><body></body>";
-    throw new Error("not found");
-  }
-  sessionStorage.setItem("radio_admin_k", got);
-})();
-</script>
-""".replace("__TOKEN__", token)
-marker = "</head>"
-if marker in s:
-    s = s.replace(marker, gate + marker, 1)
-else:
-    s = gate + s
-open(p, "w", encoding="utf-8").write(s)
-PY
-
-  grep -Fq 'radio_admin_k' "$uq/admin.html" || { rm -rf -- "$tmpdir"; fail 'RADIO admin token gate отсутствует'; return 1; }
 
   prepare_www || { rm -rf -- "$tmpdir"; return 1; }
   install -m 0644 "$uq/index.html" "$WWW_DIR/index.html"
   install -m 0644 "$uq/admin.html" "$WWW_DIR/$admin_name"
   printf '%s\n' "$admin_name" > "$RADIO_ADMIN_FILE"; chmod 600 "$RADIO_ADMIN_FILE"
+
+  install_radio_nginx_gate "$admin_name" "$token" || { rm -rf -- "$tmpdir"; return 1; }
+
   set_state radio
   rm -rf -- "$tmpdir"
   restart_nginx
   domain="$(cat "$APP_DIR/.node_domain" 2>/dev/null || hostname -f 2>/dev/null || hostname)"
   log "[OK] SelfSteal сайт: RADIO (pinned $RADIO_REF, uniquified)"
-  log '[INFO] RADIO admin protected: secret path + token gate'
-  log "[INFO] Скрытая админка: https://${domain}/${admin_name}?k=${token}"
+  log '[OK] RADIO admin: server-side Nginx cookie gate (HttpOnly/Secure/SameSite=Strict)'
+  log "[INFO] Первый вход: https://${domain}/${admin_name}?k=${token}"
+  log "[INFO] После первого входа Nginx ставит cookie и редиректит на чистый URL."
 }
-
 deploy_template(){
   local template="$1" tmpdir zip root out
   template_allowed "$template" || { fail "Неизвестный шаблон: $template"; return 1; }
