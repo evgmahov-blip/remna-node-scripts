@@ -735,6 +735,7 @@ print_node_scorecard(){
   local summary
   local speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" marked="" ip_verdict="" risk_factors="" geo="" health_summary=""
   local fail_count="" safe_mbps="" at3="" at5="" disk_status="" cpu_status="" route_status="" dpi_status="" geoblock_status=""
+  local iperf_avg_down="" iperf_avg_up="" iperf_best_down="" iperf_best_up="" iperf_min_ping=""
   local network_status="" ip_status="" media_status="" health_status="" overall_status="ОТЛИЧНО"
   local dpi_bad=0 dpi_ok=0 geoblock_bad=0 media_block=0 health_critical="" health_warnings=""
   local t5="" t8="" t9="" t10="" t11="" t12="" t13=""
@@ -756,6 +757,20 @@ print_node_scorecard(){
 
   [[ -f "$dir/09-network-bench.log" ]] &&
     speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
+
+  if [[ -f "$dir/04-iperf-ru.log" ]]; then
+    local iperf_mbps iperf_pings
+    iperf_mbps="$(grep -aE '^[A-Za-z].*[0-9.]+ Mbps[[:space:]]+[0-9.]+ Mbps[[:space:]]+[0-9]+ ms' "$dir/04-iperf-ru.log" |
+      grep -oE '[0-9.]+ Mbps' | awk '{print $1}' || true)"
+    if [[ -n "$iperf_mbps" ]]; then
+      iperf_avg_down="$(awk 'NR%2==1{s+=$1;n++} END{if(n) printf "%.1f",s/n}' <<<"$iperf_mbps")"
+      iperf_avg_up="$(awk 'NR%2==0{s+=$1;n++} END{if(n) printf "%.1f",s/n}' <<<"$iperf_mbps")"
+      iperf_best_down="$(awk 'NR%2==1 && $1>m{m=$1} END{if(m) printf "%.1f",m}' <<<"$iperf_mbps")"
+      iperf_best_up="$(awk 'NR%2==0 && $1>m{m=$1} END{if(m) printf "%.1f",m}' <<<"$iperf_mbps")"
+    fi
+    iperf_pings="$(grep -aE '^[A-Za-z].*[0-9]+ ms' "$dir/04-iperf-ru.log" | grep -oE '[0-9]+ ms' | awk '{print $1}' || true)"
+    [[ -n "$iperf_pings" ]] && iperf_min_ping="$(awk 'NR==1||$1<m{m=$1} END{if(NR) print m}' <<<"$iperf_pings")"
+  fi
 
   if [[ -f "$dir/08-sysbench-cpu.log" ]]; then
     cpu_single="$(awk '
@@ -911,12 +926,18 @@ print_node_scorecard(){
   printf '                    DNSBL: blacklisted=%s marked=%s\n' "${blacklisted:-?}" "${marked:-?}"
   printf '                    Risk: %s\n' "${risk_factors:-нет данных}"
   echo '----------------------------------------------------------------------'
-  printf ' СЕТЬ              [%-9s] %s\n' "$network_status" "$([[ -n "$speed" ]] && printf '%s Mbit/s' "$speed" || printf 'скорость не получена')"
+  printf ' СЕТЬ              [%-9s]\n' "$network_status"
+  printf '                    Cloudflare HTTPS 100MB: %s\n' "$([[ -n "$speed" ]] && printf '%s Mbit/s download' "$speed" || printf 'нет данных')"
+  if [[ -n "$iperf_avg_down" || -n "$iperf_avg_up" ]]; then
+    printf '                    iPerf3 RU (5 точек): avg ↓%s / ↑%s Mbit/s; best ↓%s / ↑%s; min ping %sms\n' \
+      "${iperf_avg_down:-?}" "${iperf_avg_up:-?}" "${iperf_best_down:-?}" "${iperf_best_up:-?}" "${iperf_min_ping:-?}"
+  fi
   if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     safe_mbps="$(awk -v s="$speed" 'BEGIN{printf "%.1f", s*0.70}')"
     at3="$(awk -v s="$safe_mbps" 'BEGIN{print int(s/3)}')"
     at5="$(awk -v s="$safe_mbps" 'BEGIN{print int(s/5)}')"
-    printf '                    рабочий бюджет ~%s Mbit/s; XHTTP ~%s @3M / ~%s @5M\n' "$safe_mbps" "$at3" "$at5"
+    printf '                    расчётный бюджет по Cloudflare (70%%): ~%s Mbit/s\n' "$safe_mbps"
+    printf '                    ориентир XHTTP: ~%s активных @3 Mbit/s / ~%s @5 Mbit/s\n' "$at3" "$at5"
   fi
   echo '----------------------------------------------------------------------'
   printf ' CPU               [%-9s] single=%s all=%s events/s\n' "$cpu_status" "${cpu_single:-?}" "${cpu_all:-?}"
