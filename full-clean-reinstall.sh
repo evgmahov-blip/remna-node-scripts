@@ -722,7 +722,113 @@ backup_current(){
   ((${#paths[@]})) || return 0
   tar -C / -czf "$dst" "${paths[@]}"
   chmod 0600 "$dst"
+  sha256sum "$dst" >"$dst.sha256"
+  chmod 0600 "$dst.sha256"
   ok "Backup конфигурации → $dst"
+}
+
+list_backups(){
+  local found=0 file
+  echo '================ BACKUPS ================'
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    found=1
+    printf '%s  %s\n' "$(stat -c '%y' "$file" 2>/dev/null | cut -d. -f1)" "$file"
+  done < <(ls -1t /root/remnanode-next-backup-*.tar.gz 2>/dev/null || true)
+  (( found )) || echo 'Backup files not found.'
+}
+
+verify_backup(){
+  local file="$1" item bad=0 expected=""
+  [[ -f "$file" ]] || { warn "Backup не найден: $file"; return 1; }
+  case "$file" in
+    /root/remnanode-next-backup-*.tar.gz) ;;
+    *) warn 'Разрешены только backup-файлы /root/remnanode-next-backup-*.tar.gz'; return 1 ;;
+  esac
+
+  if [[ -f "$file.sha256" ]]; then
+    expected="$(awk '{print $1}' "$file.sha256" 2>/dev/null || true)"
+    [[ -n "$expected" && "$(sha256sum "$file" | awk '{print $1}')" == "$expected" ]] || {
+      warn 'SHA256 backup не совпадает.'
+      return 1
+    }
+  fi
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] || continue
+    case "$item" in
+      opt/remnanode/*|opt/remnanode) ;;
+      *) warn "Неожиданный путь в backup: $item"; bad=1 ;;
+    esac
+    [[ "$item" != *"../"* && "$item" != "../"* ]] || bad=1
+  done < <(tar -tzf "$file" 2>/dev/null) || return 1
+
+  (( bad == 0 )) || return 1
+  tar -tzf "$file" >/dev/null 2>&1 || return 1
+  ok "Backup verified: $file"
+}
+
+restore_backup(){
+  local file="$1"
+  verify_backup "$file" || return 1
+  warn 'Перед restore будет создан backup текущего состояния.'
+  backup_current || true
+
+  if [[ -f "$APP_DIR/docker-compose.yml" ]] && command -v docker >/dev/null 2>&1; then
+    (cd "$APP_DIR" && docker compose down) || true
+  fi
+
+  tar -C / -xzf "$file"
+  chmod 0700 "$APP_DIR" 2>/dev/null || true
+  [[ -f "$APP_DIR/.env" ]] && chmod 0600 "$APP_DIR/.env" || true
+
+  if [[ -f "$APP_DIR/docker-compose.yml" ]] && command -v docker >/dev/null 2>&1; then
+    (cd "$APP_DIR" && docker compose up -d) || {
+      warn 'docker compose up после restore завершился ошибкой.'
+      return 1
+    }
+  fi
+
+  sync_next_sources
+  "$GUARDS" restore-hysteria >/dev/null 2>&1 || true
+  "$GUARDS" sync-rkn-watch >/dev/null 2>&1 || true
+  ok "Restore complete: $file"
+  show_status
+}
+
+backup_menu(){
+  local c latest answer
+  while true; do
+    cat <<'MENU'
+
+BACKUP / RESTORE
+ [1] Создать backup сейчас
+ [2] Показать backups
+ [3] Проверить последний backup
+ [4] Восстановить последний backup
+ [0] Назад
+MENU
+    printf 'Выбор: '; read -r c < "$TTY" || true
+    case "$c" in
+      1) backup_current; pause ;;
+      2) list_backups; pause ;;
+      3)
+        latest="$(ls -1t /root/remnanode-next-backup-*.tar.gz 2>/dev/null | head -1 || true)"
+        [[ -n "$latest" ]] && verify_backup "$latest" || warn 'Backup не найден.'
+        pause
+        ;;
+      4)
+        latest="$(ls -1t /root/remnanode-next-backup-*.tar.gz 2>/dev/null | head -1 || true)"
+        [[ -n "$latest" ]] || { warn 'Backup не найден.'; pause; continue; }
+        printf 'Restore %s? Введи RESTORE: ' "$latest"
+        read -r answer < "$TTY" || true
+        [[ "$answer" == RESTORE ]] && restore_backup "$latest" || say 'Отменено.'
+        pause
+        ;;
+      0|'') return 0 ;;
+      *) warn 'Неверный пункт.' ;;
+    esac
+  done
 }
 
 safe_clean_impl(){
@@ -923,8 +1029,9 @@ ${C_BOLD}${C_YELLOW}ОБСЛУЖИВАНИЕ / ВОССТАНОВЛЕНИЕ${C_R
  [10] Safe clean текущей NEXT-ноды
  [11] Safe reinstall текущей NEXT-ноды
  [12] Существующая/legacy нода → очистка хвостов → NEXT V2
+ [16] Backup / Restore
 
-${C_DIM}Быстрые команды: multitest | status | network | hysteria-diag${C_RESET}
+${C_DIM}Быстрые команды: multitest | status | network | hysteria-diag | backup${C_RESET}
  [0]  Выход
 ────────────────────────────────────────────────────────────
 MENU
@@ -945,6 +1052,7 @@ MENU
       13) network_menu ;;
       14) hysteria_diag; pause ;;
       15) "$TESTER" menu ;;
+      16) backup_menu ;;
       0|'') return 0 ;;
       *) warn 'Неверный пункт.' ;;
     esac
@@ -976,6 +1084,14 @@ main(){
     bbr3) sync_next_sources; "$NETWORK" bbr3 ;;
     hysteria-diag|hy2-diag) hysteria_diag ;;
     multitest|server-test|tests) sync_next_sources; shift; "$TESTER" "${1:-menu}" ;;
+    backup) backup_current ;;
+    backups) list_backups ;;
+    restore)
+      local latest
+      latest="$(ls -1t /root/remnanode-next-backup-*.tar.gz 2>/dev/null | head -1 || true)"
+      [[ -n "$latest" ]] || die 'Backup не найден.'
+      restore_backup "$latest"
+      ;;
     sync-source) sync_next_sources ;;
     *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|sync-source]' ;;
   esac
