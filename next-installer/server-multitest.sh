@@ -452,10 +452,13 @@ test_node_health(){
         echo 'TLS: OK'
       fi
       if [[ -n "$domain" ]]; then
-        if openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null | grep -Fq "DNS:$domain"; then
+        local san wildcard
+        san="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
+        wildcard="*.${domain#*.}"
+        if grep -Fq "DNS:$domain" <<<"$san" || { [[ "$domain" == *.* ]] && grep -Fq "DNS:$wildcard" <<<"$san"; }; then
           echo 'TLS SAN: OK'
         else
-          echo 'TLS SAN: WARN — node domain not found'
+          echo 'TLS SAN: WARN — node domain not covered'
           warnings=$((warnings+1))
         fi
       fi
