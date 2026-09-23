@@ -748,9 +748,10 @@ print_node_scorecard(){
   worse_overall(){
     case "$1" in
       "ПЛОХО") overall_status="ПЛОХО" ;;
-      "ВНИМАНИЕ") [[ "$overall_status" != "ПЛОХО" ]] && overall_status="ВНИМАНИЕ" ;;
-      "НОРМАЛЬНО") [[ "$overall_status" == "ОТЛИЧНО" ]] && overall_status="НОРМАЛЬНО" ;;
+      "ВНИМАНИЕ") [[ "$overall_status" == "ПЛОХО" ]] || overall_status="ВНИМАНИЕ" ;;
+      "НОРМАЛЬНО") [[ "$overall_status" != "ОТЛИЧНО" ]] || overall_status="НОРМАЛЬНО" ;;
     esac
+    return 0
   }
 
   [[ -f "$dir/09-network-bench.log" ]] &&
