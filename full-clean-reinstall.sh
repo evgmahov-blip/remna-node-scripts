@@ -16,8 +16,8 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"
 NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="7457c2ea2f97ab0df04ece479e96493784351be3"
-TESTER_BLOB_SHA="aade689ba980d65a2bc6c845afd1687b3c666a5f"
+TESTER_REF="7387a80416f5d28ccf77123e25875f4802a971dc"
+TESTER_BLOB_SHA="a43008b3f17cb5d315f54a6de40f410b64b07d38"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 APP_DIR="/opt/remnanode"
@@ -205,6 +205,10 @@ FILES
   grep -Fq 'IP VERDICT:' "$tester" || die 'Server Multitest: IP reputation verdict отсутствует.'
   grep -Fq 'Risk factors: proxy=' "$tester" || die 'Server Multitest: risk consensus отсутствует.'
   grep -Fq '13) Node Health' "$tester" || die 'Server Multitest: Node Health отсутствует.'
+  grep -Fq 'ИТОГ ПО НОДЕ — ОПЕРАТОРСКАЯ ОЦЕНКА' "$tester" || die 'Server Multitest: operator scorecard отсутствует.'
+  grep -Fq 'ОБЩИЙ ИТОГ' "$tester" || die 'Server Multitest: overall operator verdict отсутствует.'
+  grep -Fq 'IP / REPUTATION' "$tester" || die 'Server Multitest: IP section отсутствует.'
+  grep -Fq 'TLS / RUNTIME' "$tester" || die 'Server Multitest: TLS/runtime section отсутствует.'
   grep -Fq 'Health summary: critical=' "$tester" || die 'Server Multitest: Node Health summary отсутствует.'
   ! grep -Fq 'INTERPRETATION RULE' "$tester" || die 'Server Multitest: verbose interpretation footer вернулся.'
   ! sed -n '/run_all(){/,/^}/p' "$tester" | grep -Fq 'read -r action' || die 'Server Multitest: all mode снова требует Enter.'
