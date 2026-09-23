@@ -1,6 +1,10 @@
 # Защита Remna Node
 
-Модуль `protection-manager.sh` управляет отдельными цепочками `REMNA_GUARD` / `REMNA_GUARD6`. Он не выполняет `ufw reset`, не очищает пользовательский `INPUT` и не удаляет посторонние firewall-правила.
+Единая точка входа — `protection-manager.sh`. Она вызывает `security/remna-security.sh` и не является отдельным firewall-продуктом. Модуль по-прежнему владеет только `REMNA_GUARD` / `REMNA_GUARD6`, своими ipset `REMNA_*` и, если backend явно переключён, таблицей nftables `inet remna_security`.
+
+Он не выполняет `ufw reset`, не делает `iptables -F INPUT`, не делает `nft flush ruleset` и не удаляет правила Docker, UFW или пользователя.
+
+Это изменение не активирует защиту на живых нодах. NEXT по-прежнему ставит recovered `rkn-watcher-manager.sh` из pinned source bundle. Включение нового модуля на реальном RemnaNode требует отдельного human approval.
 
 ## TCP/2222 — только сервер панели
 
@@ -98,3 +102,42 @@ sudo ufw status numbered
 -A REMNA_GUARD -s <PANEL_IP> -p tcp --dport 2222 -j ACCEPT
 -A REMNA_GUARD -p tcp --dport 2222 -j DROP
 ```
+
+Блокировки TSPU/GOV/GeoIP/scanner остаются **только TCP** и только на `FILTER_PORTS`. UDP/443 Hysteria2 этими правилами не режется.
+
+## Backend
+
+По умолчанию `BACKEND=iptables`: цепочки и ipset, в том числе когда системный iptables — это iptables-nft. Это один backend, а не смесь.
+
+`BACKEND=nftables` строит только таблицу `inet remna_security`. Preflight и apply отказывают, если активен UFW или видны цепочки Docker: нативный input hook с policy accept оборвал бы чужой filter. Автопереключения нет. Команда явная:
+
+```bash
+sudo protection-manager.sh backend-switch nftables --confirm
+```
+
+На обычной ноде с Docker остаётся iptables+ipset.
+
+## Источники
+
+Закреплённые TSPU/GOV/GeoIP те же commit+blob, что и раньше. Быстрый scanner feed выключен (`ENABLE_SCANNERS=0`), пока не задан `SCANNER_URL=https://...`. Для него нет pin, но есть тот же конвейер: не HTML, не пусто, валидные CIDR, отказ от prefix короче /8 и от `0.0.0.0/0`, отказ от скачка размера относительно last-known-good, вычитание сетей, которые пересекают `PANEL_IP` или allow. Любой сбой оставляет последний успешный набор.
+
+Динамических IPv6-списков нет: pinned и fast источники здесь IPv4. IPv6 закрывает только TCP/2222 через `REMNA_GUARD6` (или nftables `ip6`). Ручные IPv6 allow/deny применяет nftables backend.
+
+## JSON
+
+Для AINOC, без разбора человеческого текста:
+
+```bash
+protection-manager.sh status --json
+protection-manager.sh preflight --json
+protection-manager.sh update --json
+protection-manager.sh selftest --json
+```
+
+Схемы: `remna-security.status.v1`, `remna-security.preflight.v1`, `remna-security.update.v1`, `remna-security.selftest.v1`.
+
+## Откат
+
+Перед изменением настроек или фида пишется снимок `/opt/remna-protection/rollback/<id>/`. `rollback` восстанавливает последний снимок и заново применяет только owned ruleset. Неуспешный apply делает это сам.
+
+`migrate-inplace` добавляет новые ключи в старый `settings.conf` и копирует непустые списки в `data/lkg/`, не переключая backend.
