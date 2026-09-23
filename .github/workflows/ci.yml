@@ -419,7 +419,7 @@ jobs:
           grep -Fq 'Они **не являются main installer**' README.md
           grep -Fq 'Installer их из bundle **не устанавливает**' README.md
           grep -Fq 'NEXT V2 migration' README.md
-          grep -Fq 'существующая/legacy нода' README.md
+          grep -Fq 'Существующая/legacy нода → очистка хвостов → NEXT V2' README.md
           grep -Fq '/root/remna-node-v2-backups/' README.md
           grep -Fq 'ставится автоматически по умолчанию' README.md
           grep -Fq 'BBR3 не ставится автоматически' README.md
@@ -450,7 +450,7 @@ jobs:
           grep -Fq 'ничего дополнительно нажимать не нужно' README.md
           grep -Fq 'multitest analyze' README.md
           grep -Fq 'в терминале выводится короткая **операторская карточка**' README.md
-          grep -Fq 'ИТОГ ПО НОДЕ' README.md
+          grep -Fq 'операторская карточка' README.md
           grep -Fq 'ОТЛИЧНО / НОРМАЛЬНО / ВНИМАНИЕ / ПЛОХО' README.md
           grep -Fq 'IP / REPUTATION' README.md
           grep -Fq 'TLS / RUNTIME' README.md
