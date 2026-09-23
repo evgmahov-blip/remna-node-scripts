@@ -735,7 +735,7 @@ print_node_scorecard(){
   local summary
   local speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" marked="" ip_verdict="" risk_factors="" geo="" health_summary=""
   local fail_count="" safe_mbps="" at3="" at5="" disk_status="" cpu_status="" route_status="" dpi_status="" geoblock_status=""
-  local iperf_avg_down="" iperf_avg_up="" iperf_best_down="" iperf_best_up="" iperf_min_ping=""
+  local iperf_avg_down="" iperf_avg_up="" iperf_best_down="" iperf_best_up="" iperf_min_ping="" network_consensus=""
   local network_status="" ip_status="" media_status="" health_status="" overall_status="ОТЛИЧНО"
   local dpi_bad=0 dpi_ok=0 geoblock_bad=0 media_block=0 health_critical="" health_warnings=""
   local t5="" t8="" t9="" t10="" t11="" t12="" t13=""
@@ -926,7 +926,33 @@ print_node_scorecard(){
   printf '                    DNSBL: blacklisted=%s marked=%s\n' "${blacklisted:-?}" "${marked:-?}"
   printf '                    Risk: %s\n' "${risk_factors:-нет данных}"
   echo '----------------------------------------------------------------------'
-  printf ' СЕТЬ              [%-9s]\n' "$network_status"
+  if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ && "$iperf_avg_down" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    local lo hi pct
+    if awk -v a="$speed" -v b="$iperf_avg_down" 'BEGIN{exit !(a<b)}'; then
+      lo="$speed"; hi="$iperf_avg_down"
+    else
+      lo="$iperf_avg_down"; hi="$speed"
+    fi
+    pct="$(awk -v a="$hi" -v b="$lo" 'BEGIN{if(a>0) printf "%.0f", ((a-b)/a)*100; else print 0}')"
+    if (( pct <= 15 )); then
+      network_consensus="результаты хорошо согласуются: download ~${lo}-${hi} Mbit/s"
+    elif (( pct <= 30 )); then
+      network_consensus="результаты в разумном диапазоне: download ~${lo}-${hi} Mbit/s"
+    else
+      network_consensus="заметный разброс между тестами: download ~${lo}-${hi} Mbit/s"
+    fi
+    if [[ "$iperf_avg_up" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+      network_consensus="${network_consensus}; upload avg ~${iperf_avg_up} Mbit/s"
+    fi
+  elif [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    network_consensus="есть только Cloudflare measurement: ~${speed} Mbit/s download"
+  elif [[ "$iperf_avg_down" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    network_consensus="есть только iPerf3 RU: avg download ~${iperf_avg_down} Mbit/s"
+  else
+    network_consensus="недостаточно данных для сетевого консенсуса"
+  fi
+
+  printf ' СЕТЬ              [%-9s] %s\n' "$network_status" "$network_consensus"
   printf '                    Cloudflare HTTPS 100MB: %s\n' "$([[ -n "$speed" ]] && printf '%s Mbit/s download' "$speed" || printf 'нет данных')"
   if [[ -n "$iperf_avg_down" || -n "$iperf_avg_up" ]]; then
     printf '                    iPerf3 RU (5 точек): avg ↓%s / ↑%s Mbit/s; best ↓%s / ↑%s; min ping %sms\n' \
