@@ -19,8 +19,8 @@ NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-insta
 TESTER_REF="38c1b9d17287ce1fa1c6c6e872e340c1a2bcb666"
 TESTER_BLOB_SHA="e75776711585252df5a1151fd7534f8fa1fd3d59"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
-SELFSTEAL_OVERLAY_REF="c6ca907d78e6f61341f83d5f7317bb0ca82935fd"
-SELFSTEAL_OVERLAY_BLOB_SHA="485a25046791f81729830be1e06b2b32fef643d2"
+SELFSTEAL_OVERLAY_REF="8e780b6537a0efd5985d59fdf7272a4cb016e534"
+SELFSTEAL_OVERLAY_BLOB_SHA="d9b533a108744e813e4f28a26ef3a8170a492f45"
 SELFSTEAL_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${SELFSTEAL_OVERLAY_REF}/next-installer/selfsteal-site-manager.sh"
 
 APP_DIR="/opt/remnanode"
