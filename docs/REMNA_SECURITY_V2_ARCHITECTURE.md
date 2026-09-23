@@ -1041,3 +1041,113 @@ Phase B tests must explicitly verify:
 - no production route, firewall state, client transport or live Remnawave profile is changed by the offline/default test path.
 
 These are acceptance requirements already inside the AINOC implementation task; they are not deferred architecture questions.
+
+
+## 20. Second-review closure
+
+The second independent Claude review found no high/medium architecture blockers and classified the remaining points as low/info. These are closed here so Phase A/B acceptance criteria are explicit.
+
+### 20.1 Detector absolute retention
+
+In addition to per-fact TTL and one-minute aggregation, the detector store has an absolute retention ceiling.
+
+- default maximum retained age: 24 hours;
+- a fact with a shorter declared TTL expires earlier;
+- expired facts are never fed into policy evaluation;
+- high-severity expired facts may be summarized into audit history, but not retained as active detector facts;
+- queue cleanup must be deterministic and bounded.
+
+### 20.2 Probe target diversity
+
+Endpoint health must not depend on one permanent probe destination.
+
+The Phase B health implementation must use a configurable probe set with at least two independent targets from different failure domains when practical. Probe rotation is deterministic/round-robin with jitter; a target failure is distinguished from WARP path failure when other targets succeed.
+
+A WARP endpoint is not promoted solely because one external service happened to answer once. Promotion requires the endpoint-level success criteria from section 18.3 across the configured probe set.
+
+### 20.3 fsync portability
+
+Atomic snapshot durability follows the section 18.7 sequence where supported.
+
+- file fsync is required before rename;
+- parent-directory fsync is attempted on supported local filesystems;
+- unsupported directory-fsync behavior must not corrupt or abort an otherwise valid transaction;
+- the implementation records the durability capability in preflight/status;
+- tests cover both supported and gracefully-degraded filesystem behavior.
+
+### 20.4 Phase A required artifacts are mandatory
+
+Phase A implementation is not complete until it provides formal machine-readable contracts for:
+
+- detector facts;
+- policy recommendations;
+- per-layer snapshots and common transaction ids;
+- feature flags and compatibility validation;
+- WARP status/redaction;
+- endpoint health records;
+- versioned QUIC-noise profile definitions;
+- Xray/rw-core activation plan/result.
+
+Each schema must have positive and negative fixtures/tests.
+
+### 20.5 Phase B hard guards
+
+Before any mutating Phase B code path:
+
+- effective `FEATURE_AUTO_POLICY` must be `0`;
+- effective `FEATURE_EGRESS_WARP` and `FEATURE_WARP_QUIC_NOISE` remain `0` unless an explicitly scoped lab/test command enables generation/registration behavior without changing production routes;
+- no Phase B command may alter the live inbound firewall, live client transport, or live production egress route;
+- a guard failure is fail-closed and machine-readable.
+
+### 20.6 Runtime reload compatibility
+
+The Xray/rw-core activation interface must detect the installed runtime/version and select a verified reload/restart method.
+
+Unknown runtime/version means activation is refused. There is no optimistic SIGHUP fallback.
+
+### 20.7 Snapshot cleanup versus rollback
+
+Snapshot retention cleanup runs only after a transaction is fully committed and no rollback operation is active.
+
+Cleanup must hold the same layer/transaction lock used by mutation/rollback so it cannot delete a generation referenced by an in-progress rollback.
+
+### 20.8 Enforced three-plane transaction ownership
+
+Implementation code must carry an explicit layer id on every mutation and snapshot.
+
+A transaction dispatcher must reject a step if it attempts to write an object owned by another layer. Cross-layer policy plans may contain multiple steps, but each step remains independently owned and independently reversible.
+
+### 20.9 QUIC profile load-time validation
+
+A QUIC-noise profile is immutable by version id and content hash.
+
+- mixed-version structural fragments are rejected;
+- unknown profile versions are rejected;
+- duplicate version ids with different content hashes are rejected;
+- active status exposes version id plus non-secret content hash;
+- profile migration follows section 18.12.
+
+### 20.10 Account identifier redaction
+
+External/machine status does not expose raw WARP account identifiers by default.
+
+It exposes a local generation id and, when correlation is needed, a truncated cryptographic hash of the provider account id. Logs follow the same rule. Raw account id, bearer token and private key remain confined to root-only secret state.
+
+### 20.11 Phase D evidence gate
+
+The Phase D matrix from section 18.11 must be stored as evidence with:
+
+- network class/operator label;
+- date/time;
+- code/config/profile versions;
+- pass/fail per critical path;
+- failure classification;
+- reviewer/human sign-off.
+
+No production proposal may be generated while a required matrix row is missing or contains an unexplained critical failure.
+
+### 20.12 Pre-Phase-C contract checkpoint
+
+Before Phase C can start, AINOC must run a dedicated contract audit proving that all sections 18 and 20 are represented in implementation and tests.
+
+Phase C remains blocked if any mandatory contract is missing, untested, or only documented but not enforced.
