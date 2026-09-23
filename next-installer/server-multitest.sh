@@ -384,6 +384,108 @@ test_ipquality(){
   rm -f "$script" "$json"
   return 0
 }
+test_node_health(){
+  need_cmd curl curl ca-certificates
+  local app="/opt/remnanode" domain="" transport="" critical=0 warnings=0
+  local cert="" end="" days="" disk="" mem_avail="" load="" ip4="" ip6=""
+
+  domain="$(cat "$app/.node_domain" 2>/dev/null || true)"
+  transport="$(cat "$app/.transport" 2>/dev/null || true)"
+
+  echo '================ NODE HEALTH ================'
+  printf 'Host: %s\n' "$(hostname -f 2>/dev/null || hostname)"
+  printf 'Transport: %s\n' "$transport"
+
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -qx remnanode; then
+    echo 'Core container: OK'
+  else
+    echo 'Core container: FAIL'
+    critical=$((critical+1))
+  fi
+
+  if ss -lnt 2>/dev/null | grep -Eq '(:|\])443[[:space:]]'; then
+    echo 'TCP/443: LISTEN'
+  else
+    echo 'TCP/443: FAIL — listener отсутствует'
+    critical=$((critical+1))
+  fi
+
+  if [[ "$transport" == *hysteria* || "$transport" == "combined" ]]; then
+    if ss -lnu 2>/dev/null | grep -Eq '(:|\])443[[:space:]]'; then
+      echo 'UDP/443: LISTEN'
+    else
+      echo 'UDP/443: FAIL — Hysteria2 выбран, listener отсутствует'
+      critical=$((critical+1))
+    fi
+  else
+    echo 'UDP/443: N/A'
+  fi
+
+  if [[ -n "$domain" ]]; then
+    printf 'Domain: %s\n' "$domain"
+    if getent ahostsv4 "$domain" >/dev/null 2>&1; then
+      echo 'DNS A: OK'
+    else
+      echo 'DNS A: WARN — resolve failed'
+      warnings=$((warnings+1))
+    fi
+  else
+    echo 'Domain: WARN — not configured'
+    warnings=$((warnings+1))
+  fi
+
+  for cert in "$app/certs/fullchain.pem" "/etc/xray/certs/fullchain.pem"; do
+    [[ -s "$cert" ]] && break
+  done
+  if [[ -s "$cert" ]] && command -v openssl >/dev/null 2>&1; then
+    end="$(openssl x509 -in "$cert" -noout -enddate 2>/dev/null | cut -d= -f2- || true)"
+    if [[ -n "$end" ]]; then
+      days=$(( ($(date -d "$end" +%s 2>/dev/null || echo 0) - $(date +%s)) / 86400 ))
+      printf 'TLS expiry: %s (%s days)\n' "$end" "$days"
+      if (( days < 0 )); then
+        echo 'TLS: FAIL — expired'
+        critical=$((critical+1))
+      elif (( days < 14 )); then
+        echo 'TLS: WARN — less than 14 days'
+        warnings=$((warnings+1))
+      else
+        echo 'TLS: OK'
+      fi
+      if [[ -n "$domain" ]]; then
+        if openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null | grep -Fq "DNS:$domain"; then
+          echo 'TLS SAN: OK'
+        else
+          echo 'TLS SAN: WARN — node domain not found'
+          warnings=$((warnings+1))
+        fi
+      fi
+    fi
+  else
+    echo 'TLS: WARN — local certificate file not found'
+    warnings=$((warnings+1))
+  fi
+
+  disk="$(df -P / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')"
+  mem_avail="$(awk '/MemAvailable:/{printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || true)"
+  load="$(awk '{print $1}' /proc/loadavg 2>/dev/null || true)"
+  printf 'Root disk used: %s%%\n' "$disk"
+  printf 'Mem available: %s MB\n' "$mem_avail"
+  printf 'Load1: %s\n' "$load"
+  if [[ "$disk" =~ ^[0-9]+$ ]] && (( disk >= 90 )); then
+    echo 'Disk: WARN — >=90% used'
+    warnings=$((warnings+1))
+  fi
+
+  ip4="$(curl -4fsSL --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || true)"
+  ip6="$(curl -6fsSL --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 10 https://api64.ipify.org 2>/dev/null || true)"
+  printf 'Public IPv4: %s\n' "$ip4"
+  printf 'Public IPv6: %s\n' "$ip6"
+
+  printf 'Health summary: critical=%s warnings=%s\n' "$critical" "$warnings"
+  (( critical == 0 ))
+}
+
+
 test_sysbench_cpu(){
   need_cmd sysbench sysbench
   need_cmd nproc coreutils
@@ -510,6 +612,7 @@ run_one(){
     10) test_nexttrace_mtr ;;
     11) test_nexttrace_mtu ;;
     12) test_nexttrace_globalping ;;
+    13) test_node_health ;;
     *) fail "Неизвестный тест: ${1:-пусто}"; return 2 ;;
   esac
 }
@@ -542,6 +645,7 @@ print_list(){
 10) NextTrace Route/MTR — loss/jitter/ASN/geo
 11) NextTrace Path MTU — UDP PMTU
 12) NextTrace Globalping — внешние TCP/443 точки → эта нода
+13) Node Health — core / 443 / DNS / TLS / disk / memory / IPv4/IPv6
 98) Анализ последнего прогона
 99) Мультитест: все тесты автоматически
 EOF
@@ -584,6 +688,12 @@ report_key_metrics(){
     echo
     echo '[IP quality / unlock]'
     grep -aE '^(ASN|Geo|Geo consensus|Usage consensus|Risk scores|Risk factors|Media|Mail|DNSBL|IP VERDICT|IP evidence):' "$dir/07-ipquality.log" | tail -30 || true
+  fi
+
+  if [[ -f "$dir/13-node-health.log" ]]; then
+    echo
+    echo '[Node health]'
+    grep -aE '^(Core container|TCP/443|UDP/443|DNS A|TLS|Root disk|Mem available|Load1|Public IPv|Health summary):' "$dir/13-node-health.log" | tail -30 || true
   fi
 
   if [[ -f "$dir/08-sysbench-cpu.log" ]]; then
@@ -649,6 +759,8 @@ print_node_scorecard(){
     geo="$(sed -n 's/^Geo: //p' "$dir/07-ipquality.log" | head -1)"
   fi
 
+  [[ -f "$dir/13-node-health.log" ]] && health_summary="$(sed -n 's/^Health summary: //p' "$dir/13-node-health.log" | head -1)"
+
   [[ -f "$summary" ]] &&     fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
 
   echo '======================================================================'
@@ -663,6 +775,7 @@ print_node_scorecard(){
   printf 'DNSBL:            blacklisted=%s marked=%s\n' "${blacklisted:-?}" "${marked:-?}"
   printf 'IP verdict:       %s\n' "${ip_verdict:-нет данных}"
   printf 'Risk factors:     %s\n' "${risk_factors:-нет данных}"
+  printf 'Node health:      %s\n' "${health_summary:-нет данных}"
 
   if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     safe_mbps="$(awk -v s="$speed" 'BEGIN{printf "%.1f", s*0.70}')"
@@ -768,7 +881,7 @@ print_colored_analysis(){
       *" SKIP "*|SKIP=*|*"SKIP="*)
         printf '%s%s%s\n' "$C_YELLOW" "$line" "$C_RESET"
         ;;
-      "Сеть:"*|"CPU single:"*|"CPU all-thread:"*|"MTU:"*|"Geo/IP location:"*|"DNSBL:"*|"IP verdict:"*|"Risk factors:"*|"Рабочий бюджет:"*|"XHTTP ориентир:"*|"IP reputation:"*)
+      "Сеть:"*|"CPU single:"*|"CPU all-thread:"*|"MTU:"*|"Geo/IP location:"*|"DNSBL:"*|"IP verdict:"*|"Risk factors:"*|"Node health:"*|"Рабочий бюджет:"*|"XHTTP ориентир:"*|"IP reputation:"*)
         printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
         ;;
       "  Нет.")
@@ -826,6 +939,7 @@ run_all(){
     "NextTrace Route/MTR"
     "NextTrace Path MTU"
     "NextTrace Globalping"
+    "Node Health"
   )
   local slugs=(
     "ip-region"
@@ -840,6 +954,7 @@ run_all(){
     "nexttrace-mtr"
     "nexttrace-mtu"
     "nexttrace-globalping"
+    "node-health"
   )
   local total="${#names[@]}" i num rc status started ended duration
   local passed=0 failed=0 skipped=0
@@ -924,7 +1039,7 @@ menu(){
     printf 'Выбор: '
     read -r choice < "$TTY" || choice=0
     case "$choice" in
-      1|2|3|4|5|6|7|8|9|10|11|12)
+      1|2|3|4|5|6|7|8|9|10|11|12|13)
         rc=0
         run_interruptible "$choice" || rc=$?
         (( rc == 0 || rc == 130 )) || warn "Тест завершился с rc=$rc"
@@ -955,7 +1070,7 @@ Usage:
   server-multitest.sh all
   server-multitest.sh analyze
   server-multitest.sh report
-  server-multitest.sh 1..12
+  server-multitest.sh 1..13
 EOF
 }
 
@@ -967,7 +1082,7 @@ main(){
     all|99) need_root; run_all ;;
     analyze) need_root; show_latest_analysis ;;
     report) need_root; show_latest_report ;;
-    1|2|3|4|5|6|7|8|9|10|11|12) need_root; run_interruptible "$1" ;;
+    1|2|3|4|5|6|7|8|9|10|11|12|13) need_root; run_interruptible "$1" ;;
     *) usage; exit 2 ;;
   esac
 }
