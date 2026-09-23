@@ -515,12 +515,17 @@ show_status(){
       if (( cert_days < 0 )); then echo '[FAIL] TLS expired'; fail_count=$((fail_count+1))
       elif (( cert_days < 14 )); then echo '[WARN] TLS expires soon'; warn_count=$((warn_count+1))
       else echo '[OK]   TLS expiry'; ok_count=$((ok_count+1)); fi
-      if [[ -n "$domain" ]] && openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null | grep -Fq "DNS:$domain"; then
-        echo '[OK]   TLS SAN covers node domain'
-        ok_count=$((ok_count+1))
-      elif [[ -n "$domain" ]]; then
-        echo '[WARN] TLS SAN does not show node domain'
-        warn_count=$((warn_count+1))
+      if [[ -n "$domain" ]]; then
+        local san wildcard
+        san="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
+        wildcard="*.${domain#*.}"
+        if grep -Fq "DNS:$domain" <<<"$san" || { [[ "$domain" == *.* ]] && grep -Fq "DNS:$wildcard" <<<"$san"; }; then
+          echo '[OK]   TLS SAN covers node domain'
+          ok_count=$((ok_count+1))
+        else
+          echo '[WARN] TLS SAN does not cover node domain'
+          warn_count=$((warn_count+1))
+        fi
       fi
     fi
   else
