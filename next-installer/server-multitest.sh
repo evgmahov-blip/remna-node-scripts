@@ -997,7 +997,7 @@ print_colored_analysis(){
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
-      " REMNANODE NEXT — MULTITEST ANALYSIS"|" ИТОГ ПО НОДЕ"|"=== TEST STATUS ==="|"=== ПРОБЛЕМЫ ===")
+      " REMNANODE NEXT — MULTITEST ANALYSIS"|" ИТОГ ПО НОДЕ — ОПЕРАТОРСКАЯ ОЦЕНКА"|"=== TEST STATUS ==="|"=== ПРОБЛЕМЫ ===")
         printf '%s%s%s\n' "$C_CYAN" "$line" "$C_RESET"
         ;;
       "======================================================================"|"================================================================="|"==================== АНАЛИТИКА ПОСЛЕ ТЕСТОВ ====================")
@@ -1018,6 +1018,18 @@ print_colored_analysis(){
         ;;
       *" SKIP "*|SKIP=*|*"SKIP="*)
         printf '%s%s%s\n' "$C_YELLOW" "$line" "$C_RESET"
+        ;;
+      *"[ОТЛИЧНО]"*)
+        printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
+        ;;
+      *"[НОРМАЛЬНО]"*)
+        printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
+        ;;
+      *"[ВНИМАНИЕ]"*)
+        printf '%s%s%s\n' "$C_YELLOW" "$line" "$C_RESET"
+        ;;
+      *"[ПЛОХО]"*)
+        printf '%s%s%s\n' "$C_RED" "$line" "$C_RESET"
         ;;
       "Сеть:"*|"CPU single:"*|"CPU all-thread:"*|"MTU:"*|"Geo/IP location:"*|"DNSBL:"*|"IP verdict:"*|"Risk factors:"*|"Node health:"*|"Рабочий бюджет:"*|"XHTTP ориентир:"*|"IP reputation:"*)
         printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
