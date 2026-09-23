@@ -941,3 +941,103 @@ Phase B remains offline-by-default:
 - feature flags remain OFF;
 - policy evaluation remains advisory;
 - all runtime mutation commands remain guarded and inactive until later approval.
+
+
+## 20. Final review clarifications
+
+These points make the remaining Phase A/B contracts explicit so that they are not left as implicit follow-up decisions.
+
+### 20.1 Endpoint probe redundancy and state thresholds
+
+A WARP endpoint health probe set must contain at least two independently configurable public targets that do not share one operational dependency. At least one probe must prove actual routed egress through the candidate WARP path; DNS resolution of the endpoint itself never counts as health.
+
+Default state machine for Phase B tests:
+
+- `unknown -> healthy`: two consecutive successful end-to-end probes;
+- `healthy -> degraded`: two consecutive failed probes;
+- `degraded -> down`: one additional failed probe after the degraded state;
+- any successful recovery probe resets the consecutive-failure counter;
+- after a state transition, a configurable cooldown prevents immediate oscillation;
+- an endpoint in `unknown` or `down` is never selected automatically.
+
+The exact timeout values and probe targets remain configurable, but tests must cover the above transition semantics and silent UDP/WireGuard blackhole behavior.
+
+### 20.2 Detector TTL semantics
+
+A detector fact is active evidence only while:
+
+```text
+now < observed_at + ttl_seconds
+```
+
+Expiration is evaluated before every policy evaluation. Expired facts:
+
+- cannot trigger or sustain a recommendation;
+- remain visible only in bounded recent-history telemetry;
+- do not contribute to confidence or occurrence thresholds.
+
+If multiple facts share a deduplication key, the newest observation extends the active window and increments the occurrence count; it does not create an unbounded queue.
+
+### 20.3 Snapshot retention bounds
+
+Committed state keeps:
+
+- current generation;
+- five previous committed generations per layer.
+
+Failed or uncommitted transaction artifacts are retained for diagnostics for at most 72 hours and at most 20 generations per layer, whichever bound is reached first. Cleanup runs only after a committed transaction or explicit maintenance action and never deletes the current/last-known-good committed generations.
+
+If cleanup itself fails, runtime state remains unchanged and a bounded telemetry event is recorded.
+
+### 20.4 Xray/rw-core reload detection contract
+
+Phase B/C must implement runtime capability detection before activation code is allowed to choose a reload method.
+
+The detection result records:
+
+- installed Remnawave/rw-core version where discoverable;
+- execution model (host binary/container);
+- supported config-test command;
+- verified reload capability, if any;
+- fallback restart mechanism.
+
+Rules:
+
+- never send SIGHUP or another signal merely because a generic Xray build might support it;
+- if a safe reload mechanism cannot be verified, use the documented controlled restart path for that runtime;
+- restart/reload failure immediately invokes the atomic rollback sequence from section 18.9;
+- the old config must be re-tested and post-rollback listeners/end-to-end health verified.
+
+### 20.5 Phase A deliverable checklist
+
+Phase A is not considered complete unless it contains all of the following as explicit schemas/contracts:
+
+- feature flags with hard defaults `FEATURE_EGRESS_WARP=0`, `FEATURE_WARP_QUIC_NOISE=0`, `FEATURE_AUTO_POLICY=0`;
+- incompatible-feature validation;
+- detector fact schema with TTL/staleness rules;
+- policy recommendation schema including an explicit `approval_required` field;
+- endpoint health state machine and probe interface;
+- WARP credential generation/lifecycle schema including orphan-risk events;
+- secret/redaction schema;
+- per-layer transaction/snapshot schema and bounded retention policy;
+- versioned QUIC-noise profile schema;
+- Xray/rw-core activation capability interface;
+- Phase D hard-gate field-test checklist.
+
+### 20.6 Phase B implementation checklist
+
+Phase B tests must explicitly verify:
+
+- feature gates are checked before every mutating WARP/policy operation;
+- `FEATURE_AUTO_POLICY=0` makes evaluation advisory-only;
+- non-idempotent WARP registration is not retried after ambiguous failure;
+- orphan-risk is recorded when remote account cleanup cannot be verified;
+- endpoint health transitions and cooldown work as specified;
+- expired detector facts never drive recommendations;
+- at least 100 QUIC packets per fixture pass decrypt/parse/invariant tests and differ at byte level;
+- per-layer rollback cannot mutate another plane;
+- snapshot cleanup obeys both age and count bounds;
+- runtime reload/restart capability detection fails closed;
+- no production route, firewall state, client transport or live Remnawave profile is changed by the offline/default test path.
+
+These are acceptance requirements already inside the AINOC implementation task; they are not deferred architecture questions.
