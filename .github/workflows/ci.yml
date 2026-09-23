@@ -37,6 +37,10 @@ jobs:
           mapfile -d '' files < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
           shellcheck -S error "${files[@]}"
 
+      - name: RemnaNode Security offline tests
+        shell: bash
+        run: bash tests/security/run.sh
+
       - name: Verify recovered NEXT source
         shell: bash
         run: |

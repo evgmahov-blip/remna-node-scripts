@@ -480,6 +480,8 @@ protection-manager.sh
 
 Они **не являются main installer**.
 
+`protection-manager.sh` в этом дереве — вход в единый модуль RemnaNode Security (`security/`). Он сохраняет прежние команды (`install`, `update`, `status`, `selftest`, `panel-set`, `rkn`) и добавляет `preflight`, `rollback`, `backend-switch` и `--json`. NEXT installer его сам не включает: RKN SAFE по-прежнему идёт из recovered `rkn-watcher-manager.sh`. Офлайн-тесты: `bash tests/security/run.sh`.
+
 ## История восстановления
 
 Последний корректный main до архитектурной ошибки: `cf8c8f5910b1bbd56364b99a457f2b999c743119`.
