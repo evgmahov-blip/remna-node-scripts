@@ -120,8 +120,8 @@ jobs:
           set -Eeuo pipefail
 
           t=next-installer/server-multitest.sh
-          test "$(git rev-parse HEAD:$t)" = "944d237f444606b8fbea7e5ec69a2c10be9b9c38"
-          test "$(git rev-parse da4976b7668cc9b4269b60bae0d5c1ac3bd2f0f4:$t)" = "944d237f444606b8fbea7e5ec69a2c10be9b9c38"
+          test "$(git rev-parse HEAD:$t)" = "65bdbed50122efb8bc39965be0de66247ea97b0b"
+          test "$(git rev-parse 7831a6f863614d88284627202df005ccec0c9682:$t)" = "65bdbed50122efb8bc39965be0de66247ea97b0b"
 
           grep -Fq 'Censorcheck — DPI' "$t"
           grep -Fq 'YABS — disk fio only' "$t"
@@ -208,8 +208,8 @@ jobs:
           ! bash "$t" list | grep -Fq 'Ping yandex'
           ! grep -Eq '(^|[^[:alnum:]])http://' "$t"
 
-          grep -Fq 'TESTER_REF="da4976b7668cc9b4269b60bae0d5c1ac3bd2f0f4"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="944d237f444606b8fbea7e5ec69a2c10be9b9c38"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="7831a6f863614d88284627202df005ccec0c9682"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="65bdbed50122efb8bc39965be0de66247ea97b0b"' full-clean-reinstall.sh
           grep -Fq 'server-multitest.sh' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next multitest' full-clean-reinstall.sh
           grep -Fq 'multitest|server-test|tests)' full-clean-reinstall.sh
@@ -300,8 +300,8 @@ jobs:
           grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_REF="da4976b7668cc9b4269b60bae0d5c1ac3bd2f0f4"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="944d237f444606b8fbea7e5ec69a2c10be9b9c38"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="7831a6f863614d88284627202df005ccec0c9682"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="65bdbed50122efb8bc39965be0de66247ea97b0b"' full-clean-reinstall.sh
           grep -Fq 'run_existing_node_v2(){' full-clean-reinstall.sh
           grep -Fq 'NEXT V2 — существующая/legacy нода' full-clean-reinstall.sh
           grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
@@ -384,7 +384,7 @@ jobs:
           test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
           test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "62ff1364c26d88f357968422d5591b3d2b8d9e78"
           test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
-          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "944d237f444606b8fbea7e5ec69a2c10be9b9c38"
+          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "65bdbed50122efb8bc39965be0de66247ea97b0b"
 
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
