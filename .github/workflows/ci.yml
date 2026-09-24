@@ -134,8 +134,8 @@ jobs:
           t=next-installer/server-multitest.sh
           tester_ref="$(sed -n 's/^TESTER_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           tester_blob="$(sed -n 's/^TESTER_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
-          test "$tester_ref" = "7ad87ee310ae809fbd8e5b90c7468890333f1414"
-          test "$tester_blob" = "b304410029c163b45fee34aa1b61ac0c4bf58ae1"
+          test "$tester_ref" = "68dfdd2fc69cf5d2d0e97b4613b1f375a36e0a73"
+          test "$tester_blob" = "47e1e8e8ec1498d84d6e2f2627facbea9711bae5"
           test "$(git rev-parse HEAD:$t)" = "$tester_blob"
           test "$(git rev-parse "$tester_ref:$t")" = "$tester_blob"
 
@@ -187,6 +187,7 @@ jobs:
           grep -Fq 'https://api.x.ai/v1/models' "$t"
           grep -Fq 'https://api.perplexity.ai/chat/completions' "$t"
           grep -Fq 'AI_SUMMARY: reachable=' "$t"
+          grep -Fq '13) test_ai_access ;;' "$t"
           grep -Fq 'Автоматический режим: все тесты идут подряд без подтверждений.' "$t"
           grep -Fq 'REPORT_ROOT=' "$t"
           grep -Fq 'summary.tsv' "$t"
@@ -394,8 +395,8 @@ jobs:
           grep -Fq 'HYSTERIA_OVERLAY_BLOB_SHA="62ff1364c26d88f357968422d5591b3d2b8d9e78"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_BLOB_SHA="3c9e7f15862048f8c4bd1fc96be58483872f6d4a"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_REF="7ad87ee310ae809fbd8e5b90c7468890333f1414"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="b304410029c163b45fee34aa1b61ac0c4bf58ae1"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="68dfdd2fc69cf5d2d0e97b4613b1f375a36e0a73"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="47e1e8e8ec1498d84d6e2f2627facbea9711bae5"' full-clean-reinstall.sh
           grep -Fq 'MGMT_OVERLAY_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"' full-clean-reinstall.sh
           grep -Fq 'PROTECTION_BLOB_SHA="d38486200c4399ec3150e0c3185d7f5620a3606a"' full-clean-reinstall.sh
           grep -Fq 'SECURITY_SH_BLOB_SHA="74307541e6f3339fe7ac34278903a202157cf98f"' full-clean-reinstall.sh
@@ -428,8 +429,8 @@ jobs:
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
             expected="$(sed -n 's/^EXPECTED_BLOB_SHA="\([^"]*\)"/\1/p' "$launcher")"
-            test "$ref" = "0a3be05331271a9e6e7d0b145859ce7453143b1c"
-            test "$expected" = "7bca20cc4a1d72492bc91d74fd422a99036da0eb"
+            test "$ref" = "a2f5c904cf9033cb2480521b439fce2670c50c3a"
+            test "$expected" = "ebd74e5702f6ea2065f6503276e9ef468c7918c6"
             test "$(git rev-parse "$ref:full-clean-reinstall.sh")" = "$expected"
             ! grep -Fq 'install-caddy-node-reality-stream.sh' "$launcher"
           done
