@@ -216,7 +216,6 @@ mode = "http"
 
 [host]
 service_manager = "none"
-log_source = "none"
 
 [privileges]
 mode = "manual"
