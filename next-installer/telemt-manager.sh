@@ -7,6 +7,9 @@ TELEMT_PORT="${TELEMT_PORT:-8443}"
 TLS_DOMAIN="${TLS_DOMAIN:-}"
 PANEL_USERNAME="${PANEL_USERNAME:-admin}"
 PANEL_PASSWORD_HASH="${PANEL_PASSWORD_HASH:-}"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+PROTECTION_MANAGER="${PROTECTION_MANAGER:-$ROOT_DIR/protection-manager.sh}"
+PROTECTION_CONF="${PROTECTION_CONF:-/opt/remna-protection/settings.conf}"
 
 TELEMT_BIN="/usr/local/bin/telemt"
 PANEL_BIN="/usr/local/bin/telemt-panel"
@@ -64,6 +67,21 @@ preflight(){
     fi
   done
   info "preflight OK: TCP/$TELEMT_PORT free; 80/443 untouched; panel/API loopback ports free"
+}
+
+ensure_protection_port(){
+  [ -x "$PROTECTION_MANAGER" ] || die "missing executable protection manager: $PROTECTION_MANAGER"
+  [ -f "$PROTECTION_CONF" ] || die "RemnaNode protection is not initialized: $PROTECTION_CONF"
+  local ports next
+  ports="$(awk -F= '$1=="FILTER_PORTS"{print $2; exit}' "$PROTECTION_CONF")"
+  [ -n "$ports" ] || ports="443"
+  case ",$ports," in
+    *,"$TELEMT_PORT",*) next="$ports" ;;
+    *) next="$ports,$TELEMT_PORT" ;;
+  esac
+  "$PROTECTION_MANAGER" preflight >/dev/null
+  "$PROTECTION_MANAGER" config-set FILTER_PORTS "$next" >/dev/null
+  info "RemnaNode protection covers TCP/$TELEMT_PORT (FILTER_PORTS=$next)"
 }
 
 download_checked(){
@@ -270,11 +288,12 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
+  ensure_protection_port
   systemctl enable --now telemt.service telemt-panel.service
 
   info "installed Telemt ${TELEMT_VERSION} on TCP/$TELEMT_PORT"
   info "installed Telemt Panel ${PANEL_VERSION} on 127.0.0.1:8080"
-  info "firewall was NOT modified; 80/443 and RemnaNode services were NOT touched"
+  info "firewall ownership stays with RemnaNode protection; TCP/$TELEMT_PORT was added through protection-manager"
   info "admin access: ssh -L 8080:127.0.0.1:8080 <node> then open http://127.0.0.1:8080"
   info "MTProto secret stored only in $TELEMT_ETC/telemt.toml (0600)"
 }
@@ -318,7 +337,7 @@ Safe coexistence defaults:
   TELEMT_PORT=8443
   Panel       127.0.0.1:8080
   Telemt API  127.0.0.1:9091
-  Firewall    never modified by this module
+  Firewall    managed only through RemnaNode protection-manager
   80/443      never claimed by this module
 
 Install requires:
