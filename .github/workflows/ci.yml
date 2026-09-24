@@ -343,7 +343,7 @@ jobs:
           grep -Fq 'runtime семантически совпадает с локальным hysteria2-tls.json' full-clean-reinstall.sh
           ! sed -n '/hysteria_diag(){/,/^}/p' full-clean-reinstall.sh | grep -Fq 'sync_next_sources'
           grep -Fq 'https://github.com/ivan-nginx/bbr3' full-clean-reinstall.sh
-          grep -Fq 'sudo remnanode-next network' full-clean-reinstall.sh
+          grep -Fq 'network) sync_next_sources; "$NETWORK" menu ;;' full-clean-reinstall.sh
           grep -Fq 'ensure_default_rkn(){' full-clean-reinstall.sh
           grep -Fq 'RKN_ASSUME_KEEP=1 "$RKN" install-safe' full-clean-reinstall.sh
           grep -Fq 'ensure_default_network(){' full-clean-reinstall.sh
