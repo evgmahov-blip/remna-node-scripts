@@ -17,6 +17,7 @@ CAMOUFLAGE_MODE="${CAMOUFLAGE_MODE:-selfsteal}"
 INSTALL_TELEMT="${INSTALL_TELEMT:-1}"
 TELEMT_PORT="${TELEMT_PORT:-8443}"
 BACKUP_ROOT="${BACKUP_ROOT:-/root/remna-managed-rebuilds}"
+LEGACY_UFW_PORTS="${LEGACY_UFW_PORTS:-}"
 SECRET_FILE="${SECRET_FILE:-/root/.remna-managed-rebuild-secret}"
 
 say(){ printf '%s\n' "$*"; }
@@ -123,6 +124,9 @@ ensure_target_cert(){
 }
 
 remove_excluded_legacy(){
+  if command -v hostnamectl >/dev/null 2>&1; then
+    hostnamectl set-hostname "$NODE_DOMAIN"
+  fi
   if command -v docker >/dev/null 2>&1; then
     docker rm -f remnawave-node-agent >/dev/null 2>&1 || true
   fi
@@ -130,6 +134,13 @@ remove_excluded_legacy(){
   systemctl disable --now nginx >/dev/null 2>&1 || true
   rm -f /etc/nginx/sites-enabled/* 2>/dev/null || true
   rm -f /etc/nginx/sites-available/cdn-xhttp.conf /etc/nginx/sites-available/default 2>/dev/null || true
+  if command -v ufw >/dev/null 2>&1 && [ -n "$LEGACY_UFW_PORTS" ]; then
+    local p
+    for p in $LEGACY_UFW_PORTS; do
+      ss -lntup | grep -q ":$p " && die "refusing to remove UFW port $p: listener still present"
+      ufw --force delete allow "$p/tcp" >/dev/null 2>&1 || true
+    done
+  fi
   ok "legacy admin agent and host nginx configs removed; unrelated containers preserved"
 }
 
