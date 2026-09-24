@@ -124,6 +124,7 @@ def validate_feed(raw: bytes, mode: str, family: str, previous: list[str], panel
         "whitelist_collisions": 0,
         "malformed": 0,
         "family": family,
+        "ignored_family": 0,
         "entries": [],
     }
     if looks_html(raw):
@@ -139,9 +140,6 @@ def validate_feed(raw: bytes, mode: str, family: str, previous: list[str], panel
         first = line.split()[0].lower()
         if mode == "gov" and first in GOV_HEADER and not V4_RE.search(line) and not V6_RE.search(line):
             continue
-        if family == "ipv4" and V6_RE.search(line):
-            report["reason"] = "family"
-            return report
         if mode == "gov":
             found = V4_RE.findall(line)
             if not found:
@@ -156,8 +154,8 @@ def validate_feed(raw: bytes, mode: str, family: str, previous: list[str], panel
             malformed += 1
             continue
         if family == "ipv4" and net.version != 4:
-            report["reason"] = "family"
-            return report
+            report["ignored_family"] += 1
+            continue
         if net.version == 4 and net.prefixlen < 8:
             report["reason"] = "broad"
             report["example"] = str(net)
