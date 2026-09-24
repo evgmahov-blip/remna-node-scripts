@@ -457,7 +457,7 @@ echo "semi-paranoid defaults"
 begin docker
 rm -f "$REMNA_SECURITY_BASE/settings.conf"
 bash "$CLI" status --json >/dev/null
-grep -q '^ENABLE_SCANNERS=1 || fail "scanners not enabled by default"
+grep -q '^ENABLE_SCANNERS=1$' "$REMNA_SECURITY_BASE/settings.conf" || fail "scanners not enabled by default"
 grep -q '^SCANNER_URL=https://lists.blocklist.de/lists/all.txt$' "$REMNA_SECURITY_BASE/settings.conf" || fail "default scanner feed missing"
 grep -q '^ENABLE_GEOIP=0$' "$REMNA_SECURITY_BASE/settings.conf" || fail "geoip must stay off by default"
 grep -q '^LOG_DROPS=0$' "$REMNA_SECURITY_BASE/settings.conf" || fail "drop logging must stay off by default"
