@@ -50,6 +50,9 @@ TELEMT="$NEXT_DIR/telemt-manager.sh"
 TELEMT_LEGACY="$NEXT_DIR/telemt-legacy-rkn-adapter.sh"
 REBUILD="$NEXT_DIR/legacy-rebuild-manager.sh"
 RELEASE_MARKER="$APP_DIR/.ainoc-release.json"
+MANAGED_UPDATE_BACKUP_ROOT="${MANAGED_UPDATE_BACKUP_ROOT:-/root/remnanode-managed-updates}"
+TELEMT_CONFIG_FILE="${TELEMT_CONFIG_FILE:-/etc/telemt/telemt.toml}"
+TELEMT_PANEL_CONFIG_FILE="${TELEMT_PANEL_CONFIG_FILE:-/etc/telemt-panel/config.toml}"
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
 
@@ -377,17 +380,18 @@ PY
 
 managed_identity_manifest(){
   local out="$1"
-  python3 - "$out" "$APP_DIR" <<'PY'
+  python3 - "$out" "$APP_DIR" "$TELEMT_CONFIG_FILE" "$TELEMT_PANEL_CONFIG_FILE" <<'PY'
 import hashlib, json, sys
 from pathlib import Path
 out=Path(sys.argv[1])
 app=Path(sys.argv[2])
+telemt=Path(sys.argv[3])
+telemt_panel=Path(sys.argv[4])
 fixed=[
     app/".env", app/".node_domain", app/".panel_ip", app/".transport",
     app/".camouflage_mode", app/"reality.env", app/".reality_sni",
-    app/".reality_target", app/".xhttp_path",
-    Path("/etc/telemt/telemt.toml"),
-    Path("/etc/telemt-panel/config.toml"),
+    app/".reality_target", app/".xhttp_path", app/"nginx.conf",
+    app/"xhttp-signature.json", telemt, telemt_panel,
 ]
 paths=list(fixed)
 profiles=app/"remnawave-profiles"
@@ -425,11 +429,16 @@ managed_identity_digest(){
 managed_running_image_digest(){
   command -v docker >/dev/null 2>&1 || return 1
   [[ "$NODE_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
-  local cid image_id digests expected
+  local cid image_id image_ref digests expected
   cid="$(cd "$APP_DIR" && docker compose ps -q remnanode 2>/dev/null || true)"
   [[ -n "$cid" ]] || return 1
   image_id="$(docker inspect "$cid" --format '{{.Image}}' 2>/dev/null || true)"
+  image_ref="$(docker inspect "$cid" --format '{{.Config.Image}}' 2>/dev/null || true)"
   [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  if [[ "$image_ref" == "$NODE_IMAGE" ]]; then
+    printf '%s\n' "$NODE_IMAGE_DIGEST"
+    return 0
+  fi
   expected="ghcr.io/remnawave/node@$NODE_IMAGE_DIGEST"
   digests="$(docker image inspect "$image_id" --format '{{range .RepoDigests}}{{println .}}{{end}}' 2>/dev/null || true)"
   if grep -Fqx "$expected" <<<"$digests"; then
@@ -442,16 +451,72 @@ managed_running_image_digest(){
 managed_update_backup(){
   local stamp dir rootfs src
   stamp="$(date +%Y%m%d-%H%M%S)"
-  dir="/root/remnanode-managed-updates/$stamp"
+  install -d -m 0700 "$MANAGED_UPDATE_BACKUP_ROOT"
+  dir="$(mktemp -d "$MANAGED_UPDATE_BACKUP_ROOT/$stamp.XXXXXX")"
+  chmod 0700 "$dir"
   rootfs="$dir/rootfs"
   install -d -m 0700 "$rootfs"
+  local dst
   for src in "$SELF" "$NEXT_DIR" "$PROTECTION" "$SECURITY_DIR" "$APP_DIR/docker-compose.yml" "$RELEASE_MARKER"; do
     [[ -e "$src" || -L "$src" ]] || continue
-    cp -a --parents "$src" "$rootfs/" || die "managed-update backup failed: $src"
+    dst="$rootfs/${src#/}"
+    mkdir -p "$(dirname "$dst")"
+    cp -a "$src" "$dst" || die "managed-update backup failed: $src"
   done
   managed_identity_manifest "$dir/identity.before.json"
+  python3 - "$dir/identity.before.json" "$rootfs" <<'PY'
+import json, shutil, sys
+from pathlib import Path
+manifest=Path(sys.argv[1])
+rootfs=Path(sys.argv[2])
+data=json.loads(manifest.read_text(encoding="utf-8"))
+for item in data.get("files", []):
+    if item.get("state") != "file":
+        continue
+    src=Path(str(item["path"]))
+    dst=rootfs / str(src).lstrip("/")
+    if not src.is_file():
+        raise SystemExit(f"identity source disappeared during backup: {src}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+PY
   chmod -R go-rwx "$dir"
   printf '%s\n' "$dir"
+}
+
+managed_update_restore_identity(){
+  local dir="$1" rootfs="$1/rootfs" manifest="$1/identity.before.json"
+  [[ -s "$manifest" ]] || { warn 'Managed update rollback: identity manifest missing.'; return 1; }
+  python3 - "$manifest" "$rootfs" "$APP_DIR" <<'PY'
+import json, shutil, sys
+from pathlib import Path
+manifest=Path(sys.argv[1])
+rootfs=Path(sys.argv[2])
+app=Path(sys.argv[3])
+data=json.loads(manifest.read_text(encoding="utf-8"))
+items=data.get("files", [])
+profiles=app/"remnawave-profiles"
+if profiles.is_dir():
+    for p in profiles.iterdir():
+        if p.is_file() and (p.suffix == ".json" or (p.name.startswith("host-") and p.suffix == ".txt")):
+            p.unlink()
+for item in items:
+    dst=Path(str(item["path"]))
+    state=item.get("state")
+    if state == "missing":
+        try:
+            dst.unlink()
+        except FileNotFoundError:
+            pass
+        continue
+    if state != "file":
+        raise SystemExit(f"unsupported identity state for {dst}: {state}")
+    src=rootfs / str(dst).lstrip("/")
+    if not src.is_file():
+        raise SystemExit(f"identity backup missing: {src}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+PY
 }
 
 managed_update_restore_code(){
@@ -484,11 +549,19 @@ managed_update_restore_code(){
 }
 
 managed_update_rollback(){
-  local dir="$1" expected_image="$2" current i
+  local dir="$1" expected_image="$2" current expected_identity restored_identity i
   managed_update_restore_code "$dir"
+  managed_update_restore_identity "$dir" || return 1
+  expected_identity="$(sha256sum "$dir/identity.before.json" | awk '{print $1}')"
+  restored_identity="$(managed_identity_digest 2>/dev/null || true)"
+  if [[ "$restored_identity" != "$expected_identity" ]]; then
+    warn "Managed update rollback identity mismatch: expected=$expected_identity got=$restored_identity"
+    return 1
+  fi
+
   current="$(managed_running_image_digest 2>/dev/null || true)"
   if [[ "$current" == "$expected_image" ]]; then
-    ok "Managed update rollback image verified: ${expected_image:0:19}…"
+    ok "Managed update rollback identity + image verified."
     return 0
   fi
 
@@ -499,7 +572,7 @@ managed_update_rollback(){
   for i in $(seq 1 30); do
     current="$(managed_running_image_digest 2>/dev/null || true)"
     if [[ "$current" == "$expected_image" ]]; then
-      ok "Managed update rollback image verified: ${expected_image:0:19}…"
+      ok "Managed update rollback identity + image verified."
       return 0
     fi
     sleep 2
@@ -569,28 +642,30 @@ run_managed_update(){
   ok "managed-update backup: $backup"
 
   if ! AINOC_INPLACE_UPDATE=1 sync_next_sources; then
-    managed_update_restore_code "$backup"
-    die 'managed-update: source sync failed; code rollback applied.'
+    if ! managed_update_rollback "$backup" "$before_image"; then
+      die 'managed-update: source sync failed AND verified rollback failed.'
+    fi
+    die 'managed-update: source sync failed; verified identity+image rollback applied.'
   fi
   if ! managed_patch_node_image; then
     if ! managed_update_rollback "$backup" "$before_image"; then
-      die 'managed-update: image update failed AND rollback image verification failed.'
+      die 'managed-update: image update failed AND identity+image rollback verification failed.'
     fi
-    die 'managed-update: image update failed; verified rollback applied.'
+    die 'managed-update: image update failed; verified identity+image rollback applied.'
   fi
 
   after_identity="$(managed_identity_digest)"
   if [[ "$after_identity" != "$before_identity" ]]; then
     if ! managed_update_rollback "$backup" "$before_image"; then
-      die 'managed-update: CONNECTION IDENTITY DRIFT detected; rollback image verification failed; identity was NOT overwritten.'
+      die 'managed-update: CONNECTION IDENTITY DRIFT detected; identity+image rollback verification failed.'
     fi
-    die 'managed-update: CONNECTION IDENTITY DRIFT detected; code/image rolled back, identity was NOT overwritten, release marker NOT written.'
+    die 'managed-update: CONNECTION IDENTITY DRIFT detected; verified identity+image rollback applied, release marker NOT written.'
   fi
   if ! managed_update_postcheck "$before_telemt" "$before_panel"; then
     if ! managed_update_rollback "$backup" "$before_image"; then
-      die 'managed-update: postcheck failed AND rollback image verification failed.'
+      die 'managed-update: postcheck failed AND identity+image rollback verification failed.'
     fi
-    die 'managed-update: postcheck failed; verified rollback applied.'
+    die 'managed-update: postcheck failed; verified identity+image rollback applied.'
   fi
 
   write_release_marker "$release_sha" "$after_identity" in-place

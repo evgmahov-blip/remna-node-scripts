@@ -84,8 +84,20 @@ FULL_LIB="$WORK/full-lib.sh"
 sed '$d' "$FULL" >"$FULL_LIB"
 source "$FULL_LIB"
 APP_DIR="$WORK/node"
-mkdir -p "$APP_DIR/remnawave-profiles"
+mkdir -p "$APP_DIR/remnawave-profiles" "$WORK/etc/telemt" "$WORK/etc/telemt-panel"
 RELEASE_MARKER="$APP_DIR/.ainoc-release.json"
+MANAGED_UPDATE_BACKUP_ROOT="$WORK/backups"
+TELEMT_CONFIG_FILE="$WORK/etc/telemt/telemt.toml"
+TELEMT_PANEL_CONFIG_FILE="$WORK/etc/telemt-panel/config.toml"
+SELF="$WORK/remnanode-next.sh"
+NEXT_DIR="$APP_DIR/next-installer"
+PROTECTION="$APP_DIR/protection-manager.sh"
+SECURITY_DIR="$APP_DIR/security"
+mkdir -p "$NEXT_DIR" "$SECURITY_DIR"
+printf '#!/usr/bin/env bash\n' >"$SELF"
+printf '#!/usr/bin/env bash\n' >"$NEXT_DIR/server-multitest.sh"
+printf '#!/usr/bin/env bash\n' >"$PROTECTION"
+printf 'services: {}\n' >"$APP_DIR/docker-compose.yml"
 printf 'NODE_PORT=2222\nSECRET_KEY=test-secret\nXTLS_API_PORT=61000\n' >"$APP_DIR/.env"
 printf 'node.example.com\n' >"$APP_DIR/.node_domain"
 printf '203.0.113.10\n' >"$APP_DIR/.panel_ip"
@@ -95,16 +107,32 @@ printf 'REALITY_PRIVATE_KEY=a\nREALITY_PUBLIC_KEY=b\nREALITY_SHORT_ID=c\n' >"$AP
 printf 'node.example.com\n' >"$APP_DIR/.reality_sni"
 printf '/dev/shm/nginx.sock\n' >"$APP_DIR/.reality_target"
 printf '/api/stable/path.ts\n' >"$APP_DIR/.xhttp_path"
+printf 'nginx-stable\n' >"$APP_DIR/nginx.conf"
+printf '{"signature":"stable"}\n' >"$APP_DIR/xhttp-signature.json"
 printf '{"profile":"stable"}\n' >"$APP_DIR/remnawave-profiles/xhttp-reality.json"
+printf 'telemt=stable\n' >"$TELEMT_CONFIG_FILE"
+printf 'panel=stable\n' >"$TELEMT_PANEL_CONFIG_FILE"
 
 before="$(managed_identity_digest)"
+backup="$(managed_update_backup)"
 printf '/api/changed/path.ts\n' >"$APP_DIR/.xhttp_path"
+printf 'REALITY_PRIVATE_KEY=changed\n' >"$APP_DIR/reality.env"
+printf 'nginx-changed\n' >"$APP_DIR/nginx.conf"
+printf '{"signature":"changed"}\n' >"$APP_DIR/xhttp-signature.json"
+printf '{"profile":"new"}\n' >"$APP_DIR/remnawave-profiles/host-new.json"
+printf 'telemt=changed\n' >"$TELEMT_CONFIG_FILE"
 after="$(managed_identity_digest)"
 [[ "$before" != "$after" ]]
-printf '/api/stable/path.ts\n' >"$APP_DIR/.xhttp_path"
+managed_update_restore_identity "$backup"
+[[ "$(managed_identity_digest)" == "$before" ]]
+[[ "$(cat "$APP_DIR/.xhttp_path")" == '/api/stable/path.ts' ]]
+grep -Fq 'REALITY_PRIVATE_KEY=a' "$APP_DIR/reality.env"
+[[ "$(cat "$APP_DIR/nginx.conf")" == 'nginx-stable' ]]
+grep -Fq '"signature":"stable"' "$APP_DIR/xhttp-signature.json"
+[[ ! -e "$APP_DIR/remnawave-profiles/host-new.json" ]]
+[[ "$(cat "$TELEMT_CONFIG_FILE")" == 'telemt=stable' ]]
 
 managed_update_backup(){ mkdir -p "$WORK/backup"; printf '%s\n' "$WORK/backup"; }
-managed_update_restore_code(){ :; }
 managed_patch_node_image(){ :; }
 managed_update_postcheck(){ :; }
 managed_running_image_digest(){ printf '%s\n' "$NODE_IMAGE_DIGEST"; }
@@ -126,11 +154,27 @@ PY
 [[ "$(stat -c %a "$RELEASE_MARKER")" == 600 ]]
 
 rm -f "$RELEASE_MARKER"
+managed_update_rollback(){
+  printf '/api/stable/path.ts\n' >"$APP_DIR/.xhttp_path"
+  touch "$WORK/rollback.called"
+  return 0
+}
 sync_next_sources(){ printf '/api/drifted/path.ts\n' >"$APP_DIR/.xhttp_path"; }
 if ( run_managed_update >/dev/null 2>&1 ); then
   echo "managed update unexpectedly passed identity drift" >&2
   exit 1
 fi
+[[ ! -e "$RELEASE_MARKER" ]]
+[[ -e "$WORK/rollback.called" ]]
+[[ "$(cat "$APP_DIR/.xhttp_path")" == '/api/stable/path.ts' ]]
+
+rm -f "$WORK/rollback.called"
+sync_next_sources(){ return 9; }
+if ( run_managed_update >/dev/null 2>&1 ); then
+  echo "managed update unexpectedly passed source-sync failure" >&2
+  exit 1
+fi
+[[ -e "$WORK/rollback.called" ]]
 [[ ! -e "$RELEASE_MARKER" ]]
 
 grep -Fq 'CONNECTION IDENTITY DRIFT' "$FULL"

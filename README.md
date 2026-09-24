@@ -266,6 +266,8 @@ sudo remnanode-next multitest report
 
 `multitest machine` предназначен для AINOC/автоматизации: stdout содержит только один JSON-объект `remnanode.multitest.v1`. В этом режиме тестер **не устанавливает APT-пакеты и не заменяет NextTrace**: отсутствующая зависимость становится FAIL конкретного теста. Отчёты machine-mode пишутся во временный каталог `/tmp/remnanode-next-multitest` (или `MULTITEST_MACHINE_REPORT_DIR`).
 
+Для Telegram/AINOC перед machine-mode действует release gate. `managed-update` выполняется **in-place**: сохраняет connection identity (`.env`, REALITY key/shortId, XHTTP path, transport/profile files, nginx/XHTTP signature и Telemt configs), обновляет закреплённые NEXT scripts и Remnanode image, затем сравнивает identity fingerprint и postcheck. При drift/ошибке восстанавливаются identity + code/image из root-only backup, release marker не записывается и Multitest остаётся заблокирован. Legacy/V2 `Managed rebuild` остаётся отдельной миграционной/аварийной операцией и для обычного Telegram-update не используется.
+
 После `multitest all` в терминале сразу выводится короткий блок **ИТОГ ПО НОДЕ**: FAIL, измеренная скорость, single/all-thread CPU, MTU, DNSBL blacklist, доступность AI API, рабочий сетевой бюджет и ориентир по одновременно активным XHTTP-клиентам при 3 и 5 Mbit/s. PASS/нормальные показатели подсвечиваются зелёным, предупреждения/пропуски — жёлтым, FAIL/проблемы — красным, заголовки секций — голубым. Файлы `analysis.txt` и `AI_REPORT.txt` остаются без ANSI-кодов.
 
 IPQuality запускается в JSON/privacy-режиме и выводит только полезные поля: ASN, регион, тип IP, risk, proxy flags, media и DNSBL — без рекламных sponsor-блоков. Подробные raw-логи и `AI_REPORT.txt` сохраняются отдельно.
