@@ -455,7 +455,66 @@ ok ufw
 
 echo "semi-paranoid defaults"
 begin docker
-grep -q '^ENABLE_SCANNERS=1$' "$REMNA_SECURITY_BASE/settings.conf" || fail "scanners not enabled by default"
+rm -f "$REMNA_SECURITY_BASE/settings.conf"
+bash "$CLI" status --json >/dev/null
+grep -q '^ENABLE_SCANNERS=1 || fail "scanners not enabled by default"
+grep -q '^SCANNER_URL=https://lists.blocklist.de/lists/all.txt$' "$REMNA_SECURITY_BASE/settings.conf" || fail "default scanner feed missing"
+grep -q '^ENABLE_GEOIP=0$' "$REMNA_SECURITY_BASE/settings.conf" || fail "geoip must stay off by default"
+grep -q '^LOG_DROPS=0$' "$REMNA_SECURITY_BASE/settings.conf" || fail "drop logging must stay off by default"
+st=$(bash "$CLI" status --json)
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["sources"]["scanners"]["enabled"] is True; assert d["sources"]["geoip"]["enabled"] is False' "$st"
+ok semi-paranoid-defaults
+
+echo "scanner fast feed and migrate"
+begin docker
+SRC=$WORK/src
+write_pair "$SRC" 8
+nets 15 20 > "$WORK/scanners.txt"
+export REMNA_SECURITY_SOURCE_SCANNERS=file://$WORK/scanners.txt
+bash "$CLI" config-set ENABLE_SCANNERS 1 >/dev/null
+bash "$CLI" update --json > "$WORK/scan.json" || fail scanner-update
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["ok"] and any(s["id"]=="scanners" and s["ok"] for s in d["sources"])' "$WORK/scan.json"
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert "remna:scanners" in "\\n".join(s["chains"]["REMNA_GUARD"])' "$REMNA_SECURITY_BASE/sim/state.json"
+# legacy config without new keys
+cat > "$REMNA_SECURITY_BASE/settings.conf" <<'EOF'
+PANEL_IP=203.0.113.10
+ENABLE_TSPU=1
+ENABLE_GOV=1
+ENABLE_GEOIP=0
+FILTER_PORTS=443
+GEO_COUNTRIES=
+EOF
+printf '192.0.2.55/32\n' > "$REMNA_SECURITY_BASE/data/allow.txt"
+bash "$CLI" migrate-inplace >/dev/null
+grep -q '^BACKEND=iptables$' "$REMNA_SECURITY_BASE/settings.conf" || fail "migrate dropped backend default"
+grep -q '^PANEL_IP=203.0.113.10$' "$REMNA_SECURITY_BASE/settings.conf" || fail "migrate lost panel"
+grep -q '192.0.2.55/32' "$REMNA_SECURITY_BASE/data/allow.txt" || fail "migrate lost allow"
+grep -q '192.0.2.55/32' "$REMNA_SECURITY_BASE/data/lkg/allow.txt" || fail "lkg not seeded"
+ok scanners-migrate
+
+echo "event rate limit and preflight json"
+begin docker
+python3 "$PY" event --base "$REMNA_SECURITY_BASE" --kind source_error --message tspu:html
+python3 "$PY" event --base "$REMNA_SECURITY_BASE" --kind source_error --message tspu:html
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert len(d)==1' "$REMNA_SECURITY_BASE/data/recent.json"
+doc=$(bash "$CLI" preflight --json)
+require_json "$doc" remna-security.preflight.v1
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ok"] is True and d["owns_only"] is True and d["docker_present"] is True' "$doc"
+ok preflight
+
+echo "live apply is refused"
+rc=0
+env -u REMNA_SECURITY_SIM REMNA_SECURITY_FORBID_LIVE=1 REMNA_SECURITY_BASE="$REMNA_SECURITY_BASE" python3 "$PY" apply --base "$REMNA_SECURITY_BASE" > "$WORK/live.out" 2> "$WORK/live.err" || rc=$?
+[ "$rc" -eq 2 ] || fail "live apply rc=$rc"
+grep -q 'forbidden' "$WORK/live.err" || fail "live apply missing refusal"
+ok forbid-live
+
+printf 'PASS %s\n' "$PASS"
+
+echo "security v2 offline"
+bash "$ROOT/tests/security/v2/run.sh"
+ok v2
+ "$REMNA_SECURITY_BASE/settings.conf" || fail "scanners not enabled by default"
 grep -q '^SCANNER_URL=https://lists.blocklist.de/lists/all.txt$' "$REMNA_SECURITY_BASE/settings.conf" || fail "default scanner feed missing"
 grep -q '^ENABLE_GEOIP=0$' "$REMNA_SECURITY_BASE/settings.conf" || fail "geoip must stay off by default"
 grep -q '^LOG_DROPS=0$' "$REMNA_SECURITY_BASE/settings.conf" || fail "drop logging must stay off by default"
