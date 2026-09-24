@@ -49,10 +49,10 @@ DEFAULTS = {
     "ENABLE_TSPU": "1",
     "ENABLE_GOV": "1",
     "ENABLE_GEOIP": "0",
-    "ENABLE_SCANNERS": "0",
+    "ENABLE_SCANNERS": "1",
     "FILTER_PORTS": "443",
     "GEO_COUNTRIES": "",
-    "SCANNER_URL": "",
+    "SCANNER_URL": "https://lists.blocklist.de/lists/all.txt",
     "BACKEND": "iptables",
     "LOG_DROPS": "0",
 }
