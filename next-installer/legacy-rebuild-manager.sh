@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+export TERM="${TERM:-xterm}"
 
 REPO_DIR="${REPO_DIR:-$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
 FULL="${FULL:-$REPO_DIR/full-clean-reinstall.sh}"
@@ -206,6 +207,26 @@ postcheck(){
   if [ "$fail" -eq 0 ]; then ok "managed rebuild postcheck PASS"; else return 1; fi
 }
 
+finish_install(){
+  run_base_setup
+  bash "$FULL" selfsteal ensure
+  CAMOUFLAGE_MODE="$CAMOUFLAGE_MODE" bash "$FULL" transport "$TRANSPORT"
+  bash "$FULL" bbr-tune
+  install_current_protection
+  install_telemt
+  postcheck
+}
+
+resume(){
+  need_root
+  [ -n "$NODE_DOMAIN" ] || die "set NODE_DOMAIN"
+  PANEL_IP="$(discover_panel_ip)"
+  [[ "$PANEL_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "PANEL_IP could not be determined safely"
+  [ -s "$SECRET_FILE" ] || die "resume secret file missing: $SECRET_FILE"
+  finish_install
+  ok "rebuild resumed and complete: $NODE_DOMAIN"
+}
+
 rebuild(){
   need_root
   [ -n "$NODE_DOMAIN" ] || die "set NODE_DOMAIN"
@@ -224,13 +245,7 @@ rebuild(){
   ensure_target_cert
   remove_excluded_legacy
   V2_ASSUME_YES=1 bash "$V2"
-  run_base_setup
-  bash "$FULL" selfsteal ensure
-  CAMOUFLAGE_MODE="$CAMOUFLAGE_MODE" bash "$FULL" transport "$TRANSPORT"
-  bash "$FULL" bbr-tune
-  install_current_protection
-  install_telemt
-  postcheck
+  finish_install
   ok "rebuild complete: $NODE_DOMAIN"
 }
 
@@ -238,6 +253,7 @@ case "${1:-discover}" in
   discover) discover ;;
   backup) make_backup ;;
   rebuild) rebuild ;;
+  resume) resume ;;
   status) postcheck ;;
-  *) die "Usage: $0 {discover|backup|rebuild|status}" ;;
+  *) die "Usage: $0 {discover|backup|rebuild|resume|status}" ;;
 esac
