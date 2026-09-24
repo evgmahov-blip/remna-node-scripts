@@ -208,7 +208,7 @@ jobs:
           ! sed -n '/run_all(){/,/^}/p' "$t" | grep -Fq 'read -r action'
           ! sed -n '/99)/,/;;/p' "$t" | grep -Fq 'pause'
           grep -Fq '"$target" --from "$from" --tcp --port 443' "$t"
-          bash "$t" list | grep -Fq '12) NextTrace Globalping'
+          bash "$t" list | grep -Fq '12) Globalping'
           ! bash "$t" list | grep -Fq 'bench.tlab'
           ! bash "$t" list | grep -Fq 'sysbench Memory'
           ! bash "$t" list | grep -Fq 'SSL/TLS check'
