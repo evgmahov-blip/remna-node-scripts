@@ -3,8 +3,10 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 M="$ROOT/next-installer/telemt-manager.sh"
+A="$ROOT/next-installer/telemt-legacy-rkn-adapter.sh"
 
 bash -n "$M"
+bash -n "$A"
 
 must(){ grep -Fq -- "$1" "$M" || { echo "missing invariant: $1" >&2; exit 1; }; }
 must_not(){ ! grep -Fq -- "$1" "$M" || { echo "forbidden pattern: $1" >&2; exit 1; }; }
@@ -20,6 +22,8 @@ must 'CapabilityBoundingSet='
 must 'AmbientCapabilities='
 must 'NoNewPrivileges=true'
 must 'ensure_protection_port'
+must 'LEGACY_ADAPTER='
+must 'PANEL_PASSWORD=' 
 must 'config-set FILTER_PORTS'
 must 'protection covers TCP/'
 must '80/443 are intentionally forbidden'
@@ -34,3 +38,10 @@ must_not 'CAP_NET_ADMIN'
 must_not 'CAP_NET_BIND_SERVICE'
 
 echo "telemt integration static security tests: OK"
+
+grep -Fq -- 'REMNA_RKN_SCANNERS' "$A"
+grep -Fq -- '--dports 80,443' "$A"
+grep -Fq -- 'TSPUIPS' "$A"
+grep -Fq -- 'ufw allow "$TELEMT_PORT/tcp"' "$A"
+grep -Fq -- 'rkn-watcher-manager.sh.before-telemt' "$A"
+grep -Fq -- 'rollback)' "$A"
