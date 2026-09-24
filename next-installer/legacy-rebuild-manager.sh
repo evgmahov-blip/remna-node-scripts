@@ -238,14 +238,18 @@ postcheck(){
   if [ "$fail" -eq 0 ]; then ok "managed rebuild postcheck PASS"; else return 1; fi
 }
 
-finish_install(){
-  run_base_setup
+finish_post_base(){
   bash "$FULL" selfsteal ensure
-  CAMOUFLAGE_MODE="$CAMOUFLAGE_MODE" bash "$FULL" transport "$TRANSPORT"
+  HYSTERIA_CERT_MOUNT_ACTION=fix CAMOUFLAGE_MODE="$CAMOUFLAGE_MODE" bash "$FULL" transport "$TRANSPORT"
   bash "$FULL" bbr-tune
   install_current_protection
   install_telemt
   postcheck
+}
+
+finish_install(){
+  run_base_setup
+  finish_post_base
 }
 
 resume(){
@@ -253,8 +257,14 @@ resume(){
   [ -n "$NODE_DOMAIN" ] || die "set NODE_DOMAIN"
   PANEL_IP="$(discover_panel_ip)"
   [[ "$PANEL_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "PANEL_IP could not be determined safely"
-  [ -s "$SECRET_FILE" ] || die "resume secret file missing: $SECRET_FILE"
-  finish_install
+  if [ -s "$SECRET_FILE" ]; then
+    finish_install
+  elif docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode && [ "$(cat /opt/remnanode/.node_domain 2>/dev/null)" = "$NODE_DOMAIN" ]; then
+    ok "base setup already complete; resuming post-base stages"
+    finish_post_base
+  else
+    die "resume state is neither pre-base nor post-base"
+  fi
   ok "rebuild resumed and complete: $NODE_DOMAIN"
 }
 
