@@ -374,11 +374,11 @@ jobs:
           grep -Fq 'HYSTERIA_OVERLAY_BLOB_SHA="62ff1364c26d88f357968422d5591b3d2b8d9e78"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_REF="cc375ea8182c76929d9fc1046217ee769a5152d9"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_BLOB_SHA="e4aa53eb348d907b72e6e847a384fabea3399cfb"' full-clean-reinstall.sh
-          grep -Fq 'REMNANODE NEXT — MAIN' full-clean-reinstall.sh
-          grep -Fq 'Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)' full-clean-reinstall.sh
-          grep -Fq 'SEMI-PARANOID (TSPU + GOV + scanners)' full-clean-reinstall.sh
-          grep -Fq 'TELEMT / MTProto + Panel' full-clean-reinstall.sh
-          grep -Fq 'Managed legacy-node rebuild' full-clean-reinstall.sh
+          grep -Fq 'REMNANODE NEXT — управление нодой' full-clean-reinstall.sh
+          grep -Fq 'Транспорт и профили — XHTTP / RAW / Hysteria2 / combined' full-clean-reinstall.sh
+          grep -Fq 'SEMI-PARANOID — TSPU + GOV + scanners + Node API guard' full-clean-reinstall.sh
+          grep -Fq 'MTProto proxy + Telemt Panel' full-clean-reinstall.sh
+          grep -Fq 'Managed legacy-node rebuild — discover / backup / rebuild / resume' full-clean-reinstall.sh
           grep -Fq 'MGMT_OVERLAY_REF="cc375ea8182c76929d9fc1046217ee769a5152d9"' full-clean-reinstall.sh
           grep -Fq 'PROTECTION_BLOB_SHA="d38486200c4399ec3150e0c3185d7f5620a3606a"' full-clean-reinstall.sh
           grep -Fq 'SECURITY_PY_BLOB_SHA="a1d7ba1464516da3568dee0d8e8caa24b42ae2d0"' full-clean-reinstall.sh
