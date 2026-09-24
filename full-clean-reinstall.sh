@@ -670,7 +670,15 @@ backup_current(){
     opt/remnanode/docker-compose.yml \
     opt/remnanode/nginx.conf \
     opt/remnanode/certs \
-    opt/remnanode/remnawave-profiles
+    opt/remnanode/remnawave-profiles \
+    opt/remna-protection \
+    var/log/remna-protection \
+    etc/telemt \
+    etc/telemt-panel \
+    var/lib/telemt-panel \
+    etc/systemd/system/remna-protection.service \
+    etc/systemd/system/remna-protection-update.service \
+    etc/systemd/system/remna-protection-update.timer
   do
     [[ -e "/$rel" ]] && paths+=("$rel")
   done
@@ -683,8 +691,12 @@ backup_current(){
 safe_clean_impl(){
   sync_next_sources
   backup_current
+  if [[ -x "$PROTECTION" ]]; then
+    "$PROTECTION" uninstall || die 'Protection uninstall failed; safe clean aborted before deleting files.'
+  fi
   "$GUARDS" remove-rkn-watch >/dev/null 2>&1 || true
   "$RKN" uninstall >/dev/null 2>&1 || true
+  rm -rf /opt/remna-protection /var/log/remna-protection
 
   if [[ -f "$APP_DIR/docker-compose.yml" ]] && command -v docker >/dev/null 2>&1; then
     (cd "$APP_DIR" && docker compose down) || true
