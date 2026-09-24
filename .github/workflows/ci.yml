@@ -323,8 +323,8 @@ jobs:
           grep -Fq '[5] ТОЛЬКО HOST XHTTP' full-clean-reinstall.sh
           grep -Fq '[6] ТОЛЬКО HOST HYSTERIA2' full-clean-reinstall.sh
           grep -Fq 'host-hysteria2|host-hysteria)' full-clean-reinstall.sh
-          grep -Fq '[13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)' full-clean-reinstall.sh
-          grep -Fq '[14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters' full-clean-reinstall.sh
+          grep -Fq '[13] Сеть / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)' full-clean-reinstall.sh
+          grep -Fq '[14] Hysteria2 диагностика — UDP/443 + DNS + security counters' full-clean-reinstall.sh
           grep -Fq '[15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next multitest 1..12' full-clean-reinstall.sh
           grep -Fq 'hysteria-diag|hy2-diag)' full-clean-reinstall.sh
@@ -365,11 +365,11 @@ jobs:
           grep -Fq 'HYSTERIA_OVERLAY_BLOB_SHA="62ff1364c26d88f357968422d5591b3d2b8d9e78"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"' full-clean-reinstall.sh
-          grep -Fq 'REMNANODE NEXT — MAIN' full-clean-reinstall.sh
-          grep -Fq 'Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)' full-clean-reinstall.sh
-          grep -Fq 'SEMI-PARANOID (TSPU + GOV + scanners)' full-clean-reinstall.sh
-          grep -Fq 'TELEMT / MTProto + Panel' full-clean-reinstall.sh
-          grep -Fq 'Managed legacy-node rebuild' full-clean-reinstall.sh
+          grep -Fq 'REMNANODE NEXT${C_RESET} — управление нодой' full-clean-reinstall.sh
+          grep -Fq 'Транспорт и профили — XHTTP / RAW / Hysteria2 / combined' full-clean-reinstall.sh
+          grep -Fq 'SEMI-PARANOID — TSPU + GOV + scanners + Node API guard' full-clean-reinstall.sh
+          grep -Fq 'MTProto proxy + Telemt Panel' full-clean-reinstall.sh
+          grep -Fq 'Managed legacy-node rebuild — discover / backup / rebuild / resume' full-clean-reinstall.sh
           grep -Fq 'MGMT_OVERLAY_REF="d73afcb6d0ef7cd574031d7b3933041767231714"' full-clean-reinstall.sh
           grep -Fq 'PROTECTION_BLOB_SHA="d38486200c4399ec3150e0c3185d7f5620a3606a"' full-clean-reinstall.sh
           grep -Fq 'SECURITY_PY_BLOB_SHA="cb085de83432bfb6ef8ade01b8551df122968f2e"' full-clean-reinstall.sh
