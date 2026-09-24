@@ -219,7 +219,7 @@ jobs:
           grep -Fq 'TESTER_REF="3a9cb5e9619b02fc0785d2620704a8f0271b47ad"' full-clean-reinstall.sh
           grep -Fq 'TESTER_BLOB_SHA="542b87efc4af8aa5911def29a564cef082d4eea6"' full-clean-reinstall.sh
           grep -Fq 'server-multitest.sh' full-clean-reinstall.sh
-          grep -Fq 'sudo remnanode-next multitest' full-clean-reinstall.sh
+          grep -Fq '[15] АНАЛИЗ НОДЫ' full-clean-reinstall.sh
           grep -Fq 'multitest|server-test|tests)' full-clean-reinstall.sh
 
       - name: Working-node topology provenance
