@@ -143,6 +143,33 @@ run_base_setup(){
   [ -s "$setup" ] || die "synced legacy setup missing"
   tmp="$(mktemp)"
   sed '/^main$/d' "$setup" >"$tmp"
+  python3 - "$tmp" <<'PY'
+from pathlib import Path
+import re, sys
+p=Path(sys.argv[1])
+s=p.read_text()
+repls = [
+    ('read -p "Выберите номер версии [1]: " version_num\\n    version_num=${version_num:-1}', 'version_num=1'),
+    ('read -p "Введите IP адрес панели Remnawave (для настройки UFW): " panel_ip', 'panel_ip="${REBUILD_PANEL_IP:?}"'),
+    ('read -p "Введите домен вашей ноды (например, node.example.com): " node_domain', 'node_domain="${REBUILD_NODE_DOMAIN:?}"'),
+    ('read -p "Порт управления нодой (для панели) [2222]: " node_port\\n    node_port=${node_port:-2222}', 'node_port="${REBUILD_NODE_PORT:-2222}"'),
+    ('read -p "Желаете открыть дополнительные входящие порты для Xray в UFW? (через пробел, например: 8443 2053) [Нет]: " add_ports_choice\\n    add_ports_choice=${add_ports_choice:-""}', 'add_ports_choice=""'),
+    ('read -p "Выберите метод выпуска [2]: " ssl_method\\n    ssl_method=${ssl_method:-2}', 'ssl_method=4'),
+    ('read -rp "Путь к fullchain.pem: " source_cert', 'source_cert="${REBUILD_CERT_FULLCHAIN:?}"'),
+    ('read -rp "Путь к privkey.pem: " source_key', 'source_key="${REBUILD_CERT_KEY:?}"'),
+]
+for a,b in repls:
+    if a not in s:
+        raise SystemExit(f"noninteractive patch anchor missing: {a[:60]}")
+    s=s.replace(a,b)
+s, n = re.subn(r'    local certificate=""\\n    while IFS= read -r line; do\\n.*?    done\\n', '    local certificate\\n    certificate="$(cat "$REBUILD_SECRET_FILE")"\\n', s, count=1, flags=re.S)
+if n != 1:
+    raise SystemExit("certificate prompt block not found")
+s, n = re.subn(r'pause_prompt\\(\\) \\{\\n    echo ""\\n    read -p "Нажмите Enter, чтобы вернуться в меню\\.\\.\\." _\\n\\}', 'pause_prompt() { return 0; }', s, count=1)
+if n != 1:
+    raise SystemExit("pause_prompt block not found")
+p.write_text(s)
+PY
   cat >>"$tmp" <<'EOF'
 check_os
 detect_arch
@@ -151,19 +178,13 @@ EOF
   chmod 700 "$tmp"
   ok "legacy setup wrapper prepared"
   local setup_log=/root/remna-managed-rebuild-setup.log
-  {
-    printf '\n'
-    printf '%s\n' "$PANEL_IP"
-    printf '%s\n' "$NODE_DOMAIN"
-    printf '\n'
-    printf '%s\n' "$secret"
-    printf '\n'
-    printf '\n'
-    printf '4\n'
-    printf '%s\n' "/etc/letsencrypt/live/$NODE_DOMAIN/fullchain.pem"
-    printf '%s\n' "/etc/letsencrypt/live/$NODE_DOMAIN/privkey.pem"
-    printf '\n'
-  } | bash "$tmp" >"$setup_log" 2>&1 || {
+  REBUILD_PANEL_IP="$PANEL_IP" \
+  REBUILD_NODE_DOMAIN="$NODE_DOMAIN" \
+  REBUILD_NODE_PORT="$NODE_PORT" \
+  REBUILD_SECRET_FILE="$SECRET_FILE" \
+  REBUILD_CERT_FULLCHAIN="/etc/letsencrypt/live/$NODE_DOMAIN/fullchain.pem" \
+  REBUILD_CERT_KEY="/etc/letsencrypt/live/$NODE_DOMAIN/privkey.pem" \
+  bash "$tmp" </dev/null >"$setup_log" 2>&1 || {
     warn "legacy setup failed; tail follows"
     tail -80 "$setup_log" >&2 || true
     return 1
@@ -172,7 +193,6 @@ EOF
   rm -f "$tmp" "$SECRET_FILE"
   unset secret
 }
-
 install_current_protection(){
   [ -f "$PROTECTION" ] || die "protection manager missing"
   chmod 700 "$PROTECTION" "$REPO_DIR/security/remna-security.sh" 2>/dev/null || true
