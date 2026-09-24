@@ -16,6 +16,7 @@ CAMOUFLAGE_MODE="${CAMOUFLAGE_MODE:-selfsteal}"
 INSTALL_TELEMT="${INSTALL_TELEMT:-1}"
 TELEMT_PORT="${TELEMT_PORT:-8443}"
 BACKUP_ROOT="${BACKUP_ROOT:-/root/remna-managed-rebuilds}"
+SECRET_FILE="${SECRET_FILE:-/root/.remna-managed-rebuild-secret}"
 
 say(){ printf '%s\n' "$*"; }
 ok(){ printf '[OK] %s\n' "$*"; }
@@ -133,8 +134,9 @@ remove_excluded_legacy(){
 
 run_base_setup(){
   local secret setup tmp
-  secret="$(old_secret)"
-  [ -n "$secret" ] || die "old RemnaNode secret missing"
+  [ -s "$SECRET_FILE" ] || die "temporary RemnaNode secret missing"
+  secret="$(cat "$SECRET_FILE")"
+  [ -n "$secret" ] || die "temporary RemnaNode secret empty"
   bash "$FULL" sync-source
   setup="/opt/remnanode/next-installer/setup_node-legacy.sh"
   [ -s "$setup" ] || die "synced legacy setup missing"
@@ -159,12 +161,13 @@ EOF
     printf '%s\n' "/etc/letsencrypt/live/$NODE_DOMAIN/privkey.pem"
     printf '\n'
   } | bash "$tmp"
-  rm -f "$tmp"
+  rm -f "$tmp" "$SECRET_FILE"
   unset secret
 }
 
 install_current_protection(){
   [ -f "$PROTECTION" ] || die "protection manager missing"
+  chmod 700 "$PROTECTION" "$REPO_DIR/security/remna-security.sh" 2>/dev/null || true
   bash "$PROTECTION" install
   bash "$PROTECTION" panel-set "$PANEL_IP"
   bash "$PROTECTION" selftest
@@ -173,6 +176,7 @@ install_current_protection(){
 install_telemt(){
   [ "$INSTALL_TELEMT" = 1 ] || return 0
   [ -f "$TELEMT" ] || die "Telemt manager missing"
+  chmod 700 "$TELEMT" "$REPO_DIR/next-installer/telemt-legacy-rkn-adapter.sh" 2>/dev/null || true
   local cred pass
   cred=/root/telemt-panel-credentials.txt
   if [ ! -s "$cred" ]; then
@@ -210,6 +214,9 @@ rebuild(){
   local secret
   secret="$(old_secret)"
   [ -n "$secret" ] || die "old RemnaNode secret missing"
+  umask 077
+  printf '%s' "$secret" >"$SECRET_FILE"
+  chmod 600 "$SECRET_FILE"
   unset secret
   local backup
   backup="$(make_backup)"
@@ -218,7 +225,9 @@ rebuild(){
   remove_excluded_legacy
   V2_ASSUME_YES=1 bash "$V2"
   run_base_setup
+  bash "$FULL" selfsteal ensure
   CAMOUFLAGE_MODE="$CAMOUFLAGE_MODE" bash "$FULL" transport "$TRANSPORT"
+  bash "$FULL" bbr-tune
   install_current_protection
   install_telemt
   postcheck
