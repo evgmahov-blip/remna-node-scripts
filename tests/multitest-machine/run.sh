@@ -132,7 +132,11 @@ grep -Fq '"signature":"stable"' "$APP_DIR/xhttp-signature.json"
 [[ ! -e "$APP_DIR/remnawave-profiles/host-new.json" ]]
 [[ "$(cat "$TELEMT_CONFIG_FILE")" == 'telemt=stable' ]]
 
-managed_update_backup(){ mkdir -p "$WORK/backup"; printf '%s\n' "$WORK/backup"; }
+managed_update_backup(){
+  mkdir -p "$WORK/backup"
+  managed_identity_manifest "$WORK/backup/identity.before.json"
+  printf '%s\n' "$WORK/backup"
+}
 managed_patch_node_image(){ :; }
 managed_update_postcheck(){ :; }
 managed_running_image_digest(){ printf '%s\n' "$NODE_IMAGE_DIGEST"; }
@@ -152,6 +156,22 @@ assert d["image_ok"] is True
 assert len(d["identity_digest"]) == 64
 PY
 [[ "$(stat -c %a "$RELEASE_MARKER")" == 600 ]]
+
+rm -f "$WORK/backup.called"
+managed_update_backup(){
+  touch "$WORK/backup.called"
+  mkdir -p "$WORK/backup"
+  printf '%s\n' "$WORK/backup"
+}
+run_managed_update
+[[ ! -e "$WORK/backup.called" ]]
+
+for n in 01 02 03 04 05 06 07; do
+  mkdir -p "$MANAGED_UPDATE_BACKUP_ROOT/20260924-1200${n}.abc${n}"
+  touch -d "2026-09-24 12:00:${n}" "$MANAGED_UPDATE_BACKUP_ROOT/20260924-1200${n}.abc${n}"
+done
+MANAGED_UPDATE_KEEP_BACKUPS=5 managed_update_prune_backups
+[[ "$(find "$MANAGED_UPDATE_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '20260924-*' | wc -l)" -eq 5 ]]
 
 rm -f "$RELEASE_MARKER"
 managed_update_rollback(){

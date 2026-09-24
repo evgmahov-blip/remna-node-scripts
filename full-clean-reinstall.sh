@@ -475,10 +475,14 @@ for item in data.get("files", []):
         continue
     src=Path(str(item["path"]))
     dst=rootfs / str(src).lstrip("/")
+    expected=str(item.get("sha256") or "")
     if not src.is_file():
         raise SystemExit(f"identity source disappeared during backup: {src}")
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
+    actual=__import__("hashlib").sha256(dst.read_bytes()).hexdigest()
+    if actual != expected:
+        raise SystemExit(f"identity changed during backup: {src}")
 PY
   chmod -R go-rwx "$dir"
   printf '%s\n' "$dir"
@@ -626,10 +630,64 @@ managed_update_postcheck(){
   [[ "$(managed_running_image_digest)" == "$NODE_IMAGE_DIGEST" ]] || return 1
 }
 
+managed_update_is_current(){
+  local release_sha="$1" status
+  status="$(release_status 2>/dev/null || true)"
+  python3 - "$release_sha" "$status" <<'PY'
+import json, sys
+target=sys.argv[1]
+try:
+    d=json.loads(sys.argv[2])
+except Exception:
+    raise SystemExit(1)
+ok=(
+    d.get("schema") == "remnanode.release.v1"
+    and d.get("installed") is True
+    and d.get("release_sha") == target
+    and d.get("identity_ok") is True
+    and d.get("image_ok") is True
+    and d.get("marker_integrity_ok") is True
+)
+raise SystemExit(0 if ok else 1)
+PY
+}
+
+managed_update_prune_backups(){
+  local keep="${MANAGED_UPDATE_KEEP_BACKUPS:-5}"
+  [[ "$keep" =~ ^[0-9]+$ ]] || keep=5
+  (( keep >= 1 )) || keep=5
+  python3 - "$MANAGED_UPDATE_BACKUP_ROOT" "$keep" <<'PY'
+import re, shutil, sys
+from pathlib import Path
+root=Path(sys.argv[1])
+keep=int(sys.argv[2])
+if not root.is_dir():
+    raise SystemExit(0)
+pat=re.compile(r"^\d{8}-\d{6}\.[A-Za-z0-9]+$")
+dirs=[p for p in root.iterdir() if p.is_dir() and pat.fullmatch(p.name)]
+dirs.sort(key=lambda p:p.stat().st_mtime, reverse=True)
+for p in dirs[keep:]:
+    shutil.rmtree(p)
+PY
+}
+
 run_managed_update(){
-  local release_sha backup before_identity after_identity before_telemt before_panel before_image
+  local release_sha backup before_identity backup_identity after_identity before_telemt before_panel before_image lock_fd
   release_sha="${AINOC_RELEASE_SHA:-}"
   [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || die 'managed-update требует trusted AINOC_RELEASE_SHA (40 hex).'
+
+  command -v flock >/dev/null 2>&1 || die 'managed-update: flock отсутствует.'
+  install -d -m 0755 /run/lock
+  exec {lock_fd}>/run/lock/remnanode-managed-update.lock
+  flock -n "$lock_fd" || die 'managed-update: другая операция обновления уже выполняется.'
+
+  if managed_update_is_current "$release_sha"; then
+    ok "AINOC release уже установлен и identity/image verified: ${release_sha:0:12}"
+    flock -u "$lock_fd" || true
+    eval "exec ${lock_fd}>&-"
+    return 0
+  fi
+
   [[ -s "$APP_DIR/.env" ]] || die 'managed-update: RemnaNode .env отсутствует.'
   [[ -s "$APP_DIR/.node_domain" ]] || die 'managed-update: node domain marker отсутствует.'
   [[ -s "$APP_DIR/.transport" ]] || die 'managed-update: transport marker отсутствует.'
@@ -639,7 +697,9 @@ run_managed_update(){
   before_telemt="$(systemctl is-active telemt.service 2>/dev/null || true)"
   before_panel="$(systemctl is-active telemt-panel.service 2>/dev/null || true)"
   backup="$(managed_update_backup)"
-  ok "managed-update backup: $backup"
+  backup_identity="$(sha256sum "$backup/identity.before.json" | awk '{print $1}')"
+  [[ "$backup_identity" == "$before_identity" ]] || die 'managed-update: identity changed during preflight/backup; update refused before mutation.'
+  ok "managed-update backup verified: $backup"
 
   if ! AINOC_INPLACE_UPDATE=1 sync_next_sources; then
     if ! managed_update_rollback "$backup" "$before_image"; then
@@ -671,6 +731,9 @@ run_managed_update(){
   write_release_marker "$release_sha" "$after_identity" in-place
   ok "AINOC in-place release установлен без изменения connection identity: ${release_sha:0:12}"
   ok "Rollback point: $backup"
+  managed_update_prune_backups || warn 'managed-update: не удалось удалить старые recovery backups.'
+  flock -u "$lock_fd" || true
+  eval "exec ${lock_fd}>&-"
 }
 
 legacy_call(){
