@@ -18,9 +18,17 @@ Run MTProto alongside the existing RemnaWave/Xray/Hysteria2 node without taking 
 - Both systemd units have an empty capability bounding set and `NoNewPrivileges=true`.
 - Telemt uses tracked conntrack mode and does not install notrack/firewall rules.
 - Panel host control is `service_manager = "none"`; privileged operations are `manual`.
-- This module never writes UFW/iptables/nftables rules directly. Before service start it enrolls the Telemt public port into the existing RemnaNode protection policy via `protection-manager.sh config-set FILTER_PORTS ...`; firewall ownership remains with `REMNA_GUARD*`.
+- With the current protection stack, the module enrolls the Telemt public port through `protection-manager.sh`. On legacy nodes it uses the reviewed compatibility adapter to extend the existing `REMNA_RKN_SCANNERS` guard and add the matching UFW admission; it does not create a second firewall contour.
 
 This intentionally gives up Telemt's notrack optimization in exchange for isolation from the node firewall.
+
+### Fake-TLS / SNI policy
+
+For production RemnaNode installs, prefer **self-mask**: `TLS_DOMAIN` should be a real hostname owned by the operator, resolving to the same node and presenting a valid certificate on the node's ordinary HTTPS service. Using the node hostname keeps TCP/443 and Telemt TCP/8443 consistent under active TLS probing.
+
+Avoid unrelated third-party SNI values (for example public CDN domains) as a default. They can create an unnecessary cross-port fingerprint even when Fake-TLS itself is valid.
+
+Changing `TLS_DOMAIN` changes the generated `ee` MTProxy secret/link. Regenerate/distribute the link after a mask-domain change.
 
 ## Pinned upstreams
 
@@ -34,10 +42,11 @@ Release assets are verified against hard-coded SHA256 values before installation
 ```bash
 sudo next-installer/telemt-manager.sh preflight
 
-# Generate the bcrypt hash with a reviewed matching telemt-panel binary first.
+# Prefer self-mask: use the same real hostname that already resolves to the node
+# and has a valid TLS certificate on the node's normal HTTPS endpoint.
 sudo env \
-  TLS_DOMAIN=example.org \
-  PANEL_PASSWORD_HASH='<bcrypt hash>' \
+  TLS_DOMAIN=sui2.remna.2rdp.ru \
+  PANEL_PASSWORD='<strong one-time password>' \
   TELEMT_PORT=8443 \
   next-installer/telemt-manager.sh install
 
@@ -62,7 +71,7 @@ A future public admin endpoint must be a separate reviewed change (preferably mT
 
 ## Firewall ownership
 
-The current `REMNA_GUARD` ownership model remains authoritative. Installation requires an initialized executable `protection-manager.sh`; before Telemt is started, the manager appends its public port (default `8443`) to `FILTER_PORTS` through that interface. It never calls iptables/nftables/UFW directly.
+The current node protection ownership remains authoritative. New protection-manager nodes append the public port (default `8443`) to `FILTER_PORTS`. Legacy RKN nodes use `telemt-legacy-rkn-adapter.sh`, which backs up and extends the existing persistent scanner guard to `80,443,8443` and adds only the corresponding UFW admission.
 
 The default RemnaNode security profile is **semi-paranoid**: TSPU and GOV feeds enabled, dynamic scanner blocking enabled with validated last-known-good fallback, GeoIP allow-list disabled, and drop logging disabled. Thus TCP/8443 receives the same scanner/source filtering as the normal public TCP service ports without turning the node into a geographic allow-list.
 
