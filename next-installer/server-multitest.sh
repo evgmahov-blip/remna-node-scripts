@@ -49,6 +49,7 @@ NEXTTRACE_TOOL_DIR="/usr/local/libexec/remnanode-next-tools"
 NEXTTRACE_BIN=""
 
 REPORT_ROOT="${MULTITEST_REPORT_DIR:-/var/log/remnanode-next/multitest}"
+MULTITEST_LOCK_FILE="${MULTITEST_LOCK_FILE:-/run/lock/remnanode-next-multitest.lock}"
 
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
@@ -74,6 +75,22 @@ warn(){ printf '%s[WARN]%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 fail(){ printf '%s[ERROR]%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; return 1; }
 need_root(){ [[ ${EUID:-$(id -u)} -eq 0 ]] || { fail 'Запусти от root.'; exit 1; }; }
 pause(){ printf 'Enter — продолжить... '; read -r _ < "$TTY" || true; }
+
+acquire_multitest_lock(){
+  need_cmd flock util-linux || return 1
+  install -d -m 0755 "$(dirname "$MULTITEST_LOCK_FILE")"
+  exec 9>"$MULTITEST_LOCK_FILE"
+  if ! flock -n 9; then
+    warn "Мультитест уже запущен другим процессом. Дождись его завершения."
+    exec 9>&-
+    return 75
+  fi
+}
+
+release_multitest_lock(){
+  flock -u 9 2>/dev/null || true
+  exec 9>&- 2>/dev/null || true
+}
 
 git_blob_sha(){
   local file="$1" size
@@ -1141,6 +1158,7 @@ show_latest_report(){
 }
 
 run_all(){
+  acquire_multitest_lock || return $?
   local names=(
     "IP Region"
     "Censorcheck — проверка геоблока"
@@ -1238,7 +1256,18 @@ run_all(){
   printf 'Analysis:  %s/analysis.txt\n' "$run_dir"
   printf 'AI report: %s/AI_REPORT.txt\n' "$run_dir"
   printf 'Повторно:  sudo remnanode-next multitest analyze\n'
-  (( failed == 0 ))
+  local final_rc=0
+  (( failed == 0 )) || final_rc=1
+  release_multitest_lock
+  return "$final_rc"
+}
+
+run_single_locked(){
+  local num="$1" rc=0
+  acquire_multitest_lock || return $?
+  run_interruptible "$num" || rc=$?
+  release_multitest_lock
+  return "$rc"
 }
 
 menu(){
@@ -1256,7 +1285,7 @@ menu(){
     case "$choice" in
       1|2|3|4|5|6|7|8|9|10|11|12|13)
         rc=0
-        run_interruptible "$choice" || rc=$?
+        run_single_locked "$choice" || rc=$?
         (( rc == 0 || rc == 130 )) || warn "Тест завершился с rc=$rc"
         pause
         ;;
@@ -1297,7 +1326,7 @@ main(){
     all|99) need_root; run_all ;;
     analyze) need_root; show_latest_analysis ;;
     report) need_root; show_latest_report ;;
-    1|2|3|4|5|6|7|8|9|10|11|12|13) need_root; run_interruptible "$1" ;;
+    1|2|3|4|5|6|7|8|9|10|11|12|13) need_root; run_single_locked "$1" ;;
     *) usage; exit 2 ;;
   esac
 }
