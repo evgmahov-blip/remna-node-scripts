@@ -18,7 +18,7 @@ Run MTProto alongside the existing RemnaWave/Xray/Hysteria2 node without taking 
 - Both systemd units have an empty capability bounding set and `NoNewPrivileges=true`.
 - Telemt uses tracked conntrack mode and does not install notrack/firewall rules.
 - Panel host control is `service_manager = "none"`; privileged operations are `manual`.
-- This module never changes UFW, iptables, nftables, Docker networking, Caddy, RemnaWave, or `REMNA_GUARD*`.
+- This module never writes UFW/iptables/nftables rules directly. Before service start it enrolls the Telemt public port into the existing RemnaNode protection policy via `protection-manager.sh config-set FILTER_PORTS ...`; firewall ownership remains with `REMNA_GUARD*`.
 
 This intentionally gives up Telemt's notrack optimization in exchange for isolation from the node firewall.
 
@@ -62,7 +62,9 @@ A future public admin endpoint must be a separate reviewed change (preferably mT
 
 ## Firewall ownership
 
-The integration does not open TCP/8443 automatically. Production activation must explicitly decide how that port is admitted by the existing node firewall/protection policy. The current `REMNA_GUARD` ownership model remains authoritative.
+The current `REMNA_GUARD` ownership model remains authoritative. Installation requires an initialized executable `protection-manager.sh`; before Telemt is started, the manager appends its public port (default `8443`) to `FILTER_PORTS` through that interface. It never calls iptables/nftables/UFW directly.
+
+The default RemnaNode security profile is **semi-paranoid**: TSPU and GOV feeds enabled, dynamic scanner blocking enabled with validated last-known-good fallback, GeoIP allow-list disabled, and drop logging disabled. Thus TCP/8443 receives the same scanner/source filtering as the normal public TCP service ports without turning the node into a geographic allow-list.
 
 ## Production gate
 
