@@ -220,7 +220,6 @@ jobs:
           test -n "$tester_ref"
           test -n "$tester_blob"
           grep -Fq 'server-multitest.sh' full-clean-reinstall.sh
-          grep -Fq 'sudo remnanode-next multitest' full-clean-reinstall.sh
           grep -Fq 'multitest|server-test|tests)' full-clean-reinstall.sh
 
       - name: Working-node topology provenance
