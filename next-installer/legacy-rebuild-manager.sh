@@ -3,7 +3,7 @@ set -Eeuo pipefail
 case "${TERM:-}" in ""|dumb|unknown) export TERM=xterm ;; esac
 
 REPO_DIR="${REPO_DIR:-$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
-FULL="${FULL:-$REPO_DIR/full-clean-reinstall.sh}"
+FULL="${FULL:-/usr/local/libexec/remnanode-next.sh}"
 V2="${V2:-$REPO_DIR/next-installer/existing-node-v2-cleanup.sh}"
 PROTECTION="${PROTECTION:-$REPO_DIR/protection-manager.sh}"
 TELEMT="${TELEMT:-$REPO_DIR/next-installer/telemt-manager.sh}"
@@ -124,6 +124,7 @@ ensure_target_cert(){
 }
 
 remove_excluded_legacy(){
+  local old_domain f
   if command -v hostnamectl >/dev/null 2>&1; then
     hostnamectl set-hostname "$NODE_DOMAIN"
   fi
@@ -131,9 +132,15 @@ remove_excluded_legacy(){
     docker rm -f remnawave-node-agent >/dev/null 2>&1 || true
   fi
   rm -rf /opt/remnawave-node-agent
-  systemctl disable --now nginx >/dev/null 2>&1 || true
-  rm -f /etc/nginx/sites-enabled/* 2>/dev/null || true
-  rm -f /etc/nginx/sites-available/cdn-xhttp.conf /etc/nginx/sites-available/default 2>/dev/null || true
+  old_domain="$(discover_old_domain)"
+  if [ -n "$old_domain" ]; then
+    for f in /etc/nginx/sites-enabled/* /etc/nginx/sites-available/*; do
+      [ -f "$f" ] || [ -L "$f" ] || continue
+      if grep -Fq "$old_domain" "$f" 2>/dev/null; then
+        rm -f -- "$f"
+      fi
+    done
+  fi
   if command -v ufw >/dev/null 2>&1 && [ -n "$LEGACY_UFW_PORTS" ]; then
     local p
     for p in $LEGACY_UFW_PORTS; do
@@ -271,6 +278,8 @@ finish_install(){
 
 resume(){
   need_root
+  [ -s "$FULL" ] || die "NEXT launcher missing: $FULL"
+  bash -n "$FULL" || die "NEXT launcher syntax check failed: $FULL"
   [ -n "$NODE_DOMAIN" ] || die "set NODE_DOMAIN"
   PANEL_IP="$(discover_panel_ip)"
   [[ "$PANEL_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "PANEL_IP could not be determined safely"
@@ -287,6 +296,8 @@ resume(){
 
 rebuild(){
   need_root
+  [ -s "$FULL" ] || die "NEXT launcher missing: $FULL"
+  bash -n "$FULL" || die "NEXT launcher syntax check failed: $FULL"
   [ -n "$NODE_DOMAIN" ] || die "set NODE_DOMAIN"
   PANEL_IP="$(discover_panel_ip)"
   [[ "$PANEL_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "PANEL_IP could not be determined safely"

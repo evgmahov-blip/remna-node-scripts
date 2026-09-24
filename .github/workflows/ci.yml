@@ -41,6 +41,10 @@ jobs:
         shell: bash
         run: bash tests/security/run.sh
 
+      - name: Mistral blocker regression tests
+        shell: bash
+        run: bash tests/mistral-blockers/run.sh
+
       - name: Telemt integration security tests
         shell: bash
         run: bash tests/telemt/run.sh

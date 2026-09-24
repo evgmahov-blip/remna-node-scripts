@@ -797,8 +797,14 @@ run_install(){
 
   echo
   echo '================ DEFAULT PROTECTION / NETWORK ================='
-  ensure_default_rkn || warn 'RKN SAFE scanner guard не удалось установить автоматически. Доступно вручную: sudo remnanode-next rkn'
-  "$GUARDS" sync-rkn-watch >/dev/null 2>&1 || warn 'RKN self-heal watcher требует внимания.'
+  local panel_ip=""
+  [[ -r "$APP_DIR/.panel_ip" ]] && panel_ip="$(tr -d '[:space:]' < "$APP_DIR/.panel_ip")"
+  if [[ -n "$panel_ip" ]]; then
+    PANEL_IP_ENV="$panel_ip" "$PROTECTION" install || die 'Current semi-paranoid protection install failed.'
+  else
+    die 'PANEL_IP missing after base install; refusing to leave TCP/2222 without current protection.'
+  fi
+  "$GUARDS" sync-rkn-watch >/dev/null 2>&1 || warn 'Legacy RKN self-heal watcher требует внимания.'
   ensure_default_network || warn 'BBR TUNE не применён автоматически. Проверить: sudo remnanode-next network-status'
   echo '==============================================================='
 
