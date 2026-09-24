@@ -313,26 +313,43 @@ test_geo_unlock(){
 test_ipquality(){
   need_cmd curl curl ca-certificates
   need_cmd jq jq
+  need_cmd bc bc
+  need_cmd nc netcat-openbsd
+  need_cmd dig dnsutils
+  need_cmd ip iproute2
 
-  local script json rc=0
+  local script json err rc=0
   script="$(mktemp "/tmp/remna-ipquality.XXXXXX.sh")"
   json="$(mktemp "/tmp/remna-ipquality.XXXXXX.json")"
+  err="$(mktemp "/tmp/remna-ipquality.XXXXXX.err")"
 
   printf '%s================ IPQuality ================%s\n' "$C_CYAN" "$C_RESET"
   if ! download_external_script "IPQuality" "$IPQUALITY_URL" "$script" "$IPQUALITY_BLOB_SHA"; then
-    rm -f "$script" "$json"
+    rm -f "$script" "$json" "$err"
     return 1
   fi
 
   set +e
-  bash "$script" -l ru -y -p -j >"$json" 2>/dev/null
+  bash "$script" -l ru -y -p -j >"$json" 2>"$err"
   rc=$?
   set -e
 
   if ! jq -e . "$json" >/dev/null 2>&1; then
     fail "IPQuality не вернул валидный JSON (rc=$rc)."
-    rm -f "$script" "$json"
+    if [[ -s "$err" ]]; then
+      printf '%s--- IPQuality stderr --- %s\n' "$C_YELLOW" "$C_RESET"
+      sed -n '1,80p' "$err"
+    fi
+    if [[ -s "$json" ]]; then
+      printf '%s--- IPQuality stdout (первые строки) --- %s\n' "$C_YELLOW" "$C_RESET"
+      sed -n '1,40p' "$json"
+    fi
+    rm -f "$script" "$json" "$err"
     return 1
+  fi
+
+  if (( rc != 0 )); then
+    warn "IPQuality вернул rc=$rc, но JSON валиден; используем полученные данные."
   fi
 
   jq -r '
