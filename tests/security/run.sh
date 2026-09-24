@@ -115,7 +115,8 @@ feed empty '' empty
 feed bad $'10.1.0.0/24\n999.1.1.1/99\n' malformed
 feed zero $'10.1.0.0/24\n0.0.0.0/0\n' broad
 feed wide $'1.0.0.0/7\n' broad
-feed v6 $'2001:db8::/32\n' family
+python3 "$PY" validate --raw <(printf '10.1.0.1\n2001:db8::1\n') --mode plain --family ipv4 --panel 203.0.113.10 --min-absolute 1 --print-json > "$WORK/mixed.out"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["ok"] is True and d["accepted"] == 1 and d["ignored_family"] == 1' "$WORK/mixed.out"
 ok feed-rejects
 
 echo "gov parser and panel/whitelist collision"
