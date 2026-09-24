@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-export TERM="${TERM:-xterm}"
+case "${TERM:-}" in ""|dumb|unknown) export TERM=xterm ;; esac
 
 REPO_DIR="${REPO_DIR:-$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
 FULL="${FULL:-$REPO_DIR/full-clean-reinstall.sh}"
