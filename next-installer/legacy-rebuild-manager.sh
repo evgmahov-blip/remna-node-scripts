@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+REPO_DIR="${REPO_DIR:-$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
+FULL="${FULL:-$REPO_DIR/full-clean-reinstall.sh}"
+V2="${V2:-$REPO_DIR/next-installer/existing-node-v2-cleanup.sh}"
+PROTECTION="${PROTECTION:-$REPO_DIR/protection-manager.sh}"
+TELEMT="${TELEMT:-$REPO_DIR/next-installer/telemt-manager.sh}"
+
+NODE_DOMAIN="${NODE_DOMAIN:-}"
+OLD_NODE_DOMAIN="${OLD_NODE_DOMAIN:-}"
+PANEL_IP="${PANEL_IP:-}"
+NODE_PORT="${NODE_PORT:-2222}"
+TRANSPORT="${TRANSPORT:-combined}"
+CAMOUFLAGE_MODE="${CAMOUFLAGE_MODE:-selfsteal}"
+INSTALL_TELEMT="${INSTALL_TELEMT:-1}"
+TELEMT_PORT="${TELEMT_PORT:-8443}"
+BACKUP_ROOT="${BACKUP_ROOT:-/root/remna-managed-rebuilds}"
+
+say(){ printf '%s\n' "$*"; }
+ok(){ printf '[OK] %s\n' "$*"; }
+warn(){ printf '[WARN] %s\n' "$*" >&2; }
+die(){ printf '[ERROR] %s\n' "$*" >&2; exit 1; }
+need_root(){ [ "$(id -u)" -eq 0 ] || die "run as root"; }
+
+public_ip(){
+  ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}'
+}
+
+discover_old_domain(){
+  if [ -n "$OLD_NODE_DOMAIN" ]; then printf '%s\n' "$OLD_NODE_DOMAIN"; return; fi
+  if [ -r /opt/remnanode/.node_domain ]; then tr -d '[:space:]' </opt/remnanode/.node_domain; return; fi
+  grep -RhoE 'server_name[[:space:]]+[^;]+' /etc/nginx/sites-enabled /etc/nginx/sites-available 2>/dev/null |
+    awk '{print $2}' | grep -E '\.' | head -1 || true
+}
+
+discover_panel_ip(){
+  if [ -n "$PANEL_IP" ]; then printf '%s\n' "$PANEL_IP"; return; fi
+  if [ -r /opt/remnanode/.panel_ip ]; then
+    local p; p="$(tr -d '[:space:]' </opt/remnanode/.panel_ip)"
+    [[ "$p" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && { printf '%s\n' "$p"; return; }
+  fi
+  ss -tn state established "sport = :$NODE_PORT" 2>/dev/null |
+    awk 'NR>1{print $5}' |
+    sed -E 's/.*ffff:([^]]+)\].*/\1/; s/:.*//' |
+    grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' |
+    sort -u | head -1 || true
+}
+
+old_secret(){
+  awk -F'SECRET_KEY=' '/SECRET_KEY=/{print $2; exit}' /opt/remnanode/docker-compose.yml 2>/dev/null |
+    sed -E 's/[[:space:]]+$//'
+}
+
+discover(){
+  need_root
+  local p old ip
+  p="$(discover_panel_ip)"
+  old="$(discover_old_domain)"
+  ip="$(public_ip)"
+  say "NODE_DOMAIN=${NODE_DOMAIN:-<required>}"
+  say "OLD_NODE_DOMAIN=${old:-<not-found>}"
+  say "PUBLIC_IP=${ip:-<not-found>}"
+  say "PANEL_IP=${p:-<not-found>}"
+  say "NODE_PORT=$NODE_PORT"
+  say "TRANSPORT=$TRANSPORT"
+  say "CAMOUFLAGE_MODE=$CAMOUFLAGE_MODE"
+  say "INSTALL_TELEMT=$INSTALL_TELEMT"
+  [ -n "$(old_secret)" ] && say "NODE_SECRET=present" || say "NODE_SECRET=missing"
+}
+
+make_backup(){
+  need_root
+  local stamp dir archive old ip p
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  dir="$BACKUP_ROOT/$stamp"
+  archive="$BACKUP_ROOT/remna-managed-rebuild-$stamp.tar.gz"
+  mkdir -p "$dir/files" "$dir/state"
+  chmod 700 "$BACKUP_ROOT" "$dir"
+  for x in /opt/remnanode /opt/remnawave-node-agent /etc/nginx /etc/letsencrypt; do
+    [ -e "$x" ] && cp -a --parents "$x" "$dir/files/" 2>/dev/null || true
+  done
+  iptables-save >"$dir/state/iptables.v4" 2>/dev/null || true
+  ip6tables-save >"$dir/state/iptables.v6" 2>/dev/null || true
+  ipset save >"$dir/state/ipset.save" 2>/dev/null || true
+  ufw status numbered >"$dir/state/ufw.txt" 2>/dev/null || true
+  ss -lntup >"$dir/state/listeners.txt" 2>/dev/null || true
+  docker ps -a --no-trunc >"$dir/state/docker-ps.txt" 2>/dev/null || true
+  ip -br a >"$dir/state/ip.txt" 2>/dev/null || true
+  ip route >"$dir/state/routes.txt" 2>/dev/null || true
+  old="$(discover_old_domain)"; ip="$(public_ip)"; p="$(discover_panel_ip)"
+  cat >"$dir/identity.txt" <<EOF
+NODE_DOMAIN=$NODE_DOMAIN
+OLD_NODE_DOMAIN=$old
+PUBLIC_IP=$ip
+PANEL_IP=$p
+NODE_PORT=$NODE_PORT
+EOF
+  chmod 600 "$dir/identity.txt"
+  tar -C "$BACKUP_ROOT" -czf "$archive" "$stamp"
+  chmod 600 "$archive"
+  sha256sum "$archive" >"$archive.sha256"
+  chmod 600 "$archive.sha256"
+  printf '%s\n' "$archive"
+}
+
+ensure_target_cert(){
+  local cert="/etc/letsencrypt/live/$NODE_DOMAIN/fullchain.pem"
+  local key="/etc/letsencrypt/live/$NODE_DOMAIN/privkey.pem"
+  if [ -s "$cert" ] && [ -s "$key" ]; then
+    ok "target certificate already exists: $NODE_DOMAIN"
+    return 0
+  fi
+  command -v certbot >/dev/null 2>&1 || die "certbot missing"
+  systemctl stop nginx >/dev/null 2>&1 || true
+  if ! certbot certonly --standalone -d "$NODE_DOMAIN" --agree-tos --non-interactive       --register-unsafely-without-email --key-type ecdsa --elliptic-curve secp384r1; then
+    systemctl start nginx >/dev/null 2>&1 || true
+    die "certificate issuance failed"
+  fi
+  [ -s "$cert" ] && [ -s "$key" ] || die "certificate files missing"
+}
+
+remove_excluded_legacy(){
+  if command -v docker >/dev/null 2>&1; then
+    docker rm -f remnawave-node-agent >/dev/null 2>&1 || true
+  fi
+  rm -rf /opt/remnawave-node-agent
+  systemctl disable --now nginx >/dev/null 2>&1 || true
+  rm -f /etc/nginx/sites-enabled/* 2>/dev/null || true
+  rm -f /etc/nginx/sites-available/cdn-xhttp.conf /etc/nginx/sites-available/default 2>/dev/null || true
+  ok "legacy admin agent and host nginx configs removed; unrelated containers preserved"
+}
+
+run_base_setup(){
+  local secret setup tmp
+  secret="$(old_secret)"
+  [ -n "$secret" ] || die "old RemnaNode secret missing"
+  bash "$FULL" sync-source
+  setup="/opt/remnanode/next-installer/setup_node-legacy.sh"
+  [ -s "$setup" ] || die "synced legacy setup missing"
+  tmp="$(mktemp)"
+  head -n -1 "$setup" >"$tmp"
+  cat >>"$tmp" <<'EOF'
+check_os
+detect_arch
+run_initial_setup
+EOF
+  chmod 700 "$tmp"
+  {
+    printf '\n'
+    printf '%s\n' "$PANEL_IP"
+    printf '%s\n' "$NODE_DOMAIN"
+    printf '\n'
+    printf '%s\n' "$secret"
+    printf '\n'
+    printf '\n'
+    printf '4\n'
+    printf '%s\n' "/etc/letsencrypt/live/$NODE_DOMAIN/fullchain.pem"
+    printf '%s\n' "/etc/letsencrypt/live/$NODE_DOMAIN/privkey.pem"
+    printf '\n'
+  } | bash "$tmp"
+  rm -f "$tmp"
+  unset secret
+}
+
+install_current_protection(){
+  [ -f "$PROTECTION" ] || die "protection manager missing"
+  bash "$PROTECTION" install
+  bash "$PROTECTION" panel-set "$PANEL_IP"
+  bash "$PROTECTION" selftest
+}
+
+install_telemt(){
+  [ "$INSTALL_TELEMT" = 1 ] || return 0
+  [ -f "$TELEMT" ] || die "Telemt manager missing"
+  local cred pass
+  cred=/root/telemt-panel-credentials.txt
+  if [ ! -s "$cred" ]; then
+    umask 077
+    pass="$(openssl rand -hex 16)"
+    printf 'username=admin\npassword=%s\n' "$pass" >"$cred"
+    unset pass
+  fi
+  pass="$(sed -n 's/^password=//p' "$cred")"
+  TLS_DOMAIN="$NODE_DOMAIN" PANEL_USERNAME=admin PANEL_PASSWORD="$pass" TELEMT_PORT="$TELEMT_PORT" bash "$TELEMT" install
+  unset pass
+}
+
+postcheck(){
+  local fail=0
+  systemctl is-active --quiet ssh || systemctl is-active --quiet sshd || { warn "SSH inactive"; fail=1; }
+  docker ps --format '{{.Names}}' | grep -qx remnanode || { warn "remnanode missing"; fail=1; }
+  ss -lntup | grep -q ":$NODE_PORT " || { warn "node port missing"; fail=1; }
+  [ "$(cat /opt/remnanode/.node_domain 2>/dev/null)" = "$NODE_DOMAIN" ] || { warn "node domain mismatch"; fail=1; }
+  [ "$(cat /opt/remnanode/.panel_ip 2>/dev/null)" = "$PANEL_IP" ] || { warn "panel ip mismatch"; fail=1; }
+  bash "$PROTECTION" status >/dev/null || { warn "protection status failed"; fail=1; }
+  if [ "$INSTALL_TELEMT" = 1 ]; then
+    systemctl is-active --quiet telemt.service || { warn "telemt inactive"; fail=1; }
+    systemctl is-active --quiet telemt-panel.service || { warn "telemt panel inactive"; fail=1; }
+  fi
+  docker ps --format '{{.Names}}' | grep -qx beszel-agent && ok "beszel-agent preserved" || warn "beszel-agent not present"
+  if [ "$fail" -eq 0 ]; then ok "managed rebuild postcheck PASS"; else return 1; fi
+}
+
+rebuild(){
+  need_root
+  [ -n "$NODE_DOMAIN" ] || die "set NODE_DOMAIN"
+  PANEL_IP="$(discover_panel_ip)"
+  [[ "$PANEL_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "PANEL_IP could not be determined safely"
+  local secret
+  secret="$(old_secret)"
+  [ -n "$secret" ] || die "old RemnaNode secret missing"
+  unset secret
+  local backup
+  backup="$(make_backup)"
+  ok "backup: $backup"
+  ensure_target_cert
+  remove_excluded_legacy
+  V2_ASSUME_YES=1 bash "$V2"
+  run_base_setup
+  CAMOUFLAGE_MODE="$CAMOUFLAGE_MODE" bash "$FULL" transport "$TRANSPORT"
+  install_current_protection
+  install_telemt
+  postcheck
+  ok "rebuild complete: $NODE_DOMAIN"
+}
+
+case "${1:-discover}" in
+  discover) discover ;;
+  backup) make_backup ;;
+  rebuild) rebuild ;;
+  status) postcheck ;;
+  *) die "Usage: $0 {discover|backup|rebuild|status}" ;;
+esac
