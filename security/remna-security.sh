@@ -43,6 +43,9 @@ die() {
 is_menu_back() { case "${1:-}" in 0|q|Q|back|BACK|Back|назад|Назад|НАЗАД) return 0 ;; *) return 1 ;; esac; }
 log_action() {
   mkdir -p "$LOGDIR"
+  chmod 0700 "$LOGDIR" || true
+  touch "$ACTION_LOG"
+  chmod 0600 "$ACTION_LOG" || true
   printf '[%s] %s\n' "$(date '+%F %T')" "$*" >> "$ACTION_LOG"
 }
 
@@ -63,7 +66,9 @@ ensure_key() {
 
 write_defaults() {
   mkdir -p "$BASE" "$DATA" "$LOGDIR"
-  chmod 0700 "$BASE" "$DATA" || true
+  chmod 0700 "$BASE" "$DATA" "$LOGDIR" || true
+  touch "$ACTION_LOG" "$UPDATE_LOG"
+  chmod 0600 "$ACTION_LOG" "$UPDATE_LOG" || true
   if [ ! -f "$CONF" ]; then
     cat > "$CONF" <<'EOF'
 PANEL_IP=
@@ -197,7 +202,7 @@ apply_rules() {
   load_conf
   snapshot_before
   if run_apply; then
-    log_action "rules applied backend=$BACKEND panel=$PANEL_IP ports=$FILTER_PORTS"
+    log_action "rules applied backend=$BACKEND panel=trusted-configured ports=$FILTER_PORTS"
     return 0
   fi
   warn "Применение owned-ruleset не удалось; возвращаю последний снимок."
@@ -359,6 +364,9 @@ update_blocklists() {
   py finalize-update --base "$BASE" --results "$RESULTS" >/dev/null
   rm -f "$RESULTS"
   mkdir -p "$LOGDIR"
+  chmod 0700 "$LOGDIR" || true
+  touch "$UPDATE_LOG"
+  chmod 0600 "$UPDATE_LOG" || true
   printf '[%s] ok=%s\n' "$(date '+%F %T')" "$failed" >> "$UPDATE_LOG"
   if [ "$JSON" = 1 ]; then
     py emit update --base "$BASE"

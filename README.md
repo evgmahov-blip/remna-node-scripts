@@ -221,7 +221,7 @@ Final Mask: ПУСТО / DEFAULT
 sudo remnanode-next multitest
 sudo remnanode-next multitest all
 sudo remnanode-next multitest 1
-sudo remnanode-next multitest 12
+sudo remnanode-next multitest 13
 ```
 
 Тесты:
@@ -239,6 +239,7 @@ sudo remnanode-next multitest 12
 10  NextTrace Route/MTR — loss/jitter/ASN/geo
 11  NextTrace Path MTU — UDP PMTU
 12  NextTrace Globalping — внешние TCP/443 точки → эта нода
+13  AI Access — OpenAI / Claude / Gemini / Mistral / Grok / Perplexity
 99  все тесты автоматически
 ```
 
@@ -261,9 +262,11 @@ sudo remnanode-next multitest report
 
 `analyze` повторно строит и показывает анализ последнего прогона. `report` показывает каталог и пути к `analysis.txt`, `AI_REPORT.txt` и raw logs. В меню также есть пункт `98) Анализ последнего прогона`.
 
-После `multitest all` в терминале сразу выводится короткий блок **ИТОГ ПО НОДЕ**: FAIL, измеренная скорость, single/all-thread CPU, MTU, DNSBL blacklist, рабочий сетевой бюджет и ориентир по одновременно активным XHTTP-клиентам при 3 и 5 Mbit/s. PASS/нормальные показатели подсвечиваются зелёным, предупреждения/пропуски — жёлтым, FAIL/проблемы — красным, заголовки секций — голубым. Файлы `analysis.txt` и `AI_REPORT.txt` остаются без ANSI-кодов.
+После `multitest all` в терминале сразу выводится короткий блок **ИТОГ ПО НОДЕ**: FAIL, измеренная скорость, single/all-thread CPU, MTU, DNSBL blacklist, доступность AI API, рабочий сетевой бюджет и ориентир по одновременно активным XHTTP-клиентам при 3 и 5 Mbit/s. PASS/нормальные показатели подсвечиваются зелёным, предупреждения/пропуски — жёлтым, FAIL/проблемы — красным, заголовки секций — голубым. Файлы `analysis.txt` и `AI_REPORT.txt` остаются без ANSI-кодов.
 
 IPQuality запускается в JSON/privacy-режиме и выводит только полезные поля: ASN, регион, тип IP, risk, proxy flags, media и DNSBL — без рекламных sponsor-блоков. Подробные raw-логи и `AI_REPORT.txt` сохраняются отдельно.
+
+AI Access не использует API-ключи и не расходует токены: он проверяет IPv4 DNS/TCP/TLS/HTTP до официальных API OpenAI, Anthropic/Claude, Gemini, Mistral, xAI/Grok и Perplexity. Ожидаемые auth-ответы без ключа (`401`, а у Gemini также `403` с сообщением о ключе/identity) считаются успешной сетевой доступностью; DNS/TCP/TLS timeout, явный geo/policy block и service error отмечаются отдельно.
 
 Tester не меняет firewall, sysctl, Docker или конфигурацию Remnawave. Он может доустановить только утилиту, необходимую выбранному тесту (`iperf3`, `sysbench`, `traceroute`, `jq` и т.п.).
 

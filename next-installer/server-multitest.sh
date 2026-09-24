@@ -53,7 +53,7 @@ REPORT_ROOT="${MULTITEST_REPORT_DIR:-/var/log/remnanode-next/multitest}"
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
 
-if [[ -t 1 ]]; then
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   C_RESET=$'\033[0m'
   C_CYAN=$'\033[36m'
   C_YELLOW=$'\033[33m'
@@ -310,28 +310,168 @@ test_geo_unlock(){
   run_external_script     "Geo/Media Unlock — RegionRestrictionCheck"     "$REGION_URL"     "$REGION_BLOB_SHA"     -M 4 -R 0 -E en
 }
 
-test_ipquality(){
-  need_cmd curl curl ca-certificates
-  need_cmd jq jq
+classify_ai_http(){
+  local http="$1" body="$2"
 
-  local script json rc=0
-  script="$(mktemp "/tmp/remna-ipquality.XXXXXX.sh")"
-  json="$(mktemp "/tmp/remna-ipquality.XXXXXX.json")"
-
-  printf '%s================ IPQuality ================%s\n' "$C_CYAN" "$C_RESET"
-  if ! download_external_script "IPQuality" "$IPQUALITY_URL" "$script" "$IPQUALITY_BLOB_SHA"; then
-    rm -f "$script" "$json"
+  if grep -Eiq 'unsupported[_ -]country|country[^[:alnum:]]+(is )?not supported|region[^[:alnum:]]+(is )?not supported|not available in (your|this) (country|region)|geo.?block' "$body" 2>/dev/null; then
+    printf 'GEO_BLOCK'
     return 1
   fi
 
+  case "$http" in
+    200|201|202|204|301|302|303|307|308)
+      printf 'REACHABLE'
+      return 0
+      ;;
+    400|401|403)
+      if [[ "$http" == "401" ]] || grep -Eiq 'api.?key|authentication|authorization|unauthenticated|credential|bearer|unregistered caller|established identity' "$body" 2>/dev/null; then
+        printf 'REACHABLE_AUTH'
+        return 0
+      fi
+      printf 'HTTP_%s_DENIED' "$http"
+      return 1
+      ;;
+    405)
+      printf 'REACHABLE_METHOD'
+      return 0
+      ;;
+    429)
+      printf 'REACHABLE_RATE_LIMIT'
+      return 0
+      ;;
+    451)
+      printf 'POLICY_BLOCK'
+      return 1
+      ;;
+    5??)
+      printf 'SERVICE_ERROR_%s' "$http"
+      return 1
+      ;;
+    000|'')
+      printf 'NO_HTTP'
+      return 1
+      ;;
+    *)
+      printf 'HTTP_%s' "$http"
+      return 1
+      ;;
+  esac
+}
+
+test_ai_access(){
+  need_cmd curl curl ca-certificates
+
+  local probes=(
+    "OpenAI|GET|https://api.openai.com/v1/models"
+    "Anthropic|GET|https://api.anthropic.com/v1/models"
+    "Gemini|GET|https://generativelanguage.googleapis.com/v1beta/models"
+    "Mistral|GET|https://api.mistral.ai/v1/models"
+    "xAI/Grok|GET|https://api.x.ai/v1/models"
+    "Perplexity|POST|https://api.perplexity.ai/chat/completions"
+  )
+  local entry name method url body err meta rc http remote_ip connect_time tls_time state state_rc
+  local reachable=0 failed=0 total=0
+  local curl_args=()
+
+  printf '%s================ AI Access ================%s\n' "$C_CYAN" "$C_RESET"
+  say 'Без API-ключей и без расхода токенов: проверяются DNS/TCP/TLS/HTTP и ожидаемые auth-ответы.'
+
+  for entry in "${probes[@]}"; do
+    IFS='|' read -r name method url <<<"$entry"
+    body="$(mktemp "/tmp/remna-ai-body.XXXXXX")"
+    err="$(mktemp "/tmp/remna-ai-err.XXXXXX")"
+    curl_args=(
+      -4 -sS
+      --proto '=https'
+      --tlsv1.2
+      --connect-timeout 8
+      --max-time 15
+      -o "$body"
+      -w '%{http_code}|%{remote_ip}|%{time_connect}|%{time_appconnect}'
+    )
+    if [[ "$method" == "POST" ]]; then
+      curl_args+=(-H 'Content-Type: application/json' -X POST --data '{}')
+    fi
+
+    if meta="$(curl "${curl_args[@]}" "$url" 2>"$err")"; then
+      rc=0
+    else
+      rc=$?
+    fi
+    total=$((total+1))
+
+    if (( rc != 0 )); then
+      case "$rc" in
+        6) state='DNS_FAIL' ;;
+        7) state='CONNECT_FAIL' ;;
+        28) state='TIMEOUT' ;;
+        35|51|58|60) state='TLS_FAIL' ;;
+        *) state="CURL_FAIL_$rc" ;;
+      esac
+      failed=$((failed+1))
+      printf '%-11s %s%-20s%s rc=%s\n' "$name" "$C_RED" "$state" "$C_RESET" "$rc"
+      if [[ -s "$err" ]]; then
+        printf '             %s%s%s\n' "$C_GRAY" "$(head -c 220 "$err" | tr '\n\r' '  ')" "$C_RESET"
+      fi
+      rm -f "$body" "$err"
+      continue
+    fi
+
+    IFS='|' read -r http remote_ip connect_time tls_time <<<"$meta"
+    state_rc=0
+    state="$(classify_ai_http "$http" "$body")" || state_rc=$?
+    if (( state_rc == 0 )); then
+      reachable=$((reachable+1))
+      printf '%-11s %s%-20s%s HTTP=%s IP=%s connect=%ss tls=%ss\n' "$name" "$C_GREEN" "$state" "$C_RESET" "$http" "${remote_ip:-?}" "${connect_time:-?}" "${tls_time:-?}"
+    else
+      failed=$((failed+1))
+      printf '%-11s %s%-20s%s HTTP=%s IP=%s connect=%ss tls=%ss\n' "$name" "$C_RED" "$state" "$C_RESET" "$http" "${remote_ip:-?}" "${connect_time:-?}" "${tls_time:-?}"
+    fi
+    rm -f "$body" "$err"
+  done
+
+  printf 'AI_SUMMARY: reachable=%s failed=%s total=%s\n' "$reachable" "$failed" "$total"
+  (( failed == 0 ))
+}
+
+test_ipquality(){
+  need_cmd curl curl ca-certificates
+  need_cmd jq jq
+  need_cmd timeout coreutils
+
+  local script json stderr rc=0
+  script="$(mktemp "/tmp/remna-ipquality.XXXXXX.sh")"
+  json="$(mktemp "/tmp/remna-ipquality.XXXXXX.json")"
+  stderr="$(mktemp "/tmp/remna-ipquality.XXXXXX.err")"
+  rm -f "$json"
+
+  printf '%s================ IPQuality ================%s\n' "$C_CYAN" "$C_RESET"
+  if ! download_external_script "IPQuality" "$IPQUALITY_URL" "$script" "$IPQUALITY_BLOB_SHA"; then
+    rm -f "$script" "$json" "$stderr"
+    return 1
+  fi
+
+  # Upstream returns rc=1 on IPv4-only hosts because its final IPv6 conditional
+  # becomes the shell exit status. Its documented JSON output file is authoritative.
   set +e
-  bash "$script" -l ru -y -p -j >"$json" 2>/dev/null
+  timeout --signal=INT --kill-after=15 120s \
+    bash "$script" -l ru -n -p -o "$json" >/dev/null 2>"$stderr"
   rc=$?
   set -e
 
-  if ! jq -e . "$json" >/dev/null 2>&1; then
-    fail "IPQuality не вернул валидный JSON (rc=$rc)."
-    rm -f "$script" "$json"
+  if (( rc == 0 || rc == 1 )) && [[ -s "$json" ]] && \
+     jq -e '(.Info.ASN != null) and ((.Score | type) == "object") and ((.Factor.Proxy | type) == "object") and ((.Media | type) == "object") and ((.Mail.DNSBlacklist | type) == "object")' \
+       "$json" >/dev/null 2>&1; then
+    if (( rc == 1 )); then
+      warn "IPQuality вернул rc=1, но полный JSON валиден; принимаю результат (upstream IPv4-only exit-status quirk)."
+    fi
+  else
+    fail "IPQuality не создал валидный JSON (rc=$rc)."
+    if [[ -s "$stderr" ]]; then
+      printf '%sДиагностика upstream (последние строки):%s\n' "$C_GRAY" "$C_RESET" >&2
+      tail -n 8 "$stderr" >&2 || true
+    fi
+    rm -f "$script" "$json" "$stderr"
     return 1
   fi
 
@@ -351,10 +491,9 @@ test_ipquality(){
       " blacklisted=" + ((.Mail.DNSBlacklist.Blacklisted // "?")|tostring)
   ' "$json"
 
-  rm -f "$script" "$json"
+  rm -f "$script" "$json" "$stderr"
   return 0
 }
-
 test_sysbench_cpu(){
   need_cmd sysbench sysbench
   need_cmd nproc coreutils
@@ -481,6 +620,7 @@ run_one(){
     10) test_nexttrace_mtr ;;
     11) test_nexttrace_mtu ;;
     12) test_nexttrace_globalping ;;
+    13) test_ai_access ;;
     *) fail "Неизвестный тест: ${1:-пусто}"; return 2 ;;
   esac
 }
@@ -513,6 +653,7 @@ print_list(){
 10) NextTrace Route/MTR — loss/jitter/ASN/geo
 11) NextTrace Path MTU — UDP PMTU
 12) NextTrace Globalping — внешние TCP/443 точки → эта нода
+13) AI Access — OpenAI / Claude / Gemini / Mistral / Grok / Perplexity
 98) Анализ последнего прогона
 99) Мультитест: все тесты автоматически
 EOF
@@ -586,12 +727,19 @@ report_key_metrics(){
     echo '[External TCP/443]'
     grep -aE '^--- from |ms|AS[0-9]|Trace|reached|unreachable|timeout' "$dir/12-nexttrace-globalping.log" | tail -50 || true
   fi
+
+  if [[ -f "$dir/13-ai-access.log" ]]; then
+    echo
+    echo '[AI access]'
+    grep -aE '^(OpenAI|Anthropic|Gemini|Mistral|xAI/Grok|Perplexity|AI_SUMMARY):?' "$dir/13-ai-access.log" | tail -20 || true
+  fi
 }
 
 print_node_scorecard(){
   local dir="$1"
   local summary
   local speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" fail_count="" safe_mbps=""
+  local ai_reachable="" ai_failed="" ai_total=""
   local at3="" at5=""
 
   summary="$dir/summary.tsv"
@@ -614,6 +762,12 @@ print_node_scorecard(){
 
   [[ -f "$dir/07-ipquality.log" ]] &&     blacklisted="$(sed -nE 's/^DNSBL:.*blacklisted=([0-9]+).*/\1/p' "$dir/07-ipquality.log" | head -1)"
 
+  if [[ -f "$dir/13-ai-access.log" ]]; then
+    ai_reachable="$(sed -nE 's/^AI_SUMMARY: reachable=([0-9]+).*/\1/p' "$dir/13-ai-access.log" | tail -1)"
+    ai_failed="$(sed -nE 's/^AI_SUMMARY:.* failed=([0-9]+).*/\1/p' "$dir/13-ai-access.log" | tail -1)"
+    ai_total="$(sed -nE 's/^AI_SUMMARY:.* total=([0-9]+).*/\1/p' "$dir/13-ai-access.log" | tail -1)"
+  fi
+
   [[ -f "$summary" ]] &&     fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
 
   echo '======================================================================'
@@ -625,6 +779,11 @@ print_node_scorecard(){
   printf 'CPU all-thread:   %s\n' "$([[ -n "$cpu_all" ]] && printf '%s events/s' "$cpu_all" || printf 'нет данных')"
   printf 'MTU:              %s\n' "${mtu:-нет данных}"
   printf 'DNSBL blacklist:  %s\n' "${blacklisted:-нет данных}"
+  if [[ -n "$ai_total" ]]; then
+    printf 'AI APIs:          reachable=%s/%s failed=%s\n' "${ai_reachable:-0}" "$ai_total" "${ai_failed:-0}"
+  else
+    printf 'AI APIs:          нет данных\n'
+  fi
 
   if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     safe_mbps="$(awk -v s="$speed" 'BEGIN{printf "%.1f", s*0.70}')"
@@ -720,6 +879,9 @@ print_colored_analysis(){
       *" PASS "*|PASS=*|*"PASS="*)
         printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
         ;;
+      *" SKIP "*|SKIP=*|*"SKIP="*)
+        printf '%s%s%s\n' "$C_YELLOW" "$line" "$C_RESET"
+        ;;
       *" FAIL "*|FAIL=*|*"FAIL="*|*"rc="*)
         if [[ "$line" == *"FAIL=0"* && "$line" != *" FAIL "* ]]; then
           printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
@@ -727,11 +889,17 @@ print_colored_analysis(){
           printf '%s%s%s\n' "$C_RED" "$line" "$C_RESET"
         fi
         ;;
-      *" SKIP "*|SKIP=*|*"SKIP="*)
-        printf '%s%s%s\n' "$C_YELLOW" "$line" "$C_RESET"
-        ;;
       "Сеть:"*|"CPU single:"*|"CPU all-thread:"*|"MTU:"*|"DNSBL blacklist:"*|"Рабочий бюджет:"*|"XHTTP ориентир:"*|"IP reputation:"*)
         printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
+        ;;
+      "AI APIs:"*)
+        if [[ "$line" == *"failed=0"* ]]; then
+          printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
+        elif [[ "$line" == *"нет данных"* ]]; then
+          printf '%s%s%s\n' "$C_YELLOW" "$line" "$C_RESET"
+        else
+          printf '%s%s%s\n' "$C_RED" "$line" "$C_RESET"
+        fi
         ;;
       "  Нет.")
         printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
@@ -788,6 +956,7 @@ run_all(){
     "NextTrace Route/MTR"
     "NextTrace Path MTU"
     "NextTrace Globalping"
+    "AI Access — OpenAI / Claude / Gemini / Mistral / Grok / Perplexity"
   )
   local slugs=(
     "ip-region"
@@ -802,6 +971,7 @@ run_all(){
     "nexttrace-mtr"
     "nexttrace-mtu"
     "nexttrace-globalping"
+    "ai-access"
   )
   local total="${#names[@]}" i num rc status started ended duration
   local passed=0 failed=0 skipped=0
@@ -886,7 +1056,7 @@ menu(){
     printf 'Выбор: '
     read -r choice < "$TTY" || choice=0
     case "$choice" in
-      1|2|3|4|5|6|7|8|9|10|11|12)
+      1|2|3|4|5|6|7|8|9|10|11|12|13)
         rc=0
         run_interruptible "$choice" || rc=$?
         (( rc == 0 || rc == 130 )) || warn "Тест завершился с rc=$rc"
@@ -917,7 +1087,7 @@ Usage:
   server-multitest.sh all
   server-multitest.sh analyze
   server-multitest.sh report
-  server-multitest.sh 1..12
+  server-multitest.sh 1..13
 EOF
 }
 
@@ -929,7 +1099,7 @@ main(){
     all|99) need_root; run_all ;;
     analyze) need_root; show_latest_analysis ;;
     report) need_root; show_latest_report ;;
-    1|2|3|4|5|6|7|8|9|10|11|12) need_root; run_interruptible "$1" ;;
+    1|2|3|4|5|6|7|8|9|10|11|12|13) need_root; run_interruptible "$1" ;;
     *) usage; exit 2 ;;
   esac
 }

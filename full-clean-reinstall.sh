@@ -7,26 +7,29 @@ REPO="evgmahov-blip/remna-node-scripts"
 SOURCE_REF="721269e2c48e31b7cac86e04bc14c46b33e31e72"
 SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"
 SOURCE_URL="https://raw.githubusercontent.com/${REPO}/${SOURCE_REF}/vendor/remna-next-source.tar.gz"
+NODE_IMAGE_VERSION="3.4.1"
+NODE_IMAGE_DIGEST="sha256:0cdf386dd49f360fc885bb34bde21132e478e40f0deac62d616086ec0fa9257e"
+NODE_IMAGE="ghcr.io/remnawave/node:${NODE_IMAGE_VERSION}@${NODE_IMAGE_DIGEST}"
 HYSTERIA_OVERLAY_REF="6f02c87c10d1d47fb4abcb234755823d1a1067bf"
 HYSTERIA_OVERLAY_BLOB_SHA="62ff1364c26d88f357968422d5591b3d2b8d9e78"
 HYSTERIA_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${HYSTERIA_OVERLAY_REF}/next-installer/remnawave-transport-manager.sh"
-V2_CLEANUP_REF="cc375ea8182c76929d9fc1046217ee769a5152d9"
-V2_CLEANUP_BLOB_SHA="e4aa53eb348d907b72e6e847a384fabea3399cfb"
+V2_CLEANUP_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"
+V2_CLEANUP_BLOB_SHA="3c9e7f15862048f8c4bd1fc96be58483872f6d4a"
 V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next-installer/existing-node-v2-cleanup.sh"
 NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"
 NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="3a2014701d1775ba07f30b469865fc993cd633d1"
-TESTER_BLOB_SHA="3d445a57ddadf923f03206f7848d37dc65f377ae"
+TESTER_REF="68dfdd2fc69cf5d2d0e97b4613b1f375a36e0a73"
+TESTER_BLOB_SHA="47e1e8e8ec1498d84d6e2f2627facbea9711bae5"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
-MGMT_OVERLAY_REF="cc375ea8182c76929d9fc1046217ee769a5152d9"
+MGMT_OVERLAY_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"
 PROTECTION_BLOB_SHA="d38486200c4399ec3150e0c3185d7f5620a3606a"
-SECURITY_SH_BLOB_SHA="f3b0d0286088ba6b6a7f9e2251010bef07d4ef25"
+SECURITY_SH_BLOB_SHA="74307541e6f3339fe7ac34278903a202157cf98f"
 SECURITY_PY_BLOB_SHA="a1d7ba1464516da3568dee0d8e8caa24b42ae2d0"
-TELEMT_BLOB_SHA="81dcf46d8cff45a681c0808c2ed309053e6edec6"
+TELEMT_BLOB_SHA="35e2e1674e995155feef881f9ec4addbbbeaa9ad"
 TELEMT_LEGACY_BLOB_SHA="4d75a0ce34ff615fb7006a4e89a2cb619850c9ab"
-REBUILD_BLOB_SHA="17a57dae41410aff2d9ce8d908636237ea1d6ade"
+REBUILD_BLOB_SHA="07b265e96f598266a6953c08adbb26b9a20ed5a2"
 
 APP_DIR="/opt/remnanode"
 NEXT_DIR="$APP_DIR/next-installer"
@@ -48,6 +51,24 @@ TELEMT_LEGACY="$NEXT_DIR/telemt-legacy-rkn-adapter.sh"
 REBUILD="$NEXT_DIR/legacy-rebuild-manager.sh"
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
+
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  C_RESET="$(printf '\033[0m')"
+  C_BOLD="$(printf '\033[1m')"
+  C_CYAN="$(printf '\033[36m')"
+  C_GREEN="$(printf '\033[32m')"
+  C_YELLOW="$(printf '\033[33m')"
+  C_RED="$(printf '\033[31m')"
+  C_GRAY="$(printf '\033[90m')"
+else
+  C_RESET=""
+  C_BOLD=""
+  C_CYAN=""
+  C_GREEN=""
+  C_YELLOW=""
+  C_RED=""
+  C_GRAY=""
+fi
 
 EXPECTED_SETUP="728ed22841a1c494a9d9fce026109f6151fe16a2b861496d267005bd4850477c"
 EXPECTED_GUARDS="620797d0677d091d6550894e32fea58ce7f2adf2f125d6f6ccfb217a7b3382fd"
@@ -116,6 +137,17 @@ FILES
 
   tar -xzf "$bundle" -C "$tmp"
   verify_source_file "$tmp/next-installer/setup_node-legacy.sh" "$EXPECTED_SETUP"
+
+  # Keep the immutable source bundle, but replace its mutable Remnawave image tag
+  # only after the original bundle and setup script have passed integrity checks.
+  sed -i "s#ghcr.io/remnawave/node:latest#${NODE_IMAGE}#g" \
+    "$tmp/docker-compose.yml" "$tmp/next-installer/setup_node-legacy.sh"
+  grep -Fq "$NODE_IMAGE" "$tmp/docker-compose.yml" || die 'Pinned Remnawave image missing from docker-compose.yml.'
+  grep -Fq "$NODE_IMAGE" "$tmp/next-installer/setup_node-legacy.sh" || die 'Pinned Remnawave image missing from setup_node-legacy.sh.'
+  ! grep -R -Fq 'ghcr.io/remnawave/node:latest' "$tmp/docker-compose.yml" "$tmp/next-installer/setup_node-legacy.sh" \
+    || die 'Mutable Remnawave node:latest reference remains after pin overlay.'
+  bash -n "$tmp/next-installer/setup_node-legacy.sh" || die 'Pinned setup_node-legacy.sh failed bash -n.'
+
   verify_source_file "$tmp/next-installer/next-runtime-guards.sh" "$EXPECTED_GUARDS"
   verify_source_file "$tmp/next-installer/remnawave-transport-manager.sh" "$EXPECTED_TRANSPORT"
 
@@ -652,7 +684,15 @@ backup_current(){
     opt/remnanode/docker-compose.yml \
     opt/remnanode/nginx.conf \
     opt/remnanode/certs \
-    opt/remnanode/remnawave-profiles
+    opt/remnanode/remnawave-profiles \
+    opt/remna-protection \
+    var/log/remna-protection \
+    etc/telemt \
+    etc/telemt-panel \
+    var/lib/telemt-panel \
+    etc/systemd/system/remna-protection.service \
+    etc/systemd/system/remna-protection-update.service \
+    etc/systemd/system/remna-protection-update.timer
   do
     [[ -e "/$rel" ]] && paths+=("$rel")
   done
@@ -665,8 +705,12 @@ backup_current(){
 safe_clean_impl(){
   sync_next_sources
   backup_current
+  if [[ -x "$PROTECTION" ]]; then
+    "$PROTECTION" uninstall || die 'Protection uninstall failed; safe clean aborted before deleting files.'
+  fi
   "$GUARDS" remove-rkn-watch >/dev/null 2>&1 || true
   "$RKN" uninstall >/dev/null 2>&1 || true
+  rm -rf /opt/remna-protection /var/log/remna-protection
 
   if [[ -f "$APP_DIR/docker-compose.yml" ]] && command -v docker >/dev/null 2>&1; then
     (cd "$APP_DIR" && docker compose down) || true
@@ -837,18 +881,16 @@ telemt_menu(){
   sync_next_sources
   local c domain pass
   while true; do
-    cat <<'MENU'
-
-TELEMT / MTPROTO
-────────────────────────────────────────────────────────────
- [1] Status
- [2] Install / repair (self-mask = node domain)
- [3] Disable services
- [4] Uninstall binaries/units (config/data preserved)
- [0] Назад
-────────────────────────────────────────────────────────────
-MENU
-    printf 'Выбор: '; read -r c < "$TTY" || true
+    echo
+    printf '%s%sTELEMT / MTPROTO%s\n' "$C_BOLD" "$C_CYAN" "$C_RESET"
+    printf '%s────────────────────────────────────────────────────────────%s\n' "$C_GRAY" "$C_RESET"
+    printf ' %s[1]%s Status / connection info\n' "$C_GREEN" "$C_RESET"
+    printf ' %s[2]%s Install / repair (self-mask = node domain)\n' "$C_GREEN" "$C_RESET"
+    printf ' %s[3]%s Disable services\n' "$C_YELLOW" "$C_RESET"
+    printf ' %s[4]%s Uninstall binaries/units (config/data preserved)\n' "$C_RED" "$C_RESET"
+    printf ' %s[0]%s Назад\n' "$C_GRAY" "$C_RESET"
+    printf '%s────────────────────────────────────────────────────────────%s\n' "$C_GRAY" "$C_RESET"
+    printf '%sВыбор:%s ' "$C_CYAN" "$C_RESET"; read -r c < "$TTY" || true
     case "$c" in
       1) "$TELEMT" status; pause ;;
       2)
@@ -856,11 +898,14 @@ MENU
         printf 'TLS/self-mask domain [%s]: ' "$domain"
         local entered; read -r entered < "$TTY" || true
         [[ -n "$entered" ]] && domain="$entered"
-        printf 'Новый пароль Telemt Panel: '
+        printf 'Пароль Telemt Panel [Enter = сохранить текущий при repair]: '
         read -rs pass < "$TTY" || true
         echo
-        [[ -n "$pass" ]] || { warn 'Пустой пароль — установка отменена.'; continue; }
-        TLS_DOMAIN="$domain" PANEL_PASSWORD="$pass" TELEMT_PORT=8443 "$TELEMT" install
+        if [[ -n "$pass" ]]; then
+          TLS_DOMAIN="$domain" PANEL_PASSWORD="$pass" TELEMT_PORT=8443 "$TELEMT" install || { unset pass; warn 'Telemt install/repair не завершён.'; continue; }
+        else
+          TLS_DOMAIN="$domain" TELEMT_PORT=8443 "$TELEMT" install || { warn 'Для новой установки нужен пароль; существующая установка не изменена.'; continue; }
+        fi
         unset pass
         pause
         ;;
@@ -871,7 +916,6 @@ MENU
     esac
   done
 }
-
 protection_menu(){
   sync_next_sources
   "$PROTECTION" menu
@@ -910,39 +954,40 @@ main_menu(){
   sync_next_sources
   local c
   while true; do
-    cat <<'MENU'
-
-REMNANODE NEXT — MAIN
-REPO: https://github.com/evgmahov-blip/remna-node-scripts
-CLI:  sudo remnanode-next
-────────────────────────────────────────────────────────────
- [1]  Установка / продолжить настройку NEXT
- [2]  Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)
- [3]  Config Profile + НАСТРОЙКИ HOST REMNAWAVE
- [4]  SelfSteal / маскировочный сайт
- [5]  XHTTP signature
- [6]  Защита ноды — SEMI-PARANOID (TSPU + GOV + scanners)
- [7]  Runtime repair / guards
- [8]  Базовое управление Remnanode
- [9]  Статус
- [10] Safe clean текущей NEXT-ноды
- [11] Safe reinstall текущей NEXT-ноды
- [12] NEXT V2 — существующая/legacy нода → очистка хвостов → NEXT
-
- [13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
-      RUN:    sudo remnanode-next network
-      BBR3:   https://github.com/ivan-nginx/bbr3
- [14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters
- [15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА
-      RUN:    sudo remnanode-next multitest
-      TEST:   sudo remnanode-next multitest 1..12
- [16] TELEMT / MTProto + Panel (8443 / loopback admin)
- [17] Managed legacy-node rebuild
-
- [0]  Выход
-────────────────────────────────────────────────────────────
-MENU
-    printf 'Выбор: '; read -r c < "$TTY" || true
+    echo
+    printf '%s%sREMNANODE NEXT — управление нодой%s\n' "$C_BOLD" "$C_CYAN" "$C_RESET"
+    printf '%sREPO:%s https://github.com/evgmahov-blip/remna-node-scripts\n' "$C_GRAY" "$C_RESET"
+    printf '%sCLI:%s  sudo remnanode-next\n' "$C_GRAY" "$C_RESET"
+    printf '%s────────────────────────────────────────────────────────────%s\n' "$C_GRAY" "$C_RESET"
+    printf '%sБЫСТРЫЕ ДЕЙСТВИЯ%s\n' "$C_BOLD$C_GREEN" "$C_RESET"
+    printf ' %s[1]%s  Установить / продолжить настройку\n' "$C_GREEN" "$C_RESET"
+    printf ' %s[9]%s  Статус ноды\n' "$C_GREEN" "$C_RESET"
+    printf ' %s[15]%s Анализ / тестирование ноды\n' "$C_GREEN" "$C_RESET"
+    echo
+    printf '%sТРАНСПОРТ / REMNAWAVE%s\n' "$C_BOLD$C_CYAN" "$C_RESET"
+    printf ' %s[2]%s  Транспорт и профили\n' "$C_CYAN" "$C_RESET"
+    printf ' %s[3]%s  Config Profile + Host\n' "$C_CYAN" "$C_RESET"
+    printf ' %s[4]%s  SelfSteal\n' "$C_CYAN" "$C_RESET"
+    printf ' %s[5]%s  XHTTP signature\n' "$C_CYAN" "$C_RESET"
+    echo
+    printf '%sЗАЩИТА / СЕТЬ%s\n' "$C_BOLD$C_YELLOW" "$C_RESET"
+    printf ' %s[6]%s  Semi-paranoid protection\n' "$C_YELLOW" "$C_RESET"
+    printf ' %s[13]%s Network / BBR\n' "$C_YELLOW" "$C_RESET"
+    printf ' %s[14]%s Hysteria2 diagnostics\n' "$C_YELLOW" "$C_RESET"
+    echo
+    printf '%sTELEGRAM / TELEMT%s\n' "$C_BOLD$C_CYAN" "$C_RESET"
+    printf ' %s[16]%s MTProto proxy + Telemt Panel\n' "$C_CYAN" "$C_RESET"
+    echo
+    printf '%sОБСЛУЖИВАНИЕ%s\n' "$C_BOLD$C_GRAY" "$C_RESET"
+    printf ' %s[7]%s  Runtime repair\n' "$C_GRAY" "$C_RESET"
+    printf ' %s[8]%s  Remnanode management\n' "$C_GRAY" "$C_RESET"
+    printf ' %s[10]%s Safe clean\n' "$C_YELLOW" "$C_RESET"
+    printf ' %s[11]%s Safe reinstall\n' "$C_YELLOW" "$C_RESET"
+    printf ' %s[12]%s Legacy → NEXT V2\n' "$C_YELLOW" "$C_RESET"
+    printf ' %s[17]%s Managed rebuild\n' "$C_YELLOW" "$C_RESET"
+    printf ' %s[0]%s  Выход\n' "$C_GRAY" "$C_RESET"
+    printf '%s────────────────────────────────────────────────────────────%s\n' "$C_GRAY" "$C_RESET"
+    printf '%sВыбор:%s ' "$C_CYAN" "$C_RESET"; read -r c < "$TTY" || true
     case "$c" in
       1) run_install; pause ;;
       2) transport_menu; pause ;;
