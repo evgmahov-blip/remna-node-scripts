@@ -624,7 +624,7 @@ managed_update_postcheck(){
   docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode || return 1
   node_port="$(awk -F= '$1=="NODE_PORT"{print $2; exit}' "$APP_DIR/.env" 2>/dev/null | tr -d '[:space:]')"
   [[ "$node_port" =~ ^[0-9]+$ ]] || node_port=2222
-  ss -lntup 2>/dev/null | grep -q ":$node_port[[:space:]]" || return 1
+  ss -lntup 2>/dev/null | grep -q ":${node_port}[[:space:]]" || return 1
   if [[ "$before_telemt" == active ]]; then systemctl is-active --quiet telemt.service || return 1; fi
   if [[ "$before_panel" == active ]]; then systemctl is-active --quiet telemt-panel.service || return 1; fi
   [[ "$(managed_running_image_digest)" == "$NODE_IMAGE_DIGEST" ]] || return 1
