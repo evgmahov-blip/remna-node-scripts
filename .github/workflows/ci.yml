@@ -432,8 +432,8 @@ jobs:
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
             expected="$(sed -n 's/^EXPECTED_BLOB_SHA="\([^"]*\)"/\1/p' "$launcher")"
-            test "$ref" = "e4cfa4c779621d565a2e9c29707daafc301f1630"
-            test "$expected" = "75a48db8201d52b987e73f58f95dac4543144e74"
+            test "$ref" = "edcdcb1b5f6c5643fefa9d1e7224f41efbf50bbd"
+            test "$expected" = "14c3a9683aa34309c21e1eaeb60bf603f595d099"
             test "$(git rev-parse "$ref:full-clean-reinstall.sh")" = "$expected"
             ! grep -Fq 'install-caddy-node-reality-stream.sh' "$launcher"
           done
