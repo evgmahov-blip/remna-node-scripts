@@ -167,9 +167,11 @@ end = s.find('    local secret_key_value;', start)
 if start < 0 or end < 0:
     raise SystemExit("certificate prompt block markers not found")
 s = s[:start] + '    local certificate\n    certificate="$(cat "$REBUILD_SECRET_FILE")"\n\n' + s[end:]
-s, n = re.subn(r'pause_prompt\\(\\) \\{\\n    echo ""\\n    read -p "Нажмите Enter, чтобы вернуться в меню\\.\\.\\." _\\n\\}', 'pause_prompt() { return 0; }', s, count=1)
-if n != 1:
-    raise SystemExit("pause_prompt block not found")
+pstart = s.find('pause_prompt() {')
+pend = s.find('# --- ИНТЕРАКТИВНЫЕ ДЕЙСТВИЯ МЕНЮ ---', pstart)
+if pstart < 0 or pend < 0:
+    raise SystemExit("pause_prompt markers not found")
+s = s[:pstart] + 'pause_prompt() { return 0; }\n\n' + s[pend:]
 p.write_text(s)
 PY
   cat >>"$tmp" <<'EOF'
