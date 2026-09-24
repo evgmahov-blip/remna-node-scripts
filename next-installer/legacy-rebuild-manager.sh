@@ -254,6 +254,8 @@ postcheck(){
 }
 
 finish_post_base(){
+  printf '%s\n' "${NODE_DOMAIN%%.*}" > /opt/remnanode/.node_name
+  chmod 600 /opt/remnanode/.node_name
   bash "$FULL" selfsteal ensure
   HYSTERIA_CERT_MOUNT_ACTION=fix CAMOUFLAGE_MODE="$CAMOUFLAGE_MODE" bash "$FULL" transport "$TRANSPORT"
   bash "$FULL" bbr-tune
