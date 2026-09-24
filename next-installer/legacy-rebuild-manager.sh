@@ -199,6 +199,10 @@ EOF
 }
 install_current_protection(){
   [ -f "$PROTECTION" ] || die "protection manager missing"
+  if ! command -v ipset >/dev/null 2>&1; then
+    apt-get -o DPkg::Lock::Timeout=300 update -y >/dev/null
+    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y ipset >/dev/null
+  fi
   chmod 700 "$PROTECTION" "$REPO_DIR/security/remna-security.sh" 2>/dev/null || true
   PANEL_IP_ENV="$PANEL_IP" bash "$PROTECTION" install
   bash "$PROTECTION" panel-set "$PANEL_IP"
