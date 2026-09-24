@@ -207,11 +207,15 @@ remove_legacy_front(){
     main_owned=1
   fi
 
+  if (( main_owned )) && systemctl is-active --quiet caddy 2>/dev/null; then
+    systemctl stop caddy >/dev/null 2>&1 || die 'Owned Caddy runtime could not be stopped.'
+  fi
+
   rm -f "$CADDY_DIR/Caddyfile.public" "$CADDY_DIR/Caddyfile.reality" "$CADDY_DROPIN"
   (( main_owned == 0 )) || rm -f "$CADDY_DIR/Caddyfile"
   rm -rf "$WEBROOT"
 
-  if systemctl is-active --quiet caddy 2>/dev/null && [[ -f "$CADDY_DIR/Caddyfile" ]] && command -v caddy >/dev/null 2>&1; then
+  if (( main_owned == 0 )) && systemctl is-active --quiet caddy 2>/dev/null && [[ -f "$CADDY_DIR/Caddyfile" ]] && command -v caddy >/dev/null 2>&1; then
     if caddy validate --config "$CADDY_DIR/Caddyfile" >/dev/null 2>&1; then
       systemctl reload caddy >/dev/null 2>&1 || warn 'Caddy reload не удался; unrelated service оставлен запущенным.'
     else
@@ -219,7 +223,7 @@ remove_legacy_front(){
     fi
   fi
 
-  ok 'Удалены только owned Caddy node-файлы; global stop Caddy не выполнялся.'
+  ok 'Удалены только owned Caddy node-файлы; global stop Caddy не выполнялся без подтверждённого ownership.'
 }
 
 remove_legacy_hysteria(){

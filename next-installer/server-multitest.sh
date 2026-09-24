@@ -335,9 +335,11 @@ test_ipquality(){
   rc=$?
   set -e
 
-  if [[ -s "$json" ]] && jq -e . "$json" >/dev/null 2>&1; then
-    if (( rc != 0 )); then
-      warn "IPQuality вернул rc=$rc, но JSON валиден; принимаю результат (upstream IPv4-only exit-status quirk)."
+  if (( rc == 0 || rc == 1 )) && [[ -s "$json" ]] && \
+     jq -e '(.Info.ASN != null) and ((.Score | type) == "object") and ((.Factor.Proxy | type) == "object") and ((.Media | type) == "object") and ((.Mail.DNSBlacklist | type) == "object")' \
+       "$json" >/dev/null 2>&1; then
+    if (( rc == 1 )); then
+      warn "IPQuality вернул rc=1, но полный JSON валиден; принимаю результат (upstream IPv4-only exit-status quirk)."
     fi
   else
     fail "IPQuality не создал валидный JSON (rc=$rc)."

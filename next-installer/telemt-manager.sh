@@ -76,6 +76,22 @@ preflight(){
   info "preflight OK: TCP/$TELEMT_PORT free; 80/443 untouched; panel/API loopback ports free"
 }
 
+ufw_owned_rule_number(){
+  local port="$1"
+  awk -v p="$port/tcp" '
+    $0 ~ p && $0 ~ /Telemt MTProto/ {
+      line=$0
+      sub(/^\[[[:space:]]*/, "", line)
+      sub(/\].*$/, "", line)
+      gsub(/[[:space:]]/, "", line)
+      if (line ~ /^[0-9]+$/) {
+        print line
+        exit
+      }
+    }
+  '
+}
+
 remove_protection_port(){
   local ports next="" part num
   if [ -x "$PROTECTION_MANAGER" ] && [ -f "$PROTECTION_CONF" ]; then
@@ -93,7 +109,7 @@ remove_protection_port(){
 
   if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
     while :; do
-      num="$(ufw status numbered 2>/dev/null | awk -v p="$TELEMT_PORT/tcp" '$0 ~ p && $0 ~ /Telemt MTProto/ {gsub(/[^0-9]/,"",$1); print $1; exit}')"
+      num="$(ufw status numbered 2>/dev/null | ufw_owned_rule_number "$TELEMT_PORT")"
       [ -n "$num" ] || break
       ufw --force delete "$num" >/dev/null 2>&1 || break
     done

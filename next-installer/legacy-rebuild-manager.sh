@@ -279,7 +279,7 @@ finish_install(){
 resume(){
   need_root
   install -d -m 0755 /run
-  trap cleanup_secret EXIT HUP INT TERM
+  trap cleanup_secret_on_exit EXIT
   [ -s "$FULL" ] || die "NEXT launcher missing: $FULL"
   bash -n "$FULL" || die "NEXT launcher syntax check failed: $FULL"
   [ -n "$NODE_DOMAIN" ] || die "set NODE_DOMAIN"
@@ -299,10 +299,19 @@ resume(){
 cleanup_secret(){
   rm -f "$SECRET_FILE"
 }
+cleanup_secret_on_exit(){
+  local rc=$?
+  if (( rc == 0 )); then
+    cleanup_secret
+  elif [ -s "$SECRET_FILE" ]; then
+    warn "rebuild incomplete; tmpfs resume secret retained at $SECRET_FILE until successful resume or reboot"
+  fi
+  return "$rc"
+}
 rebuild(){
   need_root
   install -d -m 0755 /run
-  trap cleanup_secret EXIT HUP INT TERM
+  trap cleanup_secret_on_exit EXIT
   [ -s "$FULL" ] || die "NEXT launcher missing: $FULL"
   bash -n "$FULL" || die "NEXT launcher syntax check failed: $FULL"
   [ -n "$NODE_DOMAIN" ] || die "set NODE_DOMAIN"
