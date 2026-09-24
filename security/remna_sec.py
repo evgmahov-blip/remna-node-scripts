@@ -49,10 +49,10 @@ DEFAULTS = {
     "ENABLE_TSPU": "1",
     "ENABLE_GOV": "1",
     "ENABLE_GEOIP": "0",
-    "ENABLE_SCANNERS": "0",
+    "ENABLE_SCANNERS": "1",
     "FILTER_PORTS": "443",
     "GEO_COUNTRIES": "",
-    "SCANNER_URL": "",
+    "SCANNER_URL": "https://lists.blocklist.de/lists/all.txt",
     "BACKEND": "iptables",
     "LOG_DROPS": "0",
 }
@@ -124,6 +124,7 @@ def validate_feed(raw: bytes, mode: str, family: str, previous: list[str], panel
         "whitelist_collisions": 0,
         "malformed": 0,
         "family": family,
+        "ignored_family": 0,
         "entries": [],
     }
     if looks_html(raw):
@@ -139,9 +140,6 @@ def validate_feed(raw: bytes, mode: str, family: str, previous: list[str], panel
         first = line.split()[0].lower()
         if mode == "gov" and first in GOV_HEADER and not V4_RE.search(line) and not V6_RE.search(line):
             continue
-        if family == "ipv4" and V6_RE.search(line):
-            report["reason"] = "family"
-            return report
         if mode == "gov":
             found = V4_RE.findall(line)
             if not found:
@@ -156,8 +154,8 @@ def validate_feed(raw: bytes, mode: str, family: str, previous: list[str], panel
             malformed += 1
             continue
         if family == "ipv4" and net.version != 4:
-            report["reason"] = "family"
-            return report
+            report["ignored_family"] += 1
+            continue
         if net.version == 4 and net.prefixlen < 8:
             report["reason"] = "broad"
             report["example"] = str(net)
@@ -764,10 +762,56 @@ def node_api_state(base: Path) -> str:
     cfg = load_settings(base)
     if not valid_ip(cfg.get("PANEL_IP", "")):
         return "unprotected"
-    if not env_flag("REMNA_SECURITY_SIM"):
-        return "unknown"
-    state = load_state(base)
     backend = cfg.get("BACKEND", "iptables")
+    if not env_flag("REMNA_SECURITY_SIM"):
+        if env_flag("REMNA_SECURITY_FORBID_LIVE"):
+            return "unknown"
+        if backend == "nftables":
+            nft = shutil.which("nft")
+            if not nft:
+                return "unknown"
+            proc = subprocess.run([nft, "list", "table", NFT_FAMILY, NFT_TABLE], text=True, capture_output=True)
+            if proc.returncode != 0:
+                return "unprotected"
+            table = proc.stdout or ""
+            if "tcp dport 2222 drop" not in table:
+                return "unprotected"
+            if panel_version(cfg) == 4 and f"ip saddr {cfg['PANEL_IP']}" not in table:
+                return "broken"
+            if panel_version(cfg) == 6 and f"ip6 saddr {cfg['PANEL_IP']}" not in table:
+                return "broken"
+            return "protected"
+        ipt = shutil.which("iptables")
+        if not ipt:
+            return "unknown"
+        hook = subprocess.run([ipt, "-C", "INPUT", "-j", CHAIN], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if hook.returncode != 0:
+            return "unprotected"
+        rules_proc = subprocess.run([ipt, "-S", CHAIN], text=True, capture_output=True)
+        if rules_proc.returncode != 0:
+            return "unprotected"
+        rules = [line.strip() for line in (rules_proc.stdout or "").splitlines() if line.strip()]
+        drop_idx = next((i for i, r in enumerate(rules) if "--dport 2222" in r and "-j DROP" in r), None)
+        if drop_idx is None:
+            return "unprotected"
+        if panel_version(cfg) == 4:
+            ip = cfg["PANEL_IP"]
+            accept_idx = next((i for i, r in enumerate(rules) if "--dport 2222" in r and "-j ACCEPT" in r and (f"-s {ip}/32" in r or f"-s {ip} " in r)), None)
+            if accept_idx is None:
+                return "broken"
+            if accept_idx > drop_idx:
+                return "broken"
+        if panel_version(cfg) == 6:
+            ip6t = shutil.which("ip6tables")
+            if not ip6t:
+                return "unknown"
+            rules6_proc = subprocess.run([ip6t, "-S", CHAIN6], text=True, capture_output=True)
+            rules6 = [line.strip() for line in (rules6_proc.stdout or "").splitlines() if line.strip()]
+            ip = cfg["PANEL_IP"]
+            if not any("--dport 2222" in r and "-j ACCEPT" in r and f"-s {ip}/128" in r for r in rules6):
+                return "broken"
+        return "protected"
+    state = load_state(base)
     if backend == "nftables":
         table = state.get("nft_table") or ""
         if "tcp dport 2222 drop" not in table:

@@ -20,6 +20,14 @@ TESTER_REF="3a2014701d1775ba07f30b469865fc993cd633d1"
 TESTER_BLOB_SHA="3d445a57ddadf923f03206f7848d37dc65f377ae"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
+MGMT_OVERLAY_REF="d73afcb6d0ef7cd574031d7b3933041767231714"
+PROTECTION_BLOB_SHA="d38486200c4399ec3150e0c3185d7f5620a3606a"
+SECURITY_SH_BLOB_SHA="f3b0d0286088ba6b6a7f9e2251010bef07d4ef25"
+SECURITY_PY_BLOB_SHA="cb085de83432bfb6ef8ade01b8551df122968f2e"
+TELEMT_BLOB_SHA="81dcf46d8cff45a681c0808c2ed309053e6edec6"
+TELEMT_LEGACY_BLOB_SHA="4d75a0ce34ff615fb7006a4e89a2cb619850c9ab"
+REBUILD_BLOB_SHA="f82d074be9cc0b578c7fc12e451ff9e7ec7b650e"
+
 APP_DIR="/opt/remnanode"
 NEXT_DIR="$APP_DIR/next-installer"
 CLI="/usr/local/bin/remnanode-next"
@@ -33,6 +41,11 @@ SIGNATURE="$NEXT_DIR/xhttp-signature-manager.sh"
 V2_CLEANER="$NEXT_DIR/existing-node-v2-cleanup.sh"
 NETWORK="$NEXT_DIR/network-tuning-manager.sh"
 TESTER="$NEXT_DIR/server-multitest.sh"
+PROTECTION="$APP_DIR/protection-manager.sh"
+SECURITY_DIR="$APP_DIR/security"
+TELEMT="$NEXT_DIR/telemt-manager.sh"
+TELEMT_LEGACY="$NEXT_DIR/telemt-legacy-rkn-adapter.sh"
+REBUILD="$NEXT_DIR/legacy-rebuild-manager.sh"
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
 
@@ -192,8 +205,38 @@ FILES
     die 'Server Multitest содержит небезопасный HTTP URL.'
   fi
 
-  install -d -m 0700 "$NEXT_DIR" /usr/local/libexec
+  local overlay_root
+  overlay_root="$tmp/current-overlay"
+  mkdir -p "$overlay_root/security" "$overlay_root/next-installer"
+  fetch_pinned_overlay(){
+    local rel="$1" expected="$2" out
+    out="$overlay_root/$rel"
+    mkdir -p "$(dirname "$out")"
+    curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 3 \
+      "https://raw.githubusercontent.com/${REPO}/${MGMT_OVERLAY_REF}/$rel" -o "$out" || die "Не удалось скачать current overlay: $rel"
+    [[ "$(git_blob_sha "$out")" == "$expected" ]] || die "Current overlay Git blob SHA mismatch: $rel"
+  }
+  fetch_pinned_overlay protection-manager.sh "$PROTECTION_BLOB_SHA"
+  fetch_pinned_overlay security/remna-security.sh "$SECURITY_SH_BLOB_SHA"
+  fetch_pinned_overlay security/remna_sec.py "$SECURITY_PY_BLOB_SHA"
+  fetch_pinned_overlay next-installer/telemt-manager.sh "$TELEMT_BLOB_SHA"
+  fetch_pinned_overlay next-installer/telemt-legacy-rkn-adapter.sh "$TELEMT_LEGACY_BLOB_SHA"
+  fetch_pinned_overlay next-installer/legacy-rebuild-manager.sh "$REBUILD_BLOB_SHA"
+  bash -n "$overlay_root/protection-manager.sh"
+  bash -n "$overlay_root/security/remna-security.sh"
+  bash -n "$overlay_root/next-installer/telemt-manager.sh"
+  bash -n "$overlay_root/next-installer/telemt-legacy-rkn-adapter.sh"
+  bash -n "$overlay_root/next-installer/legacy-rebuild-manager.sh"
+  python3 -m py_compile "$overlay_root/security/remna_sec.py"
+
+  install -d -m 0700 "$NEXT_DIR" "$SECURITY_DIR" /usr/local/libexec
   install -m 0700 "$tmp/next-installer/"*.sh "$NEXT_DIR/"
+  install -m 0700 "$overlay_root/protection-manager.sh" "$PROTECTION"
+  install -m 0700 "$overlay_root/security/remna-security.sh" "$SECURITY_DIR/remna-security.sh"
+  install -m 0600 "$overlay_root/security/remna_sec.py" "$SECURITY_DIR/remna_sec.py"
+  install -m 0700 "$overlay_root/next-installer/telemt-manager.sh" "$TELEMT"
+  install -m 0700 "$overlay_root/next-installer/telemt-legacy-rkn-adapter.sh" "$TELEMT_LEGACY"
+  install -m 0700 "$overlay_root/next-installer/legacy-rebuild-manager.sh" "$REBUILD"
 
   if [[ -f "$0" ]]; then
     local current
@@ -784,6 +827,79 @@ run_existing_node_v2(){
   run_install
 }
 
+telemt_menu(){
+  sync_next_sources
+  local c domain pass
+  while true; do
+    cat <<'MENU'
+
+TELEMT / MTPROTO
+────────────────────────────────────────────────────────────
+ [1] Status
+ [2] Install / repair (self-mask = node domain)
+ [3] Disable services
+ [4] Uninstall binaries/units (config/data preserved)
+ [0] Назад
+────────────────────────────────────────────────────────────
+MENU
+    printf 'Выбор: '; read -r c < "$TTY" || true
+    case "$c" in
+      1) "$TELEMT" status; pause ;;
+      2)
+        domain="$(cat "$APP_DIR/.node_domain" 2>/dev/null || hostname -f)"
+        printf 'TLS/self-mask domain [%s]: ' "$domain"
+        local entered; read -r entered < "$TTY" || true
+        [[ -n "$entered" ]] && domain="$entered"
+        printf 'Новый пароль Telemt Panel: '
+        read -rs pass < "$TTY" || true
+        echo
+        [[ -n "$pass" ]] || { warn 'Пустой пароль — установка отменена.'; continue; }
+        TLS_DOMAIN="$domain" PANEL_PASSWORD="$pass" TELEMT_PORT=8443 "$TELEMT" install
+        unset pass
+        pause
+        ;;
+      3) "$TELEMT" disable; pause ;;
+      4) "$TELEMT" uninstall; pause ;;
+      0|'') return 0 ;;
+      *) warn 'Неверный пункт.' ;;
+    esac
+  done
+}
+
+protection_menu(){
+  sync_next_sources
+  "$PROTECTION" menu
+}
+
+rebuild_menu(){
+  sync_next_sources
+  local c
+  while true; do
+    cat <<'MENU'
+
+LEGACY NODE REBUILD
+────────────────────────────────────────────────────────────
+ [1] Discover current node identity
+ [2] Status / postcheck
+ [3] Показать команду managed rebuild
+ [0] Назад
+────────────────────────────────────────────────────────────
+MENU
+    printf 'Выбор: '; read -r c < "$TTY" || true
+    case "$c" in
+      1) "$REBUILD" discover; pause ;;
+      2) "$REBUILD" status; pause ;;
+      3)
+        say 'Пример:'
+        say 'NODE_DOMAIN=node.example.com PANEL_IP=203.0.113.10 LEGACY_UFW_PORTS="2443 4443" sudo /opt/remnanode/next-installer/legacy-rebuild-manager.sh rebuild'
+        pause
+        ;;
+      0|'') return 0 ;;
+      *) warn 'Неверный пункт.' ;;
+    esac
+  done
+}
+
 main_menu(){
   sync_next_sources
   local c
@@ -799,7 +915,7 @@ CLI:  sudo remnanode-next
  [3]  Config Profile + НАСТРОЙКИ HOST REMNAWAVE
  [4]  SelfSteal / маскировочный сайт
  [5]  XHTTP signature
- [6]  РКН защита — SAFE scanner guard (DEFAULT)
+ [6]  Защита ноды — SEMI-PARANOID (TSPU + GOV + scanners)
  [7]  Runtime repair / guards
  [8]  Базовое управление Remnanode
  [9]  Статус
@@ -814,6 +930,8 @@ CLI:  sudo remnanode-next
  [15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА
       RUN:    sudo remnanode-next multitest
       TEST:   sudo remnanode-next multitest 1..12
+ [16] TELEMT / MTProto + Panel (8443 / loopback admin)
+ [17] Managed legacy-node rebuild
 
  [0]  Выход
 ────────────────────────────────────────────────────────────
@@ -825,7 +943,7 @@ MENU
       3) copy_profile_menu ;;
       4) "$SELFSTEAL" choose; pause ;;
       5) signature_menu ;;
-      6) "$RKN" menu ;;
+      6) protection_menu ;;
       7) runtime_menu ;;
       8) base_manage_menu ;;
       9) show_status; pause ;;
@@ -835,6 +953,8 @@ MENU
       13) network_menu ;;
       14) hysteria_diag; pause ;;
       15) "$TESTER" menu ;;
+      16) telemt_menu ;;
+      17) rebuild_menu ;;
       0|'') return 0 ;;
       *) warn 'Неверный пункт.' ;;
     esac
@@ -855,7 +975,9 @@ main(){
     host-hysteria2|host-hysteria) sync_next_sources; cat "$APP_DIR/remnawave-profiles/host-hysteria2.txt" ;;
     host-raw) sync_next_sources; cat "$APP_DIR/remnawave-profiles/host-raw.txt" ;;
     selfsteal) sync_next_sources; shift; "$SELFSTEAL" "${1:-choose}" "${2:-}" ;;
-    rkn) sync_next_sources; shift; "$RKN" "${1:-menu}" ;;
+    rkn|protection|security) sync_next_sources; shift; "$PROTECTION" "${1:-menu}" ;;
+    telemt|mtproto) sync_next_sources; shift; "$TELEMT" "${1:-status}" ;;
+    rebuild-manager|legacy-rebuild) sync_next_sources; shift; "$REBUILD" "${1:-discover}" ;;
     signature) sync_next_sources; shift; "$SIGNATURE" "${1:-apply}" ;;
     runtime) sync_next_sources; shift; "$GUARDS" "$@" ;;
     status) show_status ;;
@@ -867,7 +989,7 @@ main(){
     hysteria-diag|hy2-diag) hysteria_diag ;;
     multitest|server-test|tests) sync_next_sources; shift; "$TESTER" "${1:-menu}" ;;
     sync-source) sync_next_sources ;;
-    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|sync-source]' ;;
+    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|protection|security|telemt|mtproto|rebuild-manager|legacy-rebuild|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|sync-source]' ;;
   esac
 }
 

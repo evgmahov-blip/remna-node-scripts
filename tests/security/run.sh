@@ -115,7 +115,8 @@ feed empty '' empty
 feed bad $'10.1.0.0/24\n999.1.1.1/99\n' malformed
 feed zero $'10.1.0.0/24\n0.0.0.0/0\n' broad
 feed wide $'1.0.0.0/7\n' broad
-feed v6 $'2001:db8::/32\n' family
+python3 "$PY" validate --raw <(printf '10.1.0.1\n2001:db8::1\n') --mode plain --family ipv4 --panel 203.0.113.10 --min-absolute 1 --print-json > "$WORK/mixed.out"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["ok"] is True and d["accepted"] == 1 and d["ignored_family"] == 1' "$WORK/mixed.out"
 ok feed-rejects
 
 echo "gov parser and panel/whitelist collision"
@@ -271,11 +272,9 @@ set +e
 bash "$CLI" update --json > "$WORK/pfx.json"
 set -e
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert any(s["error"]=="broad" for s in d["sources"]), d' "$WORK/pfx.json"
-printf '2001:db8::/48\n' > "$SRC/tspu.txt"
-set +e
+printf '10.9.9.0/24\n2001:db8::/48\n' > "$SRC/tspu.txt"
 bash "$CLI" update --json > "$WORK/fam.json"
-set -e
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert any(s["error"]=="family" for s in d["sources"]), d' "$WORK/fam.json"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert any(s["id"]=="tspu" and s["ok"] and s["entries"]==1 for s in d["sources"]), d' "$WORK/fam.json"
 nets 80 1 > "$SRC/tspu.txt"
 bash "$CLI" update --json >/dev/null || fail "expected in-range growth to pass"
 cp "$REMNA_SECURITY_BASE/data/tspu.txt" "$WORK/tspu.base"
@@ -452,6 +451,18 @@ assert "reset" not in text
 assert "DOCKER" in " ".join(state.get("docker_chains") or [])
 PY
 ok ufw
+
+echo "semi-paranoid defaults"
+begin docker
+rm -f "$REMNA_SECURITY_BASE/settings.conf"
+bash "$CLI" status --json >/dev/null
+grep -q '^ENABLE_SCANNERS=1$' "$REMNA_SECURITY_BASE/settings.conf" || fail "scanners not enabled by default"
+grep -q '^SCANNER_URL=https://lists.blocklist.de/lists/all.txt$' "$REMNA_SECURITY_BASE/settings.conf" || fail "default scanner feed missing"
+grep -q '^ENABLE_GEOIP=0$' "$REMNA_SECURITY_BASE/settings.conf" || fail "geoip must stay off by default"
+grep -q '^LOG_DROPS=0$' "$REMNA_SECURITY_BASE/settings.conf" || fail "drop logging must stay off by default"
+st=$(bash "$CLI" status --json)
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["sources"]["scanners"]["enabled"] is True; assert d["sources"]["geoip"]["enabled"] is False' "$st"
+ok semi-paranoid-defaults
 
 echo "scanner fast feed and migrate"
 begin docker
