@@ -134,8 +134,8 @@ jobs:
           t=next-installer/server-multitest.sh
           tester_ref="$(sed -n 's/^TESTER_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           tester_blob="$(sed -n 's/^TESTER_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
-          test "$tester_ref" = "68dfdd2fc69cf5d2d0e97b4613b1f375a36e0a73"
-          test "$tester_blob" = "47e1e8e8ec1498d84d6e2f2627facbea9711bae5"
+          test "$tester_ref" = "bc240a3187c5c33cf5c56d2659059bc782e67f9e"
+          test "$tester_blob" = "2e4f39cb660cc4ca3da6280a90c8fc518498dbed"
           test "$(git rev-parse HEAD:$t)" = "$tester_blob"
           test "$(git rev-parse "$tester_ref:$t")" = "$tester_blob"
 
@@ -237,6 +237,9 @@ jobs:
           test -n "$tester_blob"
           grep -Fq 'server-multitest.sh' full-clean-reinstall.sh
           grep -Fq 'multitest|server-test|tests)' full-clean-reinstall.sh
+
+      - name: Multitest machine / release gate regressions
+        run: bash tests/multitest-machine/run.sh
 
       - name: Working-node topology provenance
         shell: bash
@@ -395,8 +398,8 @@ jobs:
           grep -Fq 'HYSTERIA_OVERLAY_BLOB_SHA="62ff1364c26d88f357968422d5591b3d2b8d9e78"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"' full-clean-reinstall.sh
           grep -Fq 'V2_CLEANUP_BLOB_SHA="3c9e7f15862048f8c4bd1fc96be58483872f6d4a"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_REF="68dfdd2fc69cf5d2d0e97b4613b1f375a36e0a73"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="47e1e8e8ec1498d84d6e2f2627facbea9711bae5"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="bc240a3187c5c33cf5c56d2659059bc782e67f9e"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="2e4f39cb660cc4ca3da6280a90c8fc518498dbed"' full-clean-reinstall.sh
           grep -Fq 'MGMT_OVERLAY_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"' full-clean-reinstall.sh
           grep -Fq 'PROTECTION_BLOB_SHA="d38486200c4399ec3150e0c3185d7f5620a3606a"' full-clean-reinstall.sh
           grep -Fq 'SECURITY_SH_BLOB_SHA="74307541e6f3339fe7ac34278903a202157cf98f"' full-clean-reinstall.sh

@@ -19,8 +19,8 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"
 NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="68dfdd2fc69cf5d2d0e97b4613b1f375a36e0a73"
-TESTER_BLOB_SHA="47e1e8e8ec1498d84d6e2f2627facbea9711bae5"
+TESTER_REF="bc240a3187c5c33cf5c56d2659059bc782e67f9e"
+TESTER_BLOB_SHA="2e4f39cb660cc4ca3da6280a90c8fc518498dbed"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 MGMT_OVERLAY_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"
@@ -49,6 +49,7 @@ SECURITY_DIR="$APP_DIR/security"
 TELEMT="$NEXT_DIR/telemt-manager.sh"
 TELEMT_LEGACY="$NEXT_DIR/telemt-legacy-rkn-adapter.sh"
 REBUILD="$NEXT_DIR/legacy-rebuild-manager.sh"
+RELEASE_MARKER="$APP_DIR/.ainoc-release.json"
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
 
@@ -231,6 +232,9 @@ FILES
   grep -Fq 'Рабочий бюджет:' "$tester" || die 'Server Multitest: XHTTP planning budget отсутствует.'
   grep -Fq 'XHTTP ориентир:' "$tester" || die 'Server Multitest: XHTTP planning estimate отсутствует.'
   grep -Fq '"DNSBL: clean="' "$tester" || die 'Server Multitest: concise IPQuality output отсутствует.'
+  grep -Fq 'server-multitest.sh machine' "$tester" || die 'Server Multitest: machine mode отсутствует.'
+  grep -Fq 'remnanode.multitest.v1' "$tester" || die 'Server Multitest: machine JSON contract отсутствует.'
+  grep -Fq 'MULTITEST_NO_INSTALL' "$tester" || die 'Server Multitest: no-install machine guard отсутствует.'
   ! grep -Fq 'INTERPRETATION RULE' "$tester" || die 'Server Multitest: verbose interpretation footer вернулся.'
   ! sed -n '/run_all(){/,/^}/p' "$tester" | grep -Fq 'read -r action' || die 'Server Multitest: all mode снова требует Enter.'
   if grep -Eq '(^|[^[:alnum:]])http://' "$tester"; then
@@ -280,6 +284,67 @@ FILES
   fi
   ok "NEXT source синхронизирован → $NEXT_DIR"
   rm -rf "$tmp"
+}
+
+release_status(){
+  if [[ ! -s "$RELEASE_MARKER" ]]; then
+    printf '{"schema":"remnanode.release.v1","installed":false,"release_sha":null}\n'
+    return 0
+  fi
+  python3 - "$RELEASE_MARKER" <<'PY'
+import json, re, sys
+from pathlib import Path
+p=Path(sys.argv[1])
+try:
+    d=json.loads(p.read_text(encoding="utf-8"))
+except Exception:
+    print('{"schema":"remnanode.release.v1","installed":false,"release_sha":null,"error":"invalid_marker"}')
+    raise SystemExit(0)
+sha=str(d.get("release_sha") or "")
+if not re.fullmatch(r"[0-9a-f]{40}", sha):
+    print('{"schema":"remnanode.release.v1","installed":false,"release_sha":null,"error":"invalid_sha"}')
+    raise SystemExit(0)
+print(json.dumps({
+    "schema":"remnanode.release.v1",
+    "installed":True,
+    "release_sha":sha,
+    "installed_at":d.get("installed_at"),
+    "method":d.get("method"),
+}, ensure_ascii=False, separators=(",",":")))
+PY
+}
+
+write_release_marker(){
+  local sha="$1" method="${2:-managed-update}" tmp
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die 'AINOC release SHA invalid.'
+  tmp="$(mktemp "$APP_DIR/.ainoc-release.XXXXXX")"
+  python3 - "$tmp" "$sha" "$method" <<'PY'
+import json, sys
+from datetime import datetime, timezone
+from pathlib import Path
+Path(sys.argv[1]).write_text(json.dumps({
+    "schema":"remnanode.release.v1",
+    "release_sha":sys.argv[2],
+    "installed_at":datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "method":sys.argv[3],
+}, ensure_ascii=False, separators=(",",":"))+"\n", encoding="utf-8")
+PY
+  chmod 0600 "$tmp"
+  mv -f "$tmp" "$RELEASE_MARKER"
+}
+
+run_managed_update(){
+  local release_sha domain
+  release_sha="${AINOC_RELEASE_SHA:-}"
+  [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || die 'managed-update требует trusted AINOC_RELEASE_SHA (40 hex).'
+  domain="$(tr -d '[:space:]' < "$APP_DIR/.node_domain" 2>/dev/null || true)"
+  [[ -n "$domain" && "$domain" == *.* ]] || die 'Не найден текущий node domain; managed-update остановлен.'
+  sync_next_sources
+  if ! NODE_DOMAIN="$domain" "$REBUILD" rebuild; then
+    die 'Managed rebuild failed; release marker не записан.'
+  fi
+  write_release_marker "$release_sha" managed-rebuild
+  ok "AINOC release marker записан: ${release_sha:0:12}"
 }
 
 legacy_call(){
@@ -1029,6 +1094,8 @@ main(){
     rkn|protection|security) sync_next_sources; shift; "$PROTECTION" "${1:-menu}" ;;
     telemt|mtproto) sync_next_sources; shift; "$TELEMT" "${1:-status}" ;;
     rebuild-manager|legacy-rebuild) sync_next_sources; shift; "$REBUILD" "${1:-discover}" ;;
+    managed-update) run_managed_update ;;
+    release-status) release_status ;;
     signature) sync_next_sources; shift; "$SIGNATURE" "${1:-apply}" ;;
     runtime) sync_next_sources; shift; "$GUARDS" "$@" ;;
     status) show_status ;;
@@ -1040,7 +1107,7 @@ main(){
     hysteria-diag|hy2-diag) hysteria_diag ;;
     multitest|server-test|tests) sync_next_sources; shift; "$TESTER" "${1:-menu}" ;;
     sync-source) sync_next_sources ;;
-    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|protection|security|telemt|mtproto|rebuild-manager|legacy-rebuild|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|sync-source]' ;;
+    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|protection|security|telemt|mtproto|rebuild-manager|legacy-rebuild|managed-update|release-status|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|sync-source]' ;;
   esac
 }
 
