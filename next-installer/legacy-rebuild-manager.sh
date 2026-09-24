@@ -200,7 +200,7 @@ EOF
 install_current_protection(){
   [ -f "$PROTECTION" ] || die "protection manager missing"
   chmod 700 "$PROTECTION" "$REPO_DIR/security/remna-security.sh" 2>/dev/null || true
-  bash "$PROTECTION" install
+  PANEL_IP="$PANEL_IP" bash "$PROTECTION" install
   bash "$PROTECTION" panel-set "$PANEL_IP"
   bash "$PROTECTION" selftest
 }
