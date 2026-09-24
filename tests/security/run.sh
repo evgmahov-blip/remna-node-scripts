@@ -455,7 +455,16 @@ ok ufw
 
 echo "semi-paranoid defaults"
 begin docker
-grep -q '^ENABLE_SCANNERS=1begin docker
+grep -q '^ENABLE_SCANNERS=1$' "$REMNA_SECURITY_BASE/settings.conf" || fail "scanners not enabled by default"
+grep -q '^SCANNER_URL=https://lists.blocklist.de/lists/all.txt$' "$REMNA_SECURITY_BASE/settings.conf" || fail "default scanner feed missing"
+grep -q '^ENABLE_GEOIP=0$' "$REMNA_SECURITY_BASE/settings.conf" || fail "geoip must stay off by default"
+grep -q '^LOG_DROPS=0$' "$REMNA_SECURITY_BASE/settings.conf" || fail "drop logging must stay off by default"
+st=$(bash "$CLI" status --json)
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["sources"]["scanners"]["enabled"] is True; assert d["sources"]["geoip"]["enabled"] is False' "$st"
+ok semi-paranoid-defaults
+
+echo "scanner fast feed and migrate"
+begin docker
 SRC=$WORK/src
 write_pair "$SRC" 8
 nets 15 20 > "$WORK/scanners.txt"
