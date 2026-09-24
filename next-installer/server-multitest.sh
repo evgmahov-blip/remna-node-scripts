@@ -411,7 +411,7 @@ test_ai_access(){
       failed=$((failed+1))
       printf '%-11s %s%-20s%s rc=%s\n' "$name" "$C_RED" "$state" "$C_RESET" "$rc"
       if [[ -s "$err" ]]; then
-        printf '             %s%s%s\n' "$C_GRAY" "$(tr '\n\r' '  ' <"$err" | head -c 220)" "$C_RESET"
+        printf '             %s%s%s\n' "$C_GRAY" "$(head -c 220 "$err" | tr '\n\r' '  ')" "$C_RESET"
       fi
       rm -f "$body" "$err"
       continue
@@ -879,15 +879,15 @@ print_colored_analysis(){
       *" PASS "*|PASS=*|*"PASS="*)
         printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
         ;;
+      *" SKIP "*|SKIP=*|*"SKIP="*)
+        printf '%s%s%s\n' "$C_YELLOW" "$line" "$C_RESET"
+        ;;
       *" FAIL "*|FAIL=*|*"FAIL="*|*"rc="*)
         if [[ "$line" == *"FAIL=0"* && "$line" != *" FAIL "* ]]; then
           printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
         else
           printf '%s%s%s\n' "$C_RED" "$line" "$C_RESET"
         fi
-        ;;
-      *" SKIP "*|SKIP=*|*"SKIP="*)
-        printf '%s%s%s\n' "$C_YELLOW" "$line" "$C_RESET"
         ;;
       "Сеть:"*|"CPU single:"*|"CPU all-thread:"*|"MTU:"*|"DNSBL blacklist:"*|"Рабочий бюджет:"*|"XHTTP ориентир:"*|"IP reputation:"*)
         printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
