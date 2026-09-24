@@ -119,7 +119,7 @@ sudo protection-manager.sh backend-switch nftables --confirm
 
 ## Источники
 
-Закреплённые TSPU/GOV/GeoIP те же commit+blob, что и раньше. Быстрый scanner feed выключен (`ENABLE_SCANNERS=0`), пока не задан `SCANNER_URL=https://...`. Для него нет pin, но есть тот же конвейер: не HTML, не пусто, валидные CIDR, отказ от prefix короче /8 и от `0.0.0.0/0`, отказ от скачка размера относительно last-known-good, вычитание сетей, которые пересекают `PANEL_IP` или allow. Любой сбой оставляет последний успешный набор.
+Закреплённые TSPU/GOV/GeoIP те же commit+blob, что и раньше. Профиль по умолчанию — **«полупаранойя»**: `ENABLE_TSPU=1`, `ENABLE_GOV=1`, `ENABLE_SCANNERS=1`, `ENABLE_GEOIP=0`, `LOG_DROPS=0`. Scanner feed по умолчанию: `https://lists.blocklist.de/lists/all.txt`. Он динамический и не pinned, поэтому проходит тот же fail-closed конвейер: не HTML, не пусто, валидные CIDR, отказ от prefix короче /8 и от `0.0.0.0/0`, отказ от скачка размера относительно last-known-good, вычитание сетей, которые пересекают `PANEL_IP` или allow. Любой сбой оставляет последний успешный набор.
 
 Динамических IPv6-списков нет: pinned и fast источники здесь IPv4. IPv6 закрывает только TCP/2222 через `REMNA_GUARD6` (или nftables `ip6`). Ручные IPv6 allow/deny применяет nftables backend.
 
@@ -141,3 +141,22 @@ protection-manager.sh selftest --json
 Перед изменением настроек или фида пишется снимок `/opt/remna-protection/rollback/<id>/`. `rollback` восстанавливает последний снимок и заново применяет только owned ruleset. Неуспешный apply делает это сам.
 
 `migrate-inplace` добавляет новые ключи в старый `settings.conf` и копирует непустые списки в `data/lkg/`, не переключая backend.
+
+
+## Профиль «полупаранойя»
+
+Новые установки и старые конфиги без scanner-ключей получают безопасные defaults:
+
+```text
+ENABLE_TSPU=1
+ENABLE_GOV=1
+ENABLE_SCANNERS=1
+SCANNER_URL=https://lists.blocklist.de/lists/all.txt
+ENABLE_GEOIP=0
+LOG_DROPS=0
+FILTER_PORTS=443
+```
+
+Это блокирует известные TSPU/GOV/сканирующие адреса только на защищаемых TCP-портах. GeoIP allow-list намеренно не включается автоматически, чтобы не отрезать легитимных клиентов. Динамический scanner feed не заменяет last-known-good, если загрузка, формат, размер или sanity-проверки не проходят.
+
+Опциональные сервисы должны добавлять свой публичный TCP-порт через `protection-manager.sh config-set FILTER_PORTS ...`, а не создавать собственные firewall-правила. Telemt-интеграция следует этому правилу и добавляет свой `8443` через штатный protection manager.
