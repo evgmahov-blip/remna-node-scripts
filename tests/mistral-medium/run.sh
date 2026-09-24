@@ -27,6 +27,8 @@ grep -Fq 'port_owned_by_telemt(){' next-installer/telemt-manager.sh
 grep -Fq 'preserving existing MTProto secret' next-installer/telemt-manager.sh
 grep -Fq 'systemctl restart telemt.service telemt-panel.service' next-installer/telemt-manager.sh
 grep -Fq 'remove_protection_port' next-installer/telemt-manager.sh
+grep -Fq 'Enter = сохранить текущий при repair' full-clean-reinstall.sh
+! sed -n '/telemt_menu(){/,/^}/p' full-clean-reinstall.sh | grep -Fq 'Пустой пароль — установка отменена.'
 ufw_one="$(bash -c 'source next-installer/telemt-manager.sh >/dev/null; printf "%s\n" "[ 1] 8443/tcp ALLOW IN Anywhere # Telemt MTProto" | ufw_owned_rule_number 8443')"
 ufw_twelve="$(bash -c 'source next-installer/telemt-manager.sh >/dev/null; printf "%s\n" "[12] 8443/tcp ALLOW IN Anywhere # Telemt MTProto" | ufw_owned_rule_number 8443')"
 test "$ufw_one" = 1

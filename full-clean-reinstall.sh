@@ -13,23 +13,23 @@ NODE_IMAGE="ghcr.io/remnawave/node:${NODE_IMAGE_VERSION}@${NODE_IMAGE_DIGEST}"
 HYSTERIA_OVERLAY_REF="6f02c87c10d1d47fb4abcb234755823d1a1067bf"
 HYSTERIA_OVERLAY_BLOB_SHA="62ff1364c26d88f357968422d5591b3d2b8d9e78"
 HYSTERIA_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${HYSTERIA_OVERLAY_REF}/next-installer/remnawave-transport-manager.sh"
-V2_CLEANUP_REF="4fb802ee6a9311e887e59c632f1f036046c3963f"
-V2_CLEANUP_BLOB_SHA="b4ab814d16b4840e41bafee22a9271c661bbbcd0"
+V2_CLEANUP_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"
+V2_CLEANUP_BLOB_SHA="3c9e7f15862048f8c4bd1fc96be58483872f6d4a"
 V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next-installer/existing-node-v2-cleanup.sh"
 NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"
 NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="4fb802ee6a9311e887e59c632f1f036046c3963f"
-TESTER_BLOB_SHA="56bdc04034a39f83a7d0d2ef9a4f1b5c6504c352"
+TESTER_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"
+TESTER_BLOB_SHA="981f3de25e89edb47ada042a9c8bdbc6915b7233"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
-MGMT_OVERLAY_REF="4fb802ee6a9311e887e59c632f1f036046c3963f"
+MGMT_OVERLAY_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"
 PROTECTION_BLOB_SHA="d38486200c4399ec3150e0c3185d7f5620a3606a"
 SECURITY_SH_BLOB_SHA="74307541e6f3339fe7ac34278903a202157cf98f"
 SECURITY_PY_BLOB_SHA="a1d7ba1464516da3568dee0d8e8caa24b42ae2d0"
-TELEMT_BLOB_SHA="dffb82687b18d9613843fdeeafb199e87ecb0582"
+TELEMT_BLOB_SHA="35e2e1674e995155feef881f9ec4addbbbeaa9ad"
 TELEMT_LEGACY_BLOB_SHA="4d75a0ce34ff615fb7006a4e89a2cb619850c9ab"
-REBUILD_BLOB_SHA="a1e62341b2e1271b528a62ab098cb802e9a6f4e5"
+REBUILD_BLOB_SHA="07b265e96f598266a6953c08adbb26b9a20ed5a2"
 
 APP_DIR="/opt/remnanode"
 NEXT_DIR="$APP_DIR/next-installer"
@@ -898,11 +898,14 @@ telemt_menu(){
         printf 'TLS/self-mask domain [%s]: ' "$domain"
         local entered; read -r entered < "$TTY" || true
         [[ -n "$entered" ]] && domain="$entered"
-        printf 'Новый пароль Telemt Panel: '
+        printf 'Пароль Telemt Panel [Enter = сохранить текущий при repair]: '
         read -rs pass < "$TTY" || true
         echo
-        [[ -n "$pass" ]] || { warn 'Пустой пароль — установка отменена.'; continue; }
-        TLS_DOMAIN="$domain" PANEL_PASSWORD="$pass" TELEMT_PORT=8443 "$TELEMT" install
+        if [[ -n "$pass" ]]; then
+          TLS_DOMAIN="$domain" PANEL_PASSWORD="$pass" TELEMT_PORT=8443 "$TELEMT" install || { unset pass; warn 'Telemt install/repair не завершён.'; continue; }
+        else
+          TLS_DOMAIN="$domain" TELEMT_PORT=8443 "$TELEMT" install || { warn 'Для новой установки нужен пароль; существующая установка не изменена.'; continue; }
+        fi
         unset pass
         pause
         ;;
