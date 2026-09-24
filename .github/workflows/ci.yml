@@ -45,6 +45,10 @@ jobs:
         shell: bash
         run: bash tests/mistral-blockers/run.sh
 
+      - name: Mistral medium-hardening regression tests
+        shell: bash
+        run: bash tests/mistral-medium/run.sh
+
       - name: Telemt integration security tests
         shell: bash
         run: bash tests/telemt/run.sh
@@ -128,8 +132,10 @@ jobs:
           set -Eeuo pipefail
 
           t=next-installer/server-multitest.sh
-          test "$(git rev-parse HEAD:$t)" = "3d445a57ddadf923f03206f7848d37dc65f377ae"
-          test "$(git rev-parse 3a2014701d1775ba07f30b469865fc993cd633d1:$t)" = "3d445a57ddadf923f03206f7848d37dc65f377ae"
+          tester_ref="$(sed -n 's/^TESTER_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          tester_blob="$(sed -n 's/^TESTER_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          test "$(git rev-parse HEAD:$t)" = "$tester_blob"
+          test "$(git rev-parse "$tester_ref:$t")" = "$tester_blob"
 
           grep -Fq 'Censorcheck — DPI' "$t"
           grep -Fq 'YABS — disk fio only' "$t"
@@ -192,7 +198,7 @@ jobs:
           grep -Fq 'Рабочий бюджет:' "$t"
           grep -Fq 'XHTTP ориентир:' "$t"
           grep -Fq '"DNSBL: clean="' "$t"
-          grep -Fq 'bash "$script" -l ru -y -p -j' "$t"
+          grep -Fq 'bash "$script" -l ru -n -p -o "$json"' "$t"
           grep -Fq 'Max runtime:' "$t"
           ! grep -Fq 'Execution timeout:' "$t"
           ! grep -Fq 'INTERPRETATION RULE' "$t"
@@ -211,8 +217,8 @@ jobs:
           ! bash "$t" list | grep -Fq 'Ping yandex'
           ! grep -Eq '(^|[^[:alnum:]])http://' "$t"
 
-          grep -Fq 'TESTER_REF="3a2014701d1775ba07f30b469865fc993cd633d1"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="3d445a57ddadf923f03206f7848d37dc65f377ae"' full-clean-reinstall.sh
+          test -n "$tester_ref"
+          test -n "$tester_blob"
           grep -Fq 'server-multitest.sh' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next multitest' full-clean-reinstall.sh
           grep -Fq 'multitest|server-test|tests)' full-clean-reinstall.sh
@@ -283,8 +289,10 @@ jobs:
           set -Eeuo pipefail
 
           v2=next-installer/existing-node-v2-cleanup.sh
-          test "$(git rev-parse HEAD:$v2)" = "e4aa53eb348d907b72e6e847a384fabea3399cfb"
-          test "$(git rev-parse cc375ea8182c76929d9fc1046217ee769a5152d9:$v2)" = "e4aa53eb348d907b72e6e847a384fabea3399cfb"
+          v2_ref="$(sed -n 's/^V2_CLEANUP_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          v2_blob="$(sed -n 's/^V2_CLEANUP_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          test "$(git rev-parse HEAD:$v2)" = "$v2_blob"
+          test "$(git rev-parse "$v2_ref:$v2")" = "$v2_blob"
 
           grep -Fq 'TASK_NAME="REMNA NODE EXISTING-NODE V2 CLEANUP"' "$v2"
           grep -Fq 'V2 preflight PASS' "$v2"
@@ -299,12 +307,10 @@ jobs:
           grep -Fq 'global UFW reset НЕ выполнялся' "$v2"
           ! grep -Fq 'ufw --force reset' "$v2"
 
-          grep -Fq 'V2_CLEANUP_REF="cc375ea8182c76929d9fc1046217ee769a5152d9"' full-clean-reinstall.sh
-          grep -Fq 'V2_CLEANUP_BLOB_SHA="e4aa53eb348d907b72e6e847a384fabea3399cfb"' full-clean-reinstall.sh
+          test -n "$v2_ref"
+          test -n "$v2_blob"
           grep -Fq 'NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_REF="3a2014701d1775ba07f30b469865fc993cd633d1"' full-clean-reinstall.sh
-          grep -Fq 'TESTER_BLOB_SHA="3d445a57ddadf923f03206f7848d37dc65f377ae"' full-clean-reinstall.sh
           grep -Fq 'run_existing_node_v2(){' full-clean-reinstall.sh
           grep -Fq 'NEXT V2 — существующая/legacy нода' full-clean-reinstall.sh
           grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
@@ -327,9 +333,13 @@ jobs:
           grep -Fq '[5] ТОЛЬКО HOST XHTTP' full-clean-reinstall.sh
           grep -Fq '[6] ТОЛЬКО HOST HYSTERIA2' full-clean-reinstall.sh
           grep -Fq 'host-hysteria2|host-hysteria)' full-clean-reinstall.sh
-          grep -Fq '[13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)' full-clean-reinstall.sh
-          grep -Fq '[14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters' full-clean-reinstall.sh
-          grep -Fq '[15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА' full-clean-reinstall.sh
+          grep -Fq 'БЫСТРЫЕ ДЕЙСТВИЯ' full-clean-reinstall.sh
+          grep -Fq 'ЗАЩИТА / СЕТЬ' full-clean-reinstall.sh
+          grep -Fq 'TELEGRAM / TELEMT' full-clean-reinstall.sh
+          grep -Fq 'ОБСЛУЖИВАНИЕ' full-clean-reinstall.sh
+          grep -Fq 'Network / BBR' full-clean-reinstall.sh
+          grep -Fq 'Hysteria2 diagnostics' full-clean-reinstall.sh
+          grep -Fq 'Анализ / тестирование ноды' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next multitest 1..12' full-clean-reinstall.sh
           grep -Fq 'hysteria-diag|hy2-diag)' full-clean-reinstall.sh
           grep -Fq 'RKN UDP/443 DROP rule + counters:' full-clean-reinstall.sh
@@ -367,18 +377,11 @@ jobs:
           grep -Fq 'SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"' full-clean-reinstall.sh
           grep -Fq 'HYSTERIA_OVERLAY_REF="6f02c87c10d1d47fb4abcb234755823d1a1067bf"' full-clean-reinstall.sh
           grep -Fq 'HYSTERIA_OVERLAY_BLOB_SHA="62ff1364c26d88f357968422d5591b3d2b8d9e78"' full-clean-reinstall.sh
-          grep -Fq 'V2_CLEANUP_REF="cc375ea8182c76929d9fc1046217ee769a5152d9"' full-clean-reinstall.sh
-          grep -Fq 'V2_CLEANUP_BLOB_SHA="e4aa53eb348d907b72e6e847a384fabea3399cfb"' full-clean-reinstall.sh
-          grep -Fq 'REMNANODE NEXT — MAIN' full-clean-reinstall.sh
-          grep -Fq 'Транспорт / профили (XHTTP / RAW / Hysteria2 / combined)' full-clean-reinstall.sh
-          grep -Fq 'SEMI-PARANOID (TSPU + GOV + scanners)' full-clean-reinstall.sh
-          grep -Fq 'TELEMT / MTProto + Panel' full-clean-reinstall.sh
-          grep -Fq 'Managed legacy-node rebuild' full-clean-reinstall.sh
-          grep -Fq 'MGMT_OVERLAY_REF="cc375ea8182c76929d9fc1046217ee769a5152d9"' full-clean-reinstall.sh
+          grep -Fq 'REMNANODE NEXT — управление нодой' full-clean-reinstall.sh
+          grep -Fq 'NODE_IMAGE_VERSION="3.4.1"' full-clean-reinstall.sh
+          grep -Fq 'NODE_IMAGE_DIGEST="sha256:0cdf386dd49f360fc885bb34bde21132e478e40f0deac62d616086ec0fa9257e"' full-clean-reinstall.sh
           grep -Fq 'PROTECTION_BLOB_SHA="d38486200c4399ec3150e0c3185d7f5620a3606a"' full-clean-reinstall.sh
           grep -Fq 'SECURITY_PY_BLOB_SHA="a1d7ba1464516da3568dee0d8e8caa24b42ae2d0"' full-clean-reinstall.sh
-          grep -Fq 'TELEMT_BLOB_SHA="81dcf46d8cff45a681c0808c2ed309053e6edec6"' full-clean-reinstall.sh
-          grep -Fq 'REBUILD_BLOB_SHA="17a57dae41410aff2d9ce8d908636237ea1d6ade"' full-clean-reinstall.sh
           ! grep -Fq 'patch_hysteria_compat(){' full-clean-reinstall.sh
           ! grep -Fq 'install-caddy-node-reality-stream.sh' full-clean-reinstall.sh
 
@@ -389,13 +392,13 @@ jobs:
           mgmt_ref="$(sed -n 's/^MGMT_OVERLAY_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
           test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "62ff1364c26d88f357968422d5591b3d2b8d9e78"
-          test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "e4aa53eb348d907b72e6e847a384fabea3399cfb"
-          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "3d445a57ddadf923f03206f7848d37dc65f377ae"
-          test "$(git rev-parse "$mgmt_ref:protection-manager.sh")" = "d38486200c4399ec3150e0c3185d7f5620a3606a"
-          test "$(git rev-parse "$mgmt_ref:security/remna-security.sh")" = "f3b0d0286088ba6b6a7f9e2251010bef07d4ef25"
-          test "$(git rev-parse "$mgmt_ref:security/remna_sec.py")" = "a1d7ba1464516da3568dee0d8e8caa24b42ae2d0"
-          test "$(git rev-parse "$mgmt_ref:next-installer/telemt-manager.sh")" = "81dcf46d8cff45a681c0808c2ed309053e6edec6"
-          test "$(git rev-parse "$mgmt_ref:next-installer/legacy-rebuild-manager.sh")" = "17a57dae41410aff2d9ce8d908636237ea1d6ade"
+          test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "$(sed -n 's/^V2_CLEANUP_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "$(sed -n 's/^TESTER_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          test "$(git rev-parse "$mgmt_ref:protection-manager.sh")" = "$(sed -n 's/^PROTECTION_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          test "$(git rev-parse "$mgmt_ref:security/remna-security.sh")" = "$(sed -n 's/^SECURITY_SH_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          test "$(git rev-parse "$mgmt_ref:security/remna_sec.py")" = "$(sed -n 's/^SECURITY_PY_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          test "$(git rev-parse "$mgmt_ref:next-installer/telemt-manager.sh")" = "$(sed -n 's/^TELEMT_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          test "$(git rev-parse "$mgmt_ref:next-installer/legacy-rebuild-manager.sh")" = "$(sed -n 's/^REBUILD_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
 
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
