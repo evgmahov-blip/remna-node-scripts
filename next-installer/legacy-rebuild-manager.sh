@@ -18,7 +18,7 @@ INSTALL_TELEMT="${INSTALL_TELEMT:-1}"
 TELEMT_PORT="${TELEMT_PORT:-8443}"
 BACKUP_ROOT="${BACKUP_ROOT:-/root/remna-managed-rebuilds}"
 LEGACY_UFW_PORTS="${LEGACY_UFW_PORTS:-}"
-SECRET_FILE="${SECRET_FILE:-/root/.remna-managed-rebuild-secret}"
+SECRET_FILE="${SECRET_FILE:-/run/remna-managed-rebuild-secret}"
 
 say(){ printf '%s\n' "$*"; }
 ok(){ printf '[OK] %s\n' "$*"; }
@@ -38,16 +38,16 @@ discover_old_domain(){
 }
 
 discover_panel_ip(){
-  if [ -n "$PANEL_IP" ]; then printf '%s\n' "$PANEL_IP"; return; fi
-  if [ -r /opt/remnanode/.panel_ip ]; then
-    local p; p="$(tr -d '[:space:]' </opt/remnanode/.panel_ip)"
-    [[ "$p" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && { printf '%s\n' "$p"; return; }
+  local p=""
+  if [ -n "$PANEL_IP" ]; then
+    p="$PANEL_IP"
+  elif [ -r /opt/remnanode/.panel_ip ]; then
+    p="$(tr -d '[:space:]' </opt/remnanode/.panel_ip)"
+  elif [ -r /opt/remna-protection/settings.conf ]; then
+    p="$(awk -F= '$1=="PANEL_IP"{print $2; exit}' /opt/remna-protection/settings.conf 2>/dev/null | tr -d '[:space:]')"
   fi
-  ss -tn state established "sport = :$NODE_PORT" 2>/dev/null |
-    awk 'NR>1{print $5}' |
-    sed -E 's/.*ffff:([^]]+)\].*/\1/; s/:.*//' |
-    grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' |
-    sort -u | head -1 || true
+  [[ "$p" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 0
+  printf '%s\n' "$p"
 }
 
 old_secret(){
@@ -80,17 +80,19 @@ make_backup(){
   archive="$BACKUP_ROOT/remna-managed-rebuild-$stamp.tar.gz"
   mkdir -p "$dir/files" "$dir/state"
   chmod 700 "$BACKUP_ROOT" "$dir"
-  for x in /opt/remnanode /opt/remnawave-node-agent /etc/nginx /etc/letsencrypt; do
-    [ -e "$x" ] && cp -a --parents "$x" "$dir/files/" 2>/dev/null || true
+  for x in /opt/remnanode /opt/remnawave-node-agent /opt/remna-protection /etc/nginx /etc/letsencrypt /etc/telemt /etc/telemt-panel /var/lib/telemt-panel; do
+    if [ -e "$x" ]; then
+      cp -a --parents "$x" "$dir/files/" || die "backup failed while copying $x"
+    fi
   done
-  iptables-save >"$dir/state/iptables.v4" 2>/dev/null || true
-  ip6tables-save >"$dir/state/iptables.v6" 2>/dev/null || true
-  ipset save >"$dir/state/ipset.save" 2>/dev/null || true
-  ufw status numbered >"$dir/state/ufw.txt" 2>/dev/null || true
-  ss -lntup >"$dir/state/listeners.txt" 2>/dev/null || true
-  docker ps -a --no-trunc >"$dir/state/docker-ps.txt" 2>/dev/null || true
-  ip -br a >"$dir/state/ip.txt" 2>/dev/null || true
-  ip route >"$dir/state/routes.txt" 2>/dev/null || true
+  command -v iptables-save >/dev/null 2>&1 && iptables-save >"$dir/state/iptables.v4" || true
+  command -v ip6tables-save >/dev/null 2>&1 && ip6tables-save >"$dir/state/iptables.v6" || true
+  command -v ipset >/dev/null 2>&1 && ipset save >"$dir/state/ipset.save" || true
+  command -v ufw >/dev/null 2>&1 && ufw status numbered >"$dir/state/ufw.txt" || true
+  ss -lntup >"$dir/state/listeners.txt" || die "backup failed while recording listeners"
+  command -v docker >/dev/null 2>&1 && docker ps -a --no-trunc >"$dir/state/docker-ps.txt" || true
+  ip -br a >"$dir/state/ip.txt" || die "backup failed while recording addresses"
+  ip route >"$dir/state/routes.txt" || die "backup failed while recording routes"
   old="$(discover_old_domain)"; ip="$(public_ip)"; p="$(discover_panel_ip)"
   cat >"$dir/identity.txt" <<EOF
 NODE_DOMAIN=$NODE_DOMAIN
@@ -100,10 +102,11 @@ PANEL_IP=$p
 NODE_PORT=$NODE_PORT
 EOF
   chmod 600 "$dir/identity.txt"
-  tar -C "$BACKUP_ROOT" -czf "$archive" "$stamp"
+  tar -C "$BACKUP_ROOT" -czf "$archive" "$stamp" || die "backup archive creation failed"
   chmod 600 "$archive"
-  sha256sum "$archive" >"$archive.sha256"
+  sha256sum "$archive" >"$archive.sha256" || die "backup checksum creation failed"
   chmod 600 "$archive.sha256"
+  tar -tzf "$archive" >/dev/null || die "backup archive verification failed"
   printf '%s\n' "$archive"
 }
 
@@ -125,9 +128,6 @@ ensure_target_cert(){
 
 remove_excluded_legacy(){
   local old_domain f
-  if command -v hostnamectl >/dev/null 2>&1; then
-    hostnamectl set-hostname "$NODE_DOMAIN"
-  fi
   if command -v docker >/dev/null 2>&1; then
     docker rm -f remnawave-node-agent >/dev/null 2>&1 || true
   fi
@@ -278,6 +278,8 @@ finish_install(){
 
 resume(){
   need_root
+  install -d -m 0755 /run
+  trap cleanup_secret EXIT HUP INT TERM
   [ -s "$FULL" ] || die "NEXT launcher missing: $FULL"
   bash -n "$FULL" || die "NEXT launcher syntax check failed: $FULL"
   [ -n "$NODE_DOMAIN" ] || die "set NODE_DOMAIN"
@@ -294,8 +296,13 @@ resume(){
   ok "rebuild resumed and complete: $NODE_DOMAIN"
 }
 
+cleanup_secret(){
+  rm -f "$SECRET_FILE"
+}
 rebuild(){
   need_root
+  install -d -m 0755 /run
+  trap cleanup_secret EXIT HUP INT TERM
   [ -s "$FULL" ] || die "NEXT launcher missing: $FULL"
   bash -n "$FULL" || die "NEXT launcher syntax check failed: $FULL"
   [ -n "$NODE_DOMAIN" ] || die "set NODE_DOMAIN"
