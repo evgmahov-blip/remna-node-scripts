@@ -54,7 +54,7 @@ copy_if_exists(){
   [[ -e "$src" ]] || return 0
   rel="${src#/}"
   mkdir -p "$dst/$(dirname "$rel")"
-  cp -a "$src" "$dst/$rel" 2>/dev/null || warn "Backup: не удалось скопировать $src"
+  cp -a "$src" "$dst/$rel" || die "Backup: не удалось скопировать $src"
 }
 
 make_backup(){
@@ -96,13 +96,11 @@ make_backup(){
   command -v ipset >/dev/null 2>&1 && ipset save > "$dir/state/ipset-save.txt" 2>&1 || true
   command -v ufw >/dev/null 2>&1 && ufw status numbered > "$dir/state/ufw-status-numbered.txt" 2>&1 || true
 
-  if tar -C "$BACKUP_ROOT" -czf "$archive" "$stamp"; then
-    chmod 0600 "$archive"
-    ok "Recovery backup → $archive"
-  else
-    warn "tar.gz создать не удалось; backup directory сохранён: $dir"
-  fi
-  chmod -R go-rwx "$dir" 2>/dev/null || true
+  tar -C "$BACKUP_ROOT" -czf "$archive" "$stamp" || die "Recovery backup archive creation failed"
+  chmod 0600 "$archive"
+  tar -tzf "$archive" >/dev/null || die "Recovery backup archive verification failed"
+  chmod -R go-rwx "$dir" || die "Recovery backup permissions hardening failed"
+  ok "Recovery backup → $archive"
 }
 
 remove_unit(){
@@ -200,10 +198,28 @@ remove_node_runtime_files(){
 }
 
 remove_legacy_front(){
-  run_quiet systemctl stop caddy
-  rm -f     "$CADDY_DIR/Caddyfile"     "$CADDY_DIR/Caddyfile.public"     "$CADDY_DIR/Caddyfile.reality"     "$CADDY_DROPIN"
+  local domain="" main_owned=0
+  [[ -r "$APP_DIR/.node_domain" ]] && domain="$(tr -d '[:space:]' < "$APP_DIR/.node_domain")"
+
+  if [[ -f "$CADDY_DIR/Caddyfile" && -n "$domain" ]] &&
+     grep -Fq "$domain" "$CADDY_DIR/Caddyfile" 2>/dev/null &&
+     grep -Fq "$WEBROOT" "$CADDY_DIR/Caddyfile" 2>/dev/null; then
+    main_owned=1
+  fi
+
+  rm -f "$CADDY_DIR/Caddyfile.public" "$CADDY_DIR/Caddyfile.reality" "$CADDY_DROPIN"
+  (( main_owned == 0 )) || rm -f "$CADDY_DIR/Caddyfile"
   rm -rf "$WEBROOT"
-  ok 'Старые Caddy node-конфиги и /var/www/mstream удалены; пакет Caddy и ACME cache сохранены.'
+
+  if systemctl is-active --quiet caddy 2>/dev/null && [[ -f "$CADDY_DIR/Caddyfile" ]] && command -v caddy >/dev/null 2>&1; then
+    if caddy validate --config "$CADDY_DIR/Caddyfile" >/dev/null 2>&1; then
+      systemctl reload caddy >/dev/null 2>&1 || warn 'Caddy reload не удался; unrelated service оставлен запущенным.'
+    else
+      warn 'Оставшийся Caddyfile не прошёл validate; unrelated Caddy service не останавливаю.'
+    fi
+  fi
+
+  ok 'Удалены только owned Caddy node-файлы; global stop Caddy не выполнялся.'
 }
 
 remove_legacy_hysteria(){
@@ -298,9 +314,9 @@ main(){
   remove_legacy_units
   stop_node_runtime
   remove_legacy_firewall
+  remove_legacy_front
   remove_node_runtime_files
   remove_legacy_hysteria
-  remove_legacy_front
   remove_stale_files
   postcheck
 }
