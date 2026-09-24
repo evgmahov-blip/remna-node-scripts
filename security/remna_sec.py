@@ -411,7 +411,9 @@ def build_plan(base: Path) -> dict:
     deny_v4, deny_v6 = split_families(deny)
     sets[SET_ALLOW] = {"entries": allow_v4, "maxelem": 65536, "enabled": True, "entries_effective": allow_v4}
     sets[SET_DENY] = {"entries": deny_v4, "maxelem": 65536, "enabled": True, "entries_effective": deny_v4}
-    ports = ports_of(cfg) if valid_ports(cfg) else []
+    if not valid_ports(cfg):
+        raise ValueError("FILTER_PORTS must contain 1..15 valid TCP ports")
+    ports = ports_of(cfg)
     port_csv = ",".join(str(p) for p in ports)
     panel = cfg.get("PANEL_IP", "")
     pver = panel_version(cfg)
@@ -659,38 +661,60 @@ def execute_live(plan: dict, state_hint: dict) -> None:
         reason = nft_activation_block(state_hint, False)
         if reason:
             raise RuntimeError(reason)
-    cmds = build_commands(plan, retire_nft=True, retire_iptables=plan["backend"] == "nftables")
-    restore = plan.get("ipset_restore", "")
-    for cmd in cmds:
-        if cmd[:2] == ["ipset", "restore"]:
-            subprocess.run(cmd, input=restore.encode(), check=True)
-            continue
-        if cmd[:2] == ["nft", "-f"]:
-            subprocess.run(cmd, input=plan.get("nft_payload", "").encode(), check=True)
-            continue
-        if cmd[:3] == ["iptables", "-N", CHAIN] or cmd[:3] == ["ip6tables", "-N", CHAIN6]:
-            subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            continue
-        if cmd[:3] in (["iptables", "-D", "INPUT"], ["ip6tables", "-D", "INPUT"]) or cmd[:2] == ["ipset", "destroy"] or cmd[:3] == ["nft", "delete", "table"]:
-            subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            continue
-        subprocess.run(cmd, check=True)
-    if plan["backend"] == "iptables":
-        while subprocess.run(["iptables", "-C", "INPUT", "-j", CHAIN], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-            subprocess.run(["iptables", "-D", "INPUT", "-j", CHAIN], check=True)
-        subprocess.run(["iptables", "-I", "INPUT", "1", "-j", CHAIN], check=True)
-        while subprocess.run(["ip6tables", "-C", "INPUT", "-j", CHAIN6], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-            subprocess.run(["ip6tables", "-D", "INPUT", "-j", CHAIN6], check=False)
-        subprocess.run(["ip6tables", "-I", "INPUT", "1", "-j", CHAIN6], check=True)
-        if ufw_active_live() and plan["panel_version"] == 4 and plan["panel_ip"]:
-            status = subprocess.run(["ufw", "status"], text=True, capture_output=True)
-            for line in (status.stdout or "").splitlines():
-                if line.startswith("2222/tcp") and "Anywhere" in line:
-                    subprocess.run(["ufw", "--force", "delete", "allow", "2222/tcp"], check=False)
-            subprocess.run(
-                ["ufw", "allow", "from", plan["panel_ip"], "to", "any", "port", "2222", "proto", "tcp", "comment", "Remnawave panel only"],
-                check=False,
-            )
+        cmds = build_commands(plan, retire_nft=True, retire_iptables=True)
+        for cmd in cmds:
+            if cmd[:2] == ["nft", "-f"]:
+                subprocess.run(cmd, input=plan.get("nft_payload", "").encode(), check=True)
+            elif cmd[:3] in (["iptables", "-D", "INPUT"], ["ip6tables", "-D", "INPUT"]) or cmd[:2] == ["ipset", "destroy"]:
+                subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.run(cmd, check=True)
+        return
+
+    # ipset updates are already atomic via TMP -> swap.
+    build_commands(plan, retire_nft=False, retire_iptables=False)
+    subprocess.run(["ipset", "restore"], input=plan.get("ipset_restore", "").encode(), check=True)
+
+    def stage_chain(binary: str, chain: str, rules: list[str]) -> None:
+        # Build a complete new chain before touching the currently active one.
+        # If rebuilding the canonical chain later fails, the staging hook remains
+        # active and keeps the node protected instead of exposing TCP/2222.
+        stage = f"{chain}_STG_{os.getpid()}"
+        subprocess.run([binary, "-N", stage], check=True)
+        try:
+            for rule in rules:
+                parts = rule.split()
+                if len(parts) >= 2 and parts[0] == "-A" and parts[1] == chain:
+                    parts[1] = stage
+                subprocess.run([binary, *parts], check=True)
+
+            subprocess.run([binary, "-I", "INPUT", "1", "-j", stage], check=True)
+
+            # The fully populated staging chain now protects traffic. Only now
+            # replace the canonical chain.
+            while subprocess.run([binary, "-C", "INPUT", "-j", chain], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                subprocess.run([binary, "-D", "INPUT", "-j", chain], check=True)
+            subprocess.run([binary, "-N", chain], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run([binary, "-F", chain], check=True)
+            for rule in rules:
+                subprocess.run([binary, *rule.split()], check=True)
+            subprocess.run([binary, "-I", "INPUT", "1", "-j", chain], check=True)
+
+            # Canonical chain is active; retire this staging generation.
+            while subprocess.run([binary, "-C", "INPUT", "-j", stage], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                subprocess.run([binary, "-D", "INPUT", "-j", stage], check=True)
+            subprocess.run([binary, "-F", stage], check=True)
+            subprocess.run([binary, "-X", stage], check=True)
+        except Exception:
+            # Never flush/delete a staging chain that may already be hooked; it
+            # is the fail-closed protection if canonical reconstruction failed.
+            raise
+
+    stage_chain("iptables", CHAIN, plan["ipv4_rules"])
+    stage_chain("ip6tables", CHAIN6, plan["ipv6_rules"])
+
+    # Retire old nft owned table only after iptables protection is live.
+    subprocess.run(["nft", "delete", "table", NFT_FAMILY, NFT_TABLE], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def promote_staging(base: Path) -> None:
