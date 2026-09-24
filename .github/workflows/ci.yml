@@ -378,7 +378,7 @@ jobs:
           grep -Fq 'PROTECTION_BLOB_SHA="d38486200c4399ec3150e0c3185d7f5620a3606a"' full-clean-reinstall.sh
           grep -Fq 'SECURITY_PY_BLOB_SHA="a1d7ba1464516da3568dee0d8e8caa24b42ae2d0"' full-clean-reinstall.sh
           grep -Fq 'TELEMT_BLOB_SHA="81dcf46d8cff45a681c0808c2ed309053e6edec6"' full-clean-reinstall.sh
-          grep -Fq 'REBUILD_BLOB_SHA="f82d074be9cc0b578c7fc12e451ff9e7ec7b650e"' full-clean-reinstall.sh
+          grep -Fq 'REBUILD_BLOB_SHA="17a57dae41410aff2d9ce8d908636237ea1d6ade"' full-clean-reinstall.sh
           ! grep -Fq 'patch_hysteria_compat(){' full-clean-reinstall.sh
           ! grep -Fq 'install-caddy-node-reality-stream.sh' full-clean-reinstall.sh
 
@@ -389,13 +389,13 @@ jobs:
           mgmt_ref="$(sed -n 's/^MGMT_OVERLAY_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           test "$(git rev-parse "$source_ref:vendor/remna-next-source.tar.gz")" = "51a91d5745d0bea9b03eefeeaac52677fcf56b60"
           test "$(git rev-parse "$overlay_ref:next-installer/remnawave-transport-manager.sh")" = "62ff1364c26d88f357968422d5591b3d2b8d9e78"
-          test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
+          test "$(git rev-parse "$v2_ref:next-installer/existing-node-v2-cleanup.sh")" = "e4aa53eb348d907b72e6e847a384fabea3399cfb"
           test "$(git rev-parse "$tester_ref:next-installer/server-multitest.sh")" = "3d445a57ddadf923f03206f7848d37dc65f377ae"
           test "$(git rev-parse "$mgmt_ref:protection-manager.sh")" = "d38486200c4399ec3150e0c3185d7f5620a3606a"
           test "$(git rev-parse "$mgmt_ref:security/remna-security.sh")" = "f3b0d0286088ba6b6a7f9e2251010bef07d4ef25"
-          test "$(git rev-parse "$mgmt_ref:security/remna_sec.py")" = "cb085de83432bfb6ef8ade01b8551df122968f2e"
+          test "$(git rev-parse "$mgmt_ref:security/remna_sec.py")" = "a1d7ba1464516da3568dee0d8e8caa24b42ae2d0"
           test "$(git rev-parse "$mgmt_ref:next-installer/telemt-manager.sh")" = "81dcf46d8cff45a681c0808c2ed309053e6edec6"
-          test "$(git rev-parse "$mgmt_ref:next-installer/legacy-rebuild-manager.sh")" = "f82d074be9cc0b578c7fc12e451ff9e7ec7b650e"
+          test "$(git rev-parse "$mgmt_ref:next-installer/legacy-rebuild-manager.sh")" = "17a57dae41410aff2d9ce8d908636237ea1d6ade"
 
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
