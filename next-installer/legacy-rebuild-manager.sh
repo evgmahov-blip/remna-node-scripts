@@ -162,9 +162,11 @@ for pat,repl in subs:
     s, n = re.subn(pat, repl, s, count=1, flags=re.M)
     if n != 1:
         raise SystemExit(f"noninteractive patch regex missing: {pat[:60]}")
-s, n = re.subn(r'    local certificate=""\\n    while IFS= read -r line; do\\n.*?    done\\n', '    local certificate\\n    certificate="$(cat "$REBUILD_SECRET_FILE")"\\n', s, count=1, flags=re.S)
-if n != 1:
-    raise SystemExit("certificate prompt block not found")
+start = s.find('    local certificate=""')
+end = s.find('    local secret_key_value;', start)
+if start < 0 or end < 0:
+    raise SystemExit("certificate prompt block markers not found")
+s = s[:start] + '    local certificate\n    certificate="$(cat "$REBUILD_SECRET_FILE")"\n\n' + s[end:]
 s, n = re.subn(r'pause_prompt\\(\\) \\{\\n    echo ""\\n    read -p "Нажмите Enter, чтобы вернуться в меню\\.\\.\\." _\\n\\}', 'pause_prompt() { return 0; }', s, count=1)
 if n != 1:
     raise SystemExit("pause_prompt block not found")
