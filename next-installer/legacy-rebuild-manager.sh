@@ -149,6 +149,8 @@ detect_arch
 run_initial_setup
 EOF
   chmod 700 "$tmp"
+  ok "legacy setup wrapper prepared"
+  local setup_log=/root/remna-managed-rebuild-setup.log
   {
     printf '\n'
     printf '%s\n' "$PANEL_IP"
@@ -161,7 +163,12 @@ EOF
     printf '%s\n' "/etc/letsencrypt/live/$NODE_DOMAIN/fullchain.pem"
     printf '%s\n' "/etc/letsencrypt/live/$NODE_DOMAIN/privkey.pem"
     printf '\n'
-  } | bash "$tmp"
+  } | bash "$tmp" >"$setup_log" 2>&1 || {
+    warn "legacy setup failed; tail follows"
+    tail -80 "$setup_log" >&2 || true
+    return 1
+  }
+  ok "legacy base setup complete"
   rm -f "$tmp" "$SECRET_FILE"
   unset secret
 }
