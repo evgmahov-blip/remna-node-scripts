@@ -142,7 +142,7 @@ run_base_setup(){
   setup="/opt/remnanode/next-installer/setup_node-legacy.sh"
   [ -s "$setup" ] || die "synced legacy setup missing"
   tmp="$(mktemp)"
-  head -n -1 "$setup" >"$tmp"
+  sed '/^main$/d' "$setup" >"$tmp"
   cat >>"$tmp" <<'EOF'
 check_os
 detect_arch
