@@ -82,7 +82,12 @@ ensure_protection_port(){
     esac
     "$PROTECTION_MANAGER" preflight >/dev/null
     "$PROTECTION_MANAGER" config-set FILTER_PORTS "$next" >/dev/null
-    info "RemnaNode protection covers TCP/$TELEMT_PORT (FILTER_PORTS=$next)"
+    if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
+      if ! ufw status | grep -Eq "^$TELEMT_PORT/tcp[[:space:]]+ALLOW IN"; then
+        ufw allow "$TELEMT_PORT/tcp" comment 'Telemt MTProto' >/dev/null
+      fi
+    fi
+    info "RemnaNode protection covers TCP/$TELEMT_PORT (FILTER_PORTS=$next); UFW admission ensured"
     return 0
   fi
   [ -f "$LEGACY_ADAPTER" ] || die "no supported RemnaNode protection manager found"
