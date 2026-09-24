@@ -501,20 +501,26 @@ run_interruptible(){
 
 print_list(){
   cat <<'EOF'
- 1) IP Region / Геолокация
+ СКОРОСТЬ / ПРОИЗВОДИТЕЛЬНОСТЬ
+ 4) iPerf3 — RU: download / upload / ping по нескольким серверам
+ 5) Disk fio — read / write / IOPS
+ 8) CPU — single-thread + all-thread
+ 9) HTTPS download — внешний канал через Cloudflare 100MB
+
+ СЕТЬ / МАРШРУТ
+10) Route/MTR — loss / latency / ASN / geo
+11) Path MTU — UDP PMTU
+12) Globalping — внешние TCP/443 точки → эта нода
+
+ ДОСТУПНОСТЬ / IP
+ 1) IP Region / геолокация
  2) Censorcheck — геоблок
  3) Censorcheck — DPI
- 4) iPerf3 — RU сервера
- 5) YABS — disk fio only
- 6) Geo/Media Unlock — RegionRestrictionCheck
+ 6) Geo/Media Unlock
  7) IPQuality — ASN / risk / blacklist / media / mail
- 8) sysbench CPU
- 9) Network Bench — HTTPS 100MB
-10) NextTrace Route/MTR — loss/jitter/ASN/geo
-11) NextTrace Path MTU — UDP PMTU
-12) NextTrace Globalping — внешние TCP/443 точки → эта нода
-98) Анализ последнего прогона
-99) Мультитест: все тесты автоматически
+
+98) ПОКАЗАТЬ АНАЛИЗ ПОСЛЕДНЕГО ПРОГОНА
+99) ПОЛНЫЙ АНАЛИЗ НОДЫ — все тесты автоматически
 EOF
 }
 
@@ -591,12 +597,13 @@ report_key_metrics(){
 print_node_scorecard(){
   local dir="$1"
   local summary
-  local speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" fail_count="" safe_mbps=""
-  local at3="" at5=""
+  local https_speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" fail_count="" safe_mbps=""
+  local at3="" at5="" iperf_lines="" disk_lines=""
 
   summary="$dir/summary.tsv"
 
-  [[ -f "$dir/09-network-bench.log" ]] &&     speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
+  [[ -f "$dir/09-network-bench.log" ]] && \
+    https_speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
 
   if [[ -f "$dir/08-sysbench-cpu.log" ]]; then
     cpu_single="$(awk '
@@ -610,36 +617,68 @@ print_node_scorecard(){
     ' "$dir/08-sysbench-cpu.log" 2>/dev/null || true)"
   fi
 
-  [[ -f "$dir/11-nexttrace-mtu.log" ]] &&     mtu="$(awk '/Path MTU:[[:space:]]*[0-9]+/{print $3; exit}' "$dir/11-nexttrace-mtu.log" 2>/dev/null || true)"
+  if [[ -f "$dir/04-iperf-ru.log" ]]; then
+    iperf_lines="$(sed -E 's/\\x1B\\[[0-9;]*[mK]//g' "$dir/04-iperf-ru.log" \
+      | grep -aE 'Server[[:space:]]+Download[[:space:]]+Upload[[:space:]]+Ping|Mbps' \
+      | tail -12 || true)"
+  fi
 
-  [[ -f "$dir/07-ipquality.log" ]] &&     blacklisted="$(sed -nE 's/^DNSBL:.*blacklisted=([0-9]+).*/\1/p' "$dir/07-ipquality.log" | head -1)"
+  if [[ -f "$dir/05-yabs-disk.log" ]]; then
+    disk_lines="$(grep -aE 'fio Disk Speed Tests|Block Size|Read|Write|Total|IOPS|MB/s|GB/s' "$dir/05-yabs-disk.log" \
+      | tail -14 || true)"
+  fi
 
-  [[ -f "$summary" ]] &&     fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
+  [[ -f "$dir/11-nexttrace-mtu.log" ]] && \
+    mtu="$(awk '/Path MTU:[[:space:]]*[0-9]+/{print $3; exit}' "$dir/11-nexttrace-mtu.log" 2>/dev/null || true)"
+  [[ -f "$dir/07-ipquality.log" ]] && \
+    blacklisted="$(sed -nE 's/^DNSBL:.*blacklisted=([0-9]+).*/\1/p' "$dir/07-ipquality.log" | head -1)"
+  [[ -f "$summary" ]] && \
+    fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
 
   echo '======================================================================'
-  echo ' ИТОГ ПО НОДЕ'
+  echo ' АНАЛИЗ НОДЫ — ПРОИЗВОДИТЕЛЬНОСТЬ И СЕТЬ'
   echo '======================================================================'
-  printf 'FAIL:             %s\n' "${fail_count:-?}"
-  printf 'Сеть:             %s\n' "$([[ -n "$speed" ]] && printf '%s Mbit/s' "$speed" || printf 'нет данных')"
-  printf 'CPU single:       %s\n' "$([[ -n "$cpu_single" ]] && printf '%s events/s' "$cpu_single" || printf 'нет данных')"
-  printf 'CPU all-thread:   %s\n' "$([[ -n "$cpu_all" ]] && printf '%s events/s' "$cpu_all" || printf 'нет данных')"
-  printf 'MTU:              %s\n' "${mtu:-нет данных}"
-  printf 'DNSBL blacklist:  %s\n' "${blacklisted:-нет данных}"
-
-  if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-    safe_mbps="$(awk -v s="$speed" 'BEGIN{printf "%.1f", s*0.70}')"
+  printf 'FAIL тестов:       %s\n' "${fail_count:-?}"
+  echo
+  echo '--- СКОРОСТЬ И ПРОПУСКНАЯ СПОСОБНОСТЬ --------------------------------'
+  printf 'HTTPS download:    %s\n' "$([[ -n "$https_speed" ]] && printf '%s Mbit/s' "$https_speed" || printf 'нет данных')"
+  if [[ -n "$iperf_lines" ]]; then
+    echo 'iPerf3 RU:'
+    printf '%s\n' "$iperf_lines" | sed 's/^/  /'
+  else
+    echo 'iPerf3 RU:         нет данных'
+  fi
+  echo
+  echo '--- CPU ----------------------------------------------------------------'
+  printf 'CPU single:        %s\n' "$([[ -n "$cpu_single" ]] && printf '%s events/s' "$cpu_single" || printf 'нет данных')"
+  printf 'CPU all-thread:    %s\n' "$([[ -n "$cpu_all" ]] && printf '%s events/s' "$cpu_all" || printf 'нет данных')"
+  echo
+  echo '--- DISK ----------------------------------------------------------------'
+  if [[ -n "$disk_lines" ]]; then
+    printf '%s\n' "$disk_lines" | sed 's/^/  /'
+  else
+    echo 'Disk fio:          нет данных'
+  fi
+  echo
+  echo '--- СЕТЕВОЙ БЮДЖЕТ ------------------------------------------------------'
+  if [[ "$https_speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    safe_mbps="$(awk -v s="$https_speed" 'BEGIN{printf "%.1f", s*0.70}')"
     at3="$(awk -v s="$safe_mbps" 'BEGIN{print int(s/3)}')"
     at5="$(awk -v s="$safe_mbps" 'BEGIN{print int(s/5)}')"
-    printf 'Рабочий бюджет:   %s Mbit/s (70%% измеренной скорости)\n' "$safe_mbps"
-    printf 'XHTTP ориентир:   ~%s активных @3 Mbit/s / ~%s @5 Mbit/s\n' "$at3" "$at5"
+    printf 'Измерено HTTPS:    %s Mbit/s\n' "$https_speed"
+    printf 'Рабочий бюджет:    %s Mbit/s (70%% измеренного канала)\n' "$safe_mbps"
+    printf 'XHTTP @3 Mbit/s:   ~%s одновременных активных потоков*\n' "$at3"
+    printf 'XHTTP @5 Mbit/s:   ~%s одновременных активных потоков*\n' "$at5"
+    echo '  * ориентир по каналу, не гарантия числа пользователей; CPU/маршрут/oversubscription тоже ограничивают.'
+  else
+    echo 'Рабочий бюджет:    нет данных — запусти тест #9 или полный анализ.'
   fi
-
-  if [[ "$blacklisted" == "0" ]]; then
-    echo 'IP reputation:    без DNSBL blacklist по текущему тесту'
-  fi
-  if [[ "$mtu" == "1500" ]]; then
-    echo 'MTU:              нормальный для XHTTP/Hysteria2'
-  fi
+  echo
+  echo '--- СОСТОЯНИЕ СЕТИ ------------------------------------------------------'
+  printf 'Path MTU:          %s\n' "${mtu:-нет данных}"
+  printf 'DNSBL blacklist:   %s\n' "${blacklisted:-нет данных}"
+  [[ "$blacklisted" == "0" ]] && echo 'IP reputation:     без DNSBL blacklist по текущему тесту'
+  [[ "$mtu" == "1500" ]] && echo 'MTU оценка:        1500 — нормальный базовый результат'
   echo '======================================================================'
 }
 
@@ -659,7 +698,7 @@ generate_report(){
 
   {
     echo '======================================================================'
-    echo ' REMNANODE NEXT — MULTITEST ANALYSIS'
+    echo ' REMNANODE NEXT — NODE ANALYSIS'
     echo '======================================================================'
     printf 'Host: %s\n' "$(hostname -f 2>/dev/null || hostname)"
     printf 'UTC:  %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S')"
@@ -708,7 +747,7 @@ print_colored_analysis(){
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
-      " REMNANODE NEXT — MULTITEST ANALYSIS"|" ИТОГ ПО НОДЕ"|"=== TEST STATUS ==="|"=== ПРОБЛЕМЫ ===")
+      " REMNANODE NEXT — NODE ANALYSIS"|" АНАЛИЗ НОДЫ — ПРОИЗВОДИТЕЛЬНОСТЬ И СЕТЬ"|"=== TEST STATUS ==="|"=== ПРОБЛЕМЫ ===")
         printf '%s%s%s\n' "$C_CYAN" "$line" "$C_RESET"
         ;;
       "======================================================================"|"================================================================="|"==================== АНАЛИТИКА ПОСЛЕ ТЕСТОВ ====================")
@@ -878,7 +917,7 @@ menu(){
   while true; do
     echo
     printf '%s============================================================%s\n' "$C_CYAN" "$C_RESET"
-    say 'REMNANODE NEXT — SERVER MULTITEST'
+    say 'REMNANODE NEXT — АНАЛИЗ НОДЫ'
     printf '%s============================================================%s\n' "$C_CYAN" "$C_RESET"
     print_list
     say ' 0) Назад'
