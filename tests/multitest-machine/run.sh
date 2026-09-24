@@ -84,15 +84,30 @@ FULL_LIB="$WORK/full-lib.sh"
 sed '$d' "$FULL" >"$FULL_LIB"
 source "$FULL_LIB"
 APP_DIR="$WORK/node"
-mkdir -p "$APP_DIR"
+mkdir -p "$APP_DIR/remnawave-profiles"
 RELEASE_MARKER="$APP_DIR/.ainoc-release.json"
+printf 'NODE_PORT=2222\nSECRET_KEY=test-secret\nXTLS_API_PORT=61000\n' >"$APP_DIR/.env"
 printf 'node.example.com\n' >"$APP_DIR/.node_domain"
-REBUILD="$WORK/fake-rebuild.sh"
-cat >"$REBUILD" <<'SH'
-#!/usr/bin/env bash
-exit 0
-SH
-chmod 0700 "$REBUILD"
+printf '203.0.113.10\n' >"$APP_DIR/.panel_ip"
+printf 'combined\n' >"$APP_DIR/.transport"
+printf 'selfsteal\n' >"$APP_DIR/.camouflage_mode"
+printf 'REALITY_PRIVATE_KEY=a\nREALITY_PUBLIC_KEY=b\nREALITY_SHORT_ID=c\n' >"$APP_DIR/reality.env"
+printf 'node.example.com\n' >"$APP_DIR/.reality_sni"
+printf '/dev/shm/nginx.sock\n' >"$APP_DIR/.reality_target"
+printf '/api/stable/path.ts\n' >"$APP_DIR/.xhttp_path"
+printf '{"profile":"stable"}\n' >"$APP_DIR/remnawave-profiles/xhttp-reality.json"
+
+before="$(managed_identity_digest)"
+printf '/api/changed/path.ts\n' >"$APP_DIR/.xhttp_path"
+after="$(managed_identity_digest)"
+[[ "$before" != "$after" ]]
+printf '/api/stable/path.ts\n' >"$APP_DIR/.xhttp_path"
+
+managed_update_backup(){ mkdir -p "$WORK/backup"; printf '%s\n' "$WORK/backup"; }
+managed_update_restore_code(){ :; }
+managed_patch_node_image(){ :; }
+managed_update_postcheck(){ :; }
+managed_running_image_digest(){ printf '%s\n' "$NODE_IMAGE_DIGEST"; }
 sync_next_sources(){ :; }
 AINOC_RELEASE_SHA="0123456789abcdef0123456789abcdef01234567"
 run_managed_update
@@ -103,20 +118,22 @@ d=json.loads(sys.argv[1])
 assert d["schema"] == "remnanode.release.v1"
 assert d["installed"] is True
 assert d["release_sha"] == "0123456789abcdef0123456789abcdef01234567"
-assert d["method"] == "managed-rebuild"
+assert d["method"] == "in-place"
+assert d["identity_ok"] is True
+assert d["image_ok"] is True
+assert len(d["identity_digest"]) == 64
 PY
 [[ "$(stat -c %a "$RELEASE_MARKER")" == 600 ]]
 
 rm -f "$RELEASE_MARKER"
-cat >"$REBUILD" <<'SH'
-#!/usr/bin/env bash
-exit 7
-SH
-chmod 0700 "$REBUILD"
+sync_next_sources(){ printf '/api/drifted/path.ts\n' >"$APP_DIR/.xhttp_path"; }
 if ( run_managed_update >/dev/null 2>&1 ); then
-  echo "managed update unexpectedly passed failed rebuild" >&2
+  echo "managed update unexpectedly passed identity drift" >&2
   exit 1
 fi
 [[ ! -e "$RELEASE_MARKER" ]]
+
+grep -Fq 'CONNECTION IDENTITY DRIFT' "$FULL"
+! sed -n '/run_managed_update(){/,/^}/p' "$FULL" | grep -Fq '"$REBUILD" rebuild'
 
 echo "MULTITEST_MACHINE_TESTS=PASS"
