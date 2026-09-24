@@ -132,8 +132,8 @@ jobs:
           set -Eeuo pipefail
 
           t=next-installer/server-multitest.sh
-          test "$(git rev-parse HEAD:$t)" = "3d445a57ddadf923f03206f7848d37dc65f377ae"
-          test "$(git rev-parse 3a2014701d1775ba07f30b469865fc993cd633d1:$t)" = "3d445a57ddadf923f03206f7848d37dc65f377ae"
+          test "$(git rev-parse HEAD:$t)" = "542b87efc4af8aa5911def29a564cef082d4eea6"
+          test "$(git rev-parse 3a9cb5e9619b02fc0785d2620704a8f0271b47ad:$t)" = "542b87efc4af8aa5911def29a564cef082d4eea6"
 
           grep -Fq 'Censorcheck — DPI' "$t"
           grep -Fq 'YABS — disk fio only' "$t"
