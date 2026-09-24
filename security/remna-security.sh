@@ -70,10 +70,10 @@ PANEL_IP=
 ENABLE_TSPU=1
 ENABLE_GOV=1
 ENABLE_GEOIP=0
-ENABLE_SCANNERS=0
+ENABLE_SCANNERS=1
 FILTER_PORTS=443
 GEO_COUNTRIES=
-SCANNER_URL=
+SCANNER_URL=https://lists.blocklist.de/lists/all.txt
 BACKEND=iptables
 LOG_DROPS=0
 EOF
@@ -83,10 +83,10 @@ EOF
     ensure_key ENABLE_TSPU 1
     ensure_key ENABLE_GOV 1
     ensure_key ENABLE_GEOIP 0
-    ensure_key ENABLE_SCANNERS 0
+    ensure_key ENABLE_SCANNERS 1
     ensure_key FILTER_PORTS 443
     ensure_key GEO_COUNTRIES ""
-    ensure_key SCANNER_URL ""
+    ensure_key SCANNER_URL "https://lists.blocklist.de/lists/all.txt"
     ensure_key BACKEND iptables
     ensure_key LOG_DROPS 0
     chmod 0600 "$CONF" || true
@@ -104,7 +104,7 @@ load_conf() {
   ENABLE_TSPU=1
   ENABLE_GOV=1
   ENABLE_GEOIP=0
-  ENABLE_SCANNERS=0
+  ENABLE_SCANNERS=1
   FILTER_PORTS=443
   GEO_COUNTRIES=""
   SCANNER_URL=""
