@@ -324,7 +324,7 @@ jobs:
           set -Eeuo pipefail
           grep -Fq 'ПОКАЗАТЬ ГОТОВЫЙ ПРОФИЛЬ / ПРОФИЛИ ДЛЯ КОПИПАСТЫ? [Y/n]:' full-clean-reinstall.sh
           grep -Fq 'sudo remnanode-next current-profile' full-clean-reinstall.sh
-          grep -Fq 'Config Profile + НАСТРОЙКИ HOST REMNAWAVE' full-clean-reinstall.sh
+          grep -Fq 'REMNAWAVE — CONFIG PROFILE + НАСТРОЙКИ HOST' full-clean-reinstall.sh
           grep -Fq '[3] Hysteria2 + TLS' full-clean-reinstall.sh
           grep -Fq '→ JSON Config Profile + HOST HYSTERIA2' full-clean-reinstall.sh
           grep -Fq '[4] XHTTP + Hysteria2' full-clean-reinstall.sh
