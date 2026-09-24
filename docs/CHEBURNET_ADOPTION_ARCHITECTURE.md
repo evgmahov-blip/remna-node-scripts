@@ -96,9 +96,33 @@ Security V2 locking remains authoritative. Any lifecycle transaction touching mo
 
 `transaction -> inbound -> transport -> egress`
 
-The lifecycle controller must never invent a competing lock order. If a required manager cannot participate in the common transaction/lock contract, the operation stops with `MANUAL_RECOVERY_REQUIRED`; it must not fall back to best-effort coordination.
+All non-Security-V2 mutating managers named by this architecture (package manager, container runtime, systemd drop-ins, sysctl fragments, certificate issuance/renewal and future lifecycle-owned mutators) are serialized behind the single lifecycle transaction lock. They must not introduce independent cross-manager lock ordering outside their own private internal lock after the lifecycle transaction lock is held.
+
+The lifecycle controller must never invent a competing Security V2 lock order. If a required manager cannot participate in the common transaction/lock contract, the operation stops with `MANUAL_RECOVERY_REQUIRED`; it must not fall back to best-effort coordination.
 
 Every mutating manager entry point must reject or join an active coordinator transaction rather than mutate concurrently behind it.
+
+### Lock identity, fencing and stale-lock handling
+
+The transaction lock is not a bare pidfile. Its durable ownership record must contain:
+- transaction id;
+- holder boot id;
+- holder process identity;
+- monotonic acquisition generation;
+- fencing token;
+- acquired_at;
+- last heartbeat/liveness observation where applicable.
+
+Every mutating manager call made under a lifecycle transaction must receive and validate the current fencing token before mutation and again before commit acknowledgement.
+
+A resumed controller never assumes that a previous process still owns the lock. It must reconcile lock owner identity, boot id, liveness and journal state.
+
+Stale-lock policy is fail-closed:
+- a dead holder does not authorize silent lock breaking;
+- the controller records stale-lock evidence;
+- it may reacquire only through the documented recovery path after proving the previous holder cannot still mutate;
+- uncertainty becomes `MANUAL_RECOVERY_REQUIRED`;
+- fencing generation/token changes on any legitimate reacquisition, making late writes from an old holder invalid.
 
 ### Durable journal and crash recovery
 
@@ -118,6 +142,14 @@ A lifecycle transaction uses one durable append/replace journal whose records bi
 A lifecycle step is considered committed only after both:
 1. the manager has committed and returned durable commit evidence; and
 2. the lifecycle journal has durably recorded that exact manager generation/fingerprint.
+
+Journal integrity is mandatory:
+- each record has schema version, sequence number and checksum/hash over canonical serialized content;
+- a transaction header binds the journal to transaction id and candidate/release provenance;
+- writes use temp -> fsync -> rename/append discipline appropriate to the chosen journal format;
+- truncated, torn, checksum-invalid, duplicate-sequence or out-of-order records are rejected;
+- unknown/newer schema versions are never auto-downgraded;
+- any journal-integrity ambiguity becomes `MANUAL_RECOVERY_REQUIRED`.
 
 On startup/resume, the controller must reconcile the journal against each manager's actual current generation and effective runtime state before taking any action. Marker presence alone is never proof of success.
 
@@ -216,6 +248,13 @@ A digest first observed from an untrusted or unauthorized registry is not automa
 
 Rollback must record and restore an exact previously verified image ID/digest, never a mutable tag.
 
+The last-known-good rollback image is a protected rollback asset:
+- its exact image ID and platform digest are recorded in the transaction/release evidence;
+- local pruning/GC must exclude it while it is the active rollback target;
+- replacement of the rollback target happens only after the new generation reaches COMPLETE and the retention policy commits the new LKG;
+- rollback does not depend on resolving a mutable tag;
+- if the exact LKG image is absent and the registry cannot provide the already-approved digest, rollback is declared unavailable and the transaction stops at `MANUAL_RECOVERY_REQUIRED`; no substitute image may be selected.
+
 Verification JSON includes expected and active digest, platform, trust-verification result and provenance identifiers without credentials.
 
 ## D. Unified read-only verification
@@ -282,6 +321,17 @@ Verification adapters operate under a capability-restricted read-only contract. 
 
 Network reads are allowed only when explicitly declared by a check and bounded by timeout. Any cache must be bounded, non-secret, optional, and outside authoritative state; cache failure cannot trigger mutation.
 
+The required/optional/WARN aggregation policy is itself an immutable release input:
+- it is versioned and content-hashed;
+- its hash is bound into release evidence;
+- verify prints the policy version/hash it used;
+- missing, mismatched, untrusted or newer-unknown policy => overall `UNKNOWN`, nonzero exit;
+- a node-local setting may not weaken required checks or convert required UNKNOWN/FAIL into success.
+
+Read-only is enforced at runtime, not only by tests. Mutating manager entry points require a mutation-gate token/context that is issued only by an authorized lifecycle mutation transaction. Verify, inspect, status, health and preflight contexts never receive such a token. A mutation-capable manager called without a valid mutation gate must fail before side effects.
+
+Where practical, read-only commands also run with reduced OS privileges/capabilities. Runtime mutation-gate enforcement remains mandatory even when privilege separation is unavailable.
+
 JSON schema should be versioned and stable for AINOC/Telegram use.
 
 Verification is read-only. Repair remains an explicit separate action and a separate gate.
@@ -307,6 +357,19 @@ Required invariants:
 - any unexpected concurrent change causes refusal, not overwrite;
 - rollback also requires the expected post-mutation generation/fingerprint and refuses to clobber a newer state;
 - a refused rollback preserves evidence and returns `MANUAL_RECOVERY_REQUIRED`.
+
+For multi-manager transactions, rollback is tracked per manager/object. The journal records `ROLLED_BACK`, `ROLLBACK_REFUSED`, `ROLLBACK_FAILED`, or `NOT_TOUCHED` for every participant together with the generation left active.
+
+A partial rollback produces one bounded `MIXED_GENERATION_MANUAL_RECOVERY` state. Its operator-facing report must identify:
+- transaction id;
+- candidate and previous generation;
+- each manager/object;
+- current observed generation/fingerprint;
+- rollback outcome;
+- remaining candidate-owned objects;
+- safe actions allowed next.
+
+No automatic forward progress, new mutation transaction, release, or activation is permitted while this mixed state is unresolved.
 
 First intended consumers:
 - SSH hardening if/when NEXT owns a narrow SSH policy;
@@ -387,6 +450,7 @@ Required test families:
 - secret validation fixtures;
 - certificate/key mismatch fixtures;
 - no-secret-in-argv/env/log/journal/traceback/temp-artifact tests;
+- secret-handling tests ensure core dumps are disabled for secret-processing helpers where supported;
 - image digest resolution/persistence tests;
 - registry allowlist/platform-manifest/image-ID binding tests;
 - signature/attestation policy tests where enabled;
@@ -398,7 +462,14 @@ Required test families:
 - semantic-effective-state tests;
 - observability parsing tests;
 - no-global-firewall-mutation tests;
-- release provenance binding tests.
+- release provenance binding tests;
+- stale-lock/fencing-token rejection tests;
+- torn/truncated/bad-checksum journal tests;
+- LKG image retention/pruning-protection tests;
+- mixed-generation partial-rollback reporting/blocking tests;
+- runtime mutation-gate refusal tests for verify/preflight contexts;
+- verify-policy hash mismatch => UNKNOWN/nonzero tests;
+- trust-policy downgrade/revocation/expiry tests.
 
 External commands must be injectable/fakeable in offline tests.
 
@@ -428,7 +499,20 @@ Release evidence must bind, in one immutable record:
 - review evidence identifiers;
 - release approval identifier.
 
-Where signing is configured, signed commit/tag/artifact provenance must be verified against pinned trusted identities/keys. Unsigned or unverifiable artifacts must not silently substitute for a signed-required policy.
+Trust strength is pinned by release evidence and is non-downgradeable at install time.
+
+The release trust policy declares whether signatures/attestations are required and binds:
+- trusted signer/issuer identities or keys;
+- allowed signature/attestation types;
+- key/issuer validity window;
+- rotation generation;
+- revocation source/policy;
+- attestation expiry/freshness policy;
+- minimum trust level.
+
+A node-local setting cannot disable a release-required signature/attestation check or replace trusted identities. Unknown signer rotation, revoked signer, expired required attestation, missing trust policy, or attempted downgrade fails closed.
+
+Signed commit/tag/artifact provenance, where required by that pinned policy, must be verified against the exact trusted identities/keys from release evidence. Unsigned or unverifiable artifacts must not silently substitute for a signed-required policy.
 
 A future installer may select only an artifact/digest that matches the approved immutable release evidence. A GitHub release page or tag name by itself is not trust evidence.
 
@@ -508,9 +592,15 @@ Architecture is acceptable only if review confirms:
 11. image drift is prevented and image trust binds registry identity, platform digest and executed image;
 12. rollback is owner-scoped and generation/CAS protected against concurrent changes;
 13. release evidence immutably binds reviewed source, artifacts and runtime image digest;
-14. no force-push/re-tag release path;
-15. inspect/preflight/verify contain no hidden activation path;
-16. no live activation is introduced by this change.
+14. transaction locks have fencing/stale-holder semantics and all non-V2 mutators are serialized behind the lifecycle transaction lock;
+15. journal integrity detects torn/truncated/corrupt/unknown-schema records fail-closed;
+16. the exact LKG image remains retained/protected while it is a rollback target;
+17. partial rollback becomes a bounded mixed-generation manual-recovery state and blocks new mutation/release/activation;
+18. verify/preflight are runtime-enforced read-only through a mutation gate, not merely CI convention;
+19. verify policy and release trust/signing policy are hash-bound/non-downgradeable release inputs;
+20. no force-push/re-tag release path;
+21. inspect/preflight/verify contain no hidden activation path;
+22. no live activation is introduced by this change.
 
 ## M. Implementation sequencing recommendation
 
@@ -536,5 +626,25 @@ This revision explicitly closes the first AnyModel antagonist review blockers:
 | Rollback races | Ownership fingerprints, generation CAS, lock scope and rollback refusal on concurrent change |
 | Release immutability declarative | Immutable evidence binding candidate -> blobs -> artifacts -> image digest -> review/release approval |
 | Hidden activation risk | Explicit prohibition plus tests for zero mutation from inspect/preflight/verify paths |
+
+This mapping is evidence for re-review only; it does not itself constitute approval.
+
+
+## O. Second antagonist review remediation mapping
+
+The second AnyModel antagonist review confirmed the first blocker set closed and identified failure-mode gaps. This revision adds:
+
+| Finding | Architectural closure |
+| --- | --- |
+| Stale/orphaned lock semantics | Durable holder identity + boot id + fencing generation/token + fail-closed reacquisition |
+| Non-V2 mutator ordering | Package/container/systemd/sysctl/certificate mutators serialized behind lifecycle transaction lock |
+| Journal corruption/torn writes | Sequence + checksum + canonical serialization + torn/truncated/unknown-schema rejection |
+| Rollback image may be pruned | Exact LKG image protected from GC while rollback target; absent LKG => manual recovery |
+| Partial cross-manager rollback undefined | Per-manager outcomes + bounded MIXED_GENERATION_MANUAL_RECOVERY state + activation/release block |
+| Read-only only test-enforced | Runtime mutation-gate required inside every mutating manager; verify/preflight never receive it |
+| Verify policy can be weakened | Verify-policy version/hash bound into release evidence; mismatch => UNKNOWN/nonzero |
+| Signing/trust can be downgraded | Release-pinned minimum trust policy, signer rotation/revocation/expiry semantics, node cannot weaken it |
+
+Secret-processing implementations should additionally disable core dumps where supported and avoid swap exposure where platform controls make that practical; this is defense-in-depth and does not replace the no-persist/no-log contract.
 
 This mapping is evidence for re-review only; it does not itself constitute approval.
