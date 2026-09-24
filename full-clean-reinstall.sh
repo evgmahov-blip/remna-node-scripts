@@ -50,13 +50,13 @@ TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
-  C_RESET="$(printf '\\033[0m')"
-  C_BOLD="$(printf '\\033[1m')"
-  C_CYAN="$(printf '\\033[36m')"
-  C_GREEN="$(printf '\\033[32m')"
-  C_YELLOW="$(printf '\\033[33m')"
-  C_RED="$(printf '\\033[31m')"
-  C_GRAY="$(printf '\\033[90m')"
+  C_RESET="$(printf '\033[0m')"
+  C_BOLD="$(printf '\033[1m')"
+  C_CYAN="$(printf '\033[36m')"
+  C_GREEN="$(printf '\033[32m')"
+  C_YELLOW="$(printf '\033[33m')"
+  C_RED="$(printf '\033[31m')"
+  C_GRAY="$(printf '\033[90m')"
 else
   C_RESET=""
   C_BOLD=""
