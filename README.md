@@ -14,12 +14,14 @@ NEXT восстановлен из source snapshot реально работаю
 - комбинированный профиль **XHTTP + Hysteria2**: TCP/443 + UDP/443;
 - генерация Config Profile и Host для Remnawave;
 - стабильная per-node XHTTP signature;
-- RKN SAFE scanner guard с rollback и self-heal — **ставится автоматически по умолчанию**;
-- runtime repair для Hysteria cert mount / RKN;
+- semi-paranoid защита ноды: TSPU + GOV + scanner feed, panel-IP guard для TCP/2222, rollback/LKG и self-heal;
+- Telemt MTProto proxy на TCP/8443 + loopback-only Telemt Panel/API;
+- runtime repair для Hysteria cert mount / security contour;
 - маскировочный SelfSteal-сайт;
 - BBR TUNE (SAFE/HIGHLOAD, без замены ядра) — **ставится автоматически по умолчанию**;
 - безопасный backup / clean / reinstall без глобального `ufw reset`;
-- **NEXT V2 для существующей/legacy-ноды**: recovery backup → адресная зачистка старых Remnanode/Caddy/Hysteria/RKN хвостов → свежая установка NEXT.
+- **NEXT V2 для существующей/legacy-ноды**: recovery backup → адресная зачистка старых Remnanode/Caddy/Hysteria/RKN хвостов → свежая установка NEXT;
+- **managed legacy rebuild**: discover → backup → rebuild/resume → hostname/node identity refresh → transport → BBR → protection → Telemt → postcheck.
 
 ## Быстрая установка
 
@@ -27,7 +29,7 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/b3779b0bcf9e50d6423478cb29fbc8f57f1c4d2f/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/8ce135f1ee01b61a10b1bdf95bfa35ed7ea54ad3/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -37,7 +39,7 @@ sudo bash /tmp/remna-install.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/93c28cc0489c03beb9c32ea0573bca774be7c652/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/8ce135f1ee01b61a10b1bdf95bfa35ed7ea54ad3/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -67,7 +69,7 @@ CLI:  sudo remnanode-next
  [3]  Config Profile + НАСТРОЙКИ HOST REMNAWAVE
  [4]  SelfSteal / маскировочный сайт
  [5]  XHTTP signature
- [6]  РКН защита — SAFE scanner guard (DEFAULT)
+ [6]  Защита ноды — SEMI-PARANOID (TSPU + GOV + scanners)
  [7]  Runtime repair / guards
  [8]  Базовое управление Remnanode
  [9]  Статус
@@ -76,16 +78,15 @@ CLI:  sudo remnanode-next
  [12] NEXT V2 — существующая/legacy нода → очистка хвостов → NEXT
 
  [13] СЕТЬ / BBR TUNE (DEFAULT) / BBR3 (OPTIONAL)
- [14] HYSTERIA2 DIAG — UDP/443 + DNS + RKN counters
-      RUN:    sudo remnanode-next hysteria-diag
-
-      NETWORK: sudo remnanode-next network
-      BBR3:   https://github.com/ivan-nginx/bbr3
+ [14] HYSTERIA2 DIAG — UDP/443 + DNS + security counters
+ [15] МУЛЬТИ-ТЕСТЫ СЕРВЕРА
+ [16] TELEMT / MTProto + Panel (8443 / loopback admin)
+ [17] Managed legacy-node rebuild
 
  [0]  Выход
 ```
 
-RKN снова находится непосредственно в основном меню NEXT.
+Защита теперь управляется через semi-paranoid security contour непосредственно из основного меню NEXT. Legacy RKN manager остаётся частью bootstrap/runtime-совместимости, но не является основным операторским интерфейсом.
 
 ## Транспортные профили
 

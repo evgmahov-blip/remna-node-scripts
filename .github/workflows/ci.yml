@@ -406,7 +406,9 @@ jobs:
           set -Eeuo pipefail
           grep -Fq 'Главный installer этого репозитория — **REMNANODE NEXT**' README.md
           grep -Fq 'XHTTP + Hysteria2' README.md
-          grep -Fq 'SAFE scanner guard' README.md
+          grep -Fq 'SEMI-PARANOID (TSPU + GOV + scanners)' README.md
+          grep -Fq 'TELEMT / MTProto + Panel' README.md
+          grep -Fq 'Managed legacy-node rebuild' README.md
           grep -Fq 'settings.clients: []' README.md
           grep -Fq 'Final Mask: ПУСТО / DEFAULT' README.md
           grep -Fq 'sniffing.routeOnly: true' README.md
