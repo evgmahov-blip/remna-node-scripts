@@ -134,6 +134,8 @@ jobs:
           t=next-installer/server-multitest.sh
           tester_ref="$(sed -n 's/^TESTER_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           tester_blob="$(sed -n 's/^TESTER_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          test "$tester_ref" = "f7c609b0fa929cecc4a74db5bafe90b0a4d782be"
+          test "$tester_blob" = "981f3de25e89edb47ada042a9c8bdbc6915b7233"
           test "$(git rev-parse HEAD:$t)" = "$tester_blob"
           test "$(git rev-parse "$tester_ref:$t")" = "$tester_blob"
 
@@ -290,6 +292,8 @@ jobs:
           v2=next-installer/existing-node-v2-cleanup.sh
           v2_ref="$(sed -n 's/^V2_CLEANUP_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
           v2_blob="$(sed -n 's/^V2_CLEANUP_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)"
+          test "$v2_ref" = "f7c609b0fa929cecc4a74db5bafe90b0a4d782be"
+          test "$v2_blob" = "3c9e7f15862048f8c4bd1fc96be58483872f6d4a"
           test "$(git rev-parse HEAD:$v2)" = "$v2_blob"
           test "$(git rev-parse "$v2_ref:$v2")" = "$v2_blob"
 
@@ -375,6 +379,16 @@ jobs:
           grep -Fq 'SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"' full-clean-reinstall.sh
           grep -Fq 'HYSTERIA_OVERLAY_REF="6f02c87c10d1d47fb4abcb234755823d1a1067bf"' full-clean-reinstall.sh
           grep -Fq 'HYSTERIA_OVERLAY_BLOB_SHA="62ff1364c26d88f357968422d5591b3d2b8d9e78"' full-clean-reinstall.sh
+          grep -Fq 'V2_CLEANUP_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"' full-clean-reinstall.sh
+          grep -Fq 'V2_CLEANUP_BLOB_SHA="3c9e7f15862048f8c4bd1fc96be58483872f6d4a"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"' full-clean-reinstall.sh
+          grep -Fq 'TESTER_BLOB_SHA="981f3de25e89edb47ada042a9c8bdbc6915b7233"' full-clean-reinstall.sh
+          grep -Fq 'MGMT_OVERLAY_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"' full-clean-reinstall.sh
+          grep -Fq 'PROTECTION_BLOB_SHA="d38486200c4399ec3150e0c3185d7f5620a3606a"' full-clean-reinstall.sh
+          grep -Fq 'SECURITY_SH_BLOB_SHA="74307541e6f3339fe7ac34278903a202157cf98f"' full-clean-reinstall.sh
+          grep -Fq 'SECURITY_PY_BLOB_SHA="a1d7ba1464516da3568dee0d8e8caa24b42ae2d0"' full-clean-reinstall.sh
+          grep -Fq 'TELEMT_BLOB_SHA="35e2e1674e995155feef881f9ec4addbbbeaa9ad"' full-clean-reinstall.sh
+          grep -Fq 'REBUILD_BLOB_SHA="07b265e96f598266a6953c08adbb26b9a20ed5a2"' full-clean-reinstall.sh
           grep -Fq 'REMNANODE NEXT — управление нодой' full-clean-reinstall.sh
           grep -Fq 'NODE_IMAGE_VERSION="3.4.1"' full-clean-reinstall.sh
           grep -Fq 'NODE_IMAGE_DIGEST="sha256:0cdf386dd49f360fc885bb34bde21132e478e40f0deac62d616086ec0fa9257e"' full-clean-reinstall.sh
@@ -401,6 +415,8 @@ jobs:
           for launcher in install.sh clean-install.sh; do
             ref="$(sed -n 's/^PINNED_REF="\([^"]*\)"/\1/p' "$launcher")"
             expected="$(sed -n 's/^EXPECTED_BLOB_SHA="\([^"]*\)"/\1/p' "$launcher")"
+            test "$ref" = "c66588f6bb79e6c4856edc746474d8922d61f1de"
+            test "$expected" = "e5d93829a72a776900ddfce1e20d5a801aa13547"
             test "$(git rev-parse "$ref:full-clean-reinstall.sh")" = "$expected"
             ! grep -Fq 'install-caddy-node-reality-stream.sh' "$launcher"
           done
