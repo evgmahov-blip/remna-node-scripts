@@ -311,7 +311,7 @@ jobs:
           grep -Fq 'NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"' full-clean-reinstall.sh
           grep -Fq 'NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"' full-clean-reinstall.sh
           grep -Fq 'run_existing_node_v2(){' full-clean-reinstall.sh
-          grep -Fq 'NEXT V2 — существующая/legacy нода' full-clean-reinstall.sh
+          grep -Fq 'Legacy → NEXT V2' full-clean-reinstall.sh
           grep -Fq 'migrate-existing|install-v2|legacy-to-next' full-clean-reinstall.sh
           grep -Fq 'exec bash "$TMP" migrate-existing' clean-install.sh
           grep -Fq 'exec bash "$TMP" install' install.sh
