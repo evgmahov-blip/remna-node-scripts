@@ -52,6 +52,11 @@ port_in_use(){
   ss -H -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)${1}$"
 }
 
+port_owned_by_telemt(){
+  local port="$1"
+  ss -H -ltnp 2>/dev/null | grep -E "(^|:)${port}[[:space:]]" | grep -Eq 'users:\(\("telemt(-panel)?"'
+}
+
 preflight(){
   need_cmd ss
   [[ "$TELEMT_PORT" =~ ^[0-9]+$ ]] || die "TELEMT_PORT must be numeric"
@@ -60,15 +65,39 @@ preflight(){
     2222|8080|8081|9091) die "reserved local/remnanode port: $TELEMT_PORT" ;;
   esac
   [ "$TELEMT_PORT" -ne 80 ] && [ "$TELEMT_PORT" -ne 443 ] || die "80/443 are intentionally forbidden for coexistence"
-  if port_in_use "$TELEMT_PORT"; then
-    die "TCP/$TELEMT_PORT is already in use"
+  if port_in_use "$TELEMT_PORT" && ! port_owned_by_telemt "$TELEMT_PORT"; then
+    die "TCP/$TELEMT_PORT is already in use by another process"
   fi
   for p in 8080 9091; do
-    if port_in_use "$p"; then
-      die "loopback service port TCP/$p is already in use"
+    if port_in_use "$p" && ! port_owned_by_telemt "$p"; then
+      die "loopback service port TCP/$p is already in use by another process"
     fi
   done
   info "preflight OK: TCP/$TELEMT_PORT free; 80/443 untouched; panel/API loopback ports free"
+}
+
+remove_protection_port(){
+  local ports next="" part num
+  if [ -x "$PROTECTION_MANAGER" ] && [ -f "$PROTECTION_CONF" ]; then
+    ports="$(awk -F= '$1=="FILTER_PORTS"{print $2; exit}' "$PROTECTION_CONF")"
+    IFS=',' read -ra _parts <<< "$ports"
+    for part in "${_parts[@]}"; do
+      part="$(printf '%s' "$part" | tr -d '[:space:]')"
+      [ -n "$part" ] || continue
+      [ "$part" = "$TELEMT_PORT" ] && continue
+      next="${next:+$next,}$part"
+    done
+    [ -n "$next" ] || next="443"
+    "$PROTECTION_MANAGER" config-set FILTER_PORTS "$next" >/dev/null
+  fi
+
+  if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
+    while :; do
+      num="$(ufw status numbered 2>/dev/null | awk -v p="$TELEMT_PORT/tcp" '$0 ~ p && $0 ~ /Telemt MTProto/ {gsub(/[^0-9]/,"",$1); print $1; exit}')"
+      [ -n "$num" ] || break
+      ufw --force delete "$num" >/dev/null 2>&1 || break
+    done
+  fi
 }
 
 ensure_protection_port(){
@@ -131,11 +160,25 @@ install_all(){
   preflight
   [ -n "$TLS_DOMAIN" ] || die "set TLS_DOMAIN to the Fake-TLS/SNI domain"
   [[ "$TLS_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || die "TLS_DOMAIN contains unsupported characters"
-  [ -n "$PANEL_PASSWORD_HASH" ] || [ -n "$PANEL_PASSWORD" ] || die "set PANEL_PASSWORD_HASH or PANEL_PASSWORD"
+  local existing_hash=""
+  if [ -z "$PANEL_PASSWORD_HASH" ] && [ -z "$PANEL_PASSWORD" ] && [ -r "$PANEL_ETC/config.toml" ]; then
+    existing_hash="$(awk -F= '/^[[:space:]]*password_hash[[:space:]]*=/{sub(/^[[:space:]]*/,"",$2); gsub(/"/,"",$2); print $2; exit}' "$PANEL_ETC/config.toml")"
+    [ -n "$existing_hash" ] && PANEL_PASSWORD_HASH="$existing_hash"
+  fi
+  [ -n "$PANEL_PASSWORD_HASH" ] || [ -n "$PANEL_PASSWORD" ] || die "set PANEL_PASSWORD_HASH or PANEL_PASSWORD (or repair an existing install)"
 
-  local arch secret telemt_url panel_url
+  local arch secret existing_secret telemt_url panel_url
   arch="$(arch_name)"
-  secret="$(openssl rand -hex 16)"
+  existing_secret=""
+  if [ -r "$TELEMT_ETC/telemt.toml" ]; then
+    existing_secret="$(awk -F= '/^[[:space:]]*default[[:space:]]*=/{sub(/^[[:space:]]*/,"",$2); gsub(/"/,"",$2); print $2; exit}' "$TELEMT_ETC/telemt.toml")"
+  fi
+  if [[ "$existing_secret" =~ ^[0-9A-Fa-f]{32}$ ]]; then
+    secret="$existing_secret"
+    info "preserving existing MTProto secret"
+  else
+    secret="$(openssl rand -hex 16)"
+  fi
   telemt_url="https://github.com/telemt/telemt/releases/download/${TELEMT_VERSION}/telemt-${arch}-linux-gnu.tar.gz"
   panel_url="https://github.com/amirotin/telemt_panel/releases/download/${PANEL_VERSION}/telemt-panel-${arch}-linux-gnu.tar.gz"
 
@@ -303,7 +346,8 @@ EOF
 
   systemctl daemon-reload
   ensure_protection_port
-  systemctl enable --now telemt.service telemt-panel.service
+  systemctl enable telemt.service telemt-panel.service >/dev/null
+  systemctl restart telemt.service telemt-panel.service
 
   info "installed Telemt ${TELEMT_VERSION} on TCP/$TELEMT_PORT"
   info "installed Telemt Panel ${PANEL_VERSION} on 127.0.0.1:8080"
@@ -354,6 +398,7 @@ disable_all(){
 uninstall_all(){
   need_root
   disable_all
+  remove_protection_port
   rm -f /etc/systemd/system/telemt.service /etc/systemd/system/telemt-panel.service
   systemctl daemon-reload
   rm -f "$TELEMT_BIN" "$PANEL_BIN"
