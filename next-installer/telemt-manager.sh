@@ -85,8 +85,8 @@ ensure_protection_port(){
     info "RemnaNode protection covers TCP/$TELEMT_PORT (FILTER_PORTS=$next)"
     return 0
   fi
-  [ -x "$LEGACY_ADAPTER" ] || die "no supported RemnaNode protection manager found"
-  TELEMT_PORT="$TELEMT_PORT" "$LEGACY_ADAPTER" apply
+  [ -f "$LEGACY_ADAPTER" ] || die "no supported RemnaNode protection manager found"
+  TELEMT_PORT="$TELEMT_PORT" bash "$LEGACY_ADAPTER" apply
   info "legacy RemnaNode RKN guard covers TCP/$TELEMT_PORT"
 }
 
