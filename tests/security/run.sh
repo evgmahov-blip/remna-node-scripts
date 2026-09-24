@@ -272,11 +272,9 @@ set +e
 bash "$CLI" update --json > "$WORK/pfx.json"
 set -e
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert any(s["error"]=="broad" for s in d["sources"]), d' "$WORK/pfx.json"
-printf '2001:db8::/48\n' > "$SRC/tspu.txt"
-set +e
+printf '10.9.9.0/24\n2001:db8::/48\n' > "$SRC/tspu.txt"
 bash "$CLI" update --json > "$WORK/fam.json"
-set -e
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert any(s["error"]=="family" for s in d["sources"]), d' "$WORK/fam.json"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert any(s["id"]=="tspu" and s["ok"] and s["entries"]==1 for s in d["sources"]), d' "$WORK/fam.json"
 nets 80 1 > "$SRC/tspu.txt"
 bash "$CLI" update --json >/dev/null || fail "expected in-range growth to pass"
 cp "$REMNA_SECURITY_BASE/data/tspu.txt" "$WORK/tspu.base"
