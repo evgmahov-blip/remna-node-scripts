@@ -51,6 +51,7 @@ TELEMT_LEGACY="$NEXT_DIR/telemt-legacy-rkn-adapter.sh"
 REBUILD="$NEXT_DIR/legacy-rebuild-manager.sh"
 RELEASE_MARKER="$APP_DIR/.ainoc-release.json"
 MANAGED_UPDATE_BACKUP_ROOT="${MANAGED_UPDATE_BACKUP_ROOT:-/root/remnanode-managed-updates}"
+MANAGED_UPDATE_RUNTIME_DIR="${MANAGED_UPDATE_RUNTIME_DIR:-/run}"
 TELEMT_CONFIG_FILE="${TELEMT_CONFIG_FILE:-/etc/telemt/telemt.toml}"
 TELEMT_PANEL_CONFIG_FILE="${TELEMT_PANEL_CONFIG_FILE:-/etc/telemt-panel/config.toml}"
 TTY=/dev/tty
@@ -418,8 +419,8 @@ PY
 
 managed_identity_digest(){
   local tmp digest
-  install -d -m 0755 /run
-  tmp="$(mktemp /run/remnanode-identity.XXXXXX)"
+  install -d -m 0700 "$MANAGED_UPDATE_RUNTIME_DIR"
+  tmp="$(mktemp "$MANAGED_UPDATE_RUNTIME_DIR/remnanode-identity.XXXXXX")"
   managed_identity_manifest "$tmp"
   digest="$(sha256sum "$tmp" | awk '{print $1}')"
   rm -f "$tmp"
@@ -677,8 +678,8 @@ run_managed_update(){
   [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || die 'managed-update требует trusted AINOC_RELEASE_SHA (40 hex).'
 
   command -v flock >/dev/null 2>&1 || die 'managed-update: flock отсутствует.'
-  install -d -m 0755 /run/lock
-  exec {lock_fd}>/run/lock/remnanode-managed-update.lock
+  install -d -m 0700 "$MANAGED_UPDATE_RUNTIME_DIR"
+  exec {lock_fd}>"$MANAGED_UPDATE_RUNTIME_DIR/remnanode-managed-update.lock"
   flock -n "$lock_fd" || die 'managed-update: другая операция обновления уже выполняется.'
 
   if managed_update_is_current "$release_sha"; then
