@@ -49,6 +49,7 @@ NEXTTRACE_TOOL_DIR="/usr/local/libexec/remnanode-next-tools"
 NEXTTRACE_BIN=""
 
 REPORT_ROOT="${MULTITEST_REPORT_DIR:-/var/log/remnanode-next/multitest}"
+MULTITEST_NO_INSTALL="${MULTITEST_NO_INSTALL:-0}"
 
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
@@ -101,6 +102,10 @@ need_cmd(){
   local pkgs=("$@")
   (( ${#pkgs[@]} > 0 )) || pkgs=("$cmd")
   if ! command -v "$cmd" >/dev/null 2>&1; then
+    if [[ "$MULTITEST_NO_INSTALL" == "1" ]]; then
+      fail "Команда $cmd отсутствует; machine mode не устанавливает пакеты."
+      return 1
+    fi
     say ">>> Устанавливаю зависимость для теста: ${pkgs[*]}"
     apt_install "${pkgs[@]}" || return 1
   fi
@@ -236,16 +241,25 @@ ensure_nexttrace(){
 
   asset="nexttrace_linux_${arch}"
   NEXTTRACE_BIN="$NEXTTRACE_TOOL_DIR/nexttrace-${NEXTTRACE_VERSION}-${arch}"
-  install -d -m 0755 "$NEXTTRACE_TOOL_DIR"
 
   if [[ -x "$NEXTTRACE_BIN" ]]; then
     got="$(sha256sum "$NEXTTRACE_BIN" | awk '{print $1}')"
     if [[ "$got" == "$expected" ]]; then
       return 0
     fi
+    if [[ "$MULTITEST_NO_INSTALL" == "1" ]]; then
+      fail "Cached NextTrace checksum mismatch; machine mode не заменяет бинарники."
+      return 1
+    fi
     warn "Cached NextTrace checksum mismatch; файл будет заменён."
   fi
 
+  if [[ "$MULTITEST_NO_INSTALL" == "1" ]]; then
+    fail "NextTrace $NEXTTRACE_VERSION не установлен; machine mode не устанавливает бинарники."
+    return 1
+  fi
+
+  install -d -m 0755 "$NEXTTRACE_TOOL_DIR"
   tmp="$(mktemp "/tmp/nexttrace.XXXXXX")"
   if ! curl -fsSL --proto '=https' --tlsv1.2       --connect-timeout 10 --max-time 180 --retry 2       -o "$tmp" "$NEXTTRACE_BASE_URL/$asset"; then
     rm -f "$tmp"
@@ -862,6 +876,212 @@ generate_report(){
   cp -f "$ai" "$REPORT_ROOT/latest-AI_REPORT.txt"
 }
 
+generate_json_report(){
+  local dir mode out
+  dir="$1"
+  mode="${2:-human}"
+  out="$dir/result.json"
+
+  command -v python3 >/dev/null 2>&1 || {
+    fail 'python3 отсутствует; JSON report не может быть построен.'
+    return 1
+  }
+
+  python3 - "$dir" "$out" "$mode" <<'PY'
+import csv
+import json
+import re
+import sys
+from pathlib import Path
+
+run_dir = Path(sys.argv[1])
+out = Path(sys.argv[2])
+mode = sys.argv[3]
+summary = run_dir / "summary.tsv"
+
+rows = []
+with summary.open(encoding="utf-8", errors="replace") as fh:
+    for row in csv.DictReader(fh, delimiter="\t"):
+        rows.append({
+            "test": int(row.get("test") or 0),
+            "name": row.get("name") or "",
+            "status": row.get("status") or "UNKNOWN",
+            "duration_sec": int(float(row.get("duration_sec") or 0)),
+            "rc": int(row.get("rc") or 0),
+        })
+
+def read(name):
+    p = run_dir / name
+    if not p.is_file():
+        return ""
+    return p.read_text(encoding="utf-8", errors="replace")
+
+def first(pattern, text, cast=str, flags=0):
+    m = re.search(pattern, text, flags)
+    if not m:
+        return None
+    try:
+        return cast(m.group(1))
+    except Exception:
+        return None
+
+meta = {}
+for line in read("meta.txt").splitlines():
+    if "=" in line:
+        k, v = line.split("=", 1)
+        meta[k.strip()] = v.strip()
+
+network = read("09-network-bench.log")
+cpu = read("08-sysbench-cpu.log")
+mtu_log = read("11-nexttrace-mtu.log")
+ipq = read("07-ipquality.log")
+ai_log = read("13-ai-access.log")
+
+network_mbps = first(r"Average:\s+([0-9.]+) Mbit/s", network, float)
+cpu_single = first(
+    r"CPU single-thread:.*?events per second:\s*([0-9.]+)",
+    cpu, float, re.S,
+)
+cpu_all = first(
+    r"CPU all-thread.*?events per second:\s*([0-9.]+)",
+    cpu, float, re.S,
+)
+path_mtu = first(r"Path MTU:\s*([0-9]+)", mtu_log, int)
+dnsbl = first(r"DNSBL:.*blacklisted=([0-9]+)", ipq, int)
+
+def prefixed(label):
+    return first(rf"^{re.escape(label)}:\s*(.+)$", ipq, str, re.M)
+
+ai_providers = []
+for provider in ("OpenAI", "Anthropic", "Gemini", "Mistral", "xAI/Grok", "Perplexity"):
+    m = re.search(
+        rf"^{re.escape(provider)}\s+(\S+)\s+HTTP=([0-9]+)",
+        ai_log,
+        re.M,
+    )
+    if m:
+        ai_providers.append({
+            "provider": provider,
+            "state": m.group(1),
+            "http": int(m.group(2)),
+        })
+
+ai_reachable = first(r"AI_SUMMARY:\s*reachable=([0-9]+)", ai_log, int)
+ai_failed = first(r"AI_SUMMARY:.*failed=([0-9]+)", ai_log, int)
+ai_total = first(r"AI_SUMMARY:.*total=([0-9]+)", ai_log, int)
+
+passed = sum(1 for r in rows if r["status"] == "PASS")
+failed = sum(1 for r in rows if r["status"] == "FAIL")
+skipped = sum(1 for r in rows if r["status"] == "SKIP")
+duration = sum(r["duration_sec"] for r in rows)
+
+issues = [
+    {
+        "test": r["test"],
+        "name": r["name"],
+        "status": r["status"],
+        "rc": r["rc"],
+    }
+    for r in rows
+    if r["status"] != "PASS"
+]
+
+working_budget = round(network_mbps * 0.70, 1) if network_mbps is not None else None
+xhttp_3 = int(working_budget / 3) if working_budget is not None else None
+xhttp_5 = int(working_budget / 5) if working_budget is not None else None
+
+conclusions = []
+if failed:
+    bad = ", ".join(f"#{x['test']} {x['name']}" for x in issues if x["status"] == "FAIL")
+    conclusions.append(f"FAIL={failed}: {bad}")
+elif skipped:
+    conclusions.append(f"FAIL=0, но SKIP={skipped}; пропущенные тесты требуют отдельной проверки.")
+else:
+    conclusions.append(f"Все {len(rows)} тестов завершились без FAIL/SKIP.")
+
+if network_mbps is not None:
+    conclusions.append(
+        f"HTTPS {network_mbps:.1f} Mbit/s; рабочий бюджет ~{working_budget:.1f} Mbit/s; "
+        f"ориентир XHTTP ~{xhttp_3} @3 Mbit/s / ~{xhttp_5} @5 Mbit/s."
+    )
+if cpu_single is not None or cpu_all is not None:
+    conclusions.append(
+        "CPU: single="
+        + (f"{cpu_single:.1f}" if cpu_single is not None else "n/a")
+        + " events/s; all-thread="
+        + (f"{cpu_all:.1f}" if cpu_all is not None else "n/a")
+        + " events/s."
+    )
+if path_mtu is not None:
+    conclusions.append(
+        "Path MTU 1500."
+        if path_mtu == 1500
+        else f"Path MTU {path_mtu}; ниже 1500 — проверь overhead/фрагментацию."
+    )
+if dnsbl is not None:
+    conclusions.append(
+        "DNSBL: blacklist не обнаружен."
+        if dnsbl == 0
+        else f"DNSBL: blacklisted={dnsbl}; репутацию IP стоит проверить."
+    )
+if ai_total is not None:
+    conclusions.append(
+        f"AI API: reachable={ai_reachable or 0}/{ai_total}, failed={ai_failed or 0}."
+    )
+
+overall = "PASS" if failed == 0 and skipped == 0 else "WARN"
+payload = {
+    "schema": "remnanode.multitest.v1",
+    "overall_status": overall,
+    "execution_mode": mode,
+    "host": meta.get("host"),
+    "utc_start": meta.get("utc_start"),
+    "duration_sec": duration,
+    "counts": {
+        "pass": passed,
+        "fail": failed,
+        "skip": skipped,
+        "total": len(rows),
+    },
+    "tests": rows,
+    "metrics": {
+        "network_mbps": network_mbps,
+        "working_budget_mbps": working_budget,
+        "xhttp_active_at_3mbps": xhttp_3,
+        "xhttp_active_at_5mbps": xhttp_5,
+        "cpu_single_events_sec": cpu_single,
+        "cpu_all_events_sec": cpu_all,
+        "path_mtu": path_mtu,
+        "ipquality": {
+            "asn": prefixed("ASN"),
+            "region": prefixed("Region"),
+            "usage": prefixed("Usage"),
+            "risk": prefixed("Risk"),
+            "proxy_flags": prefixed("Proxy flags"),
+            "media": prefixed("Media"),
+            "dnsbl_blacklisted": dnsbl,
+        },
+        "ai_access": {
+            "reachable": ai_reachable,
+            "failed": ai_failed,
+            "total": ai_total,
+            "providers": ai_providers,
+        },
+    },
+    "issues": issues,
+    "conclusions": conclusions,
+    "artifacts": {
+        "run_dir": str(run_dir),
+        "analysis": str(run_dir / "analysis.txt"),
+        "ai_report": str(run_dir / "AI_REPORT.txt"),
+    },
+}
+out.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
+PY
+
+  cp -f "$out" "$REPORT_ROOT/latest-result.json"
+}
+
 print_colored_analysis(){
   local file="$1" line status
 
@@ -939,10 +1159,15 @@ show_latest_report(){
   printf 'Run directory: %s\n' "$dir"
   printf 'Analysis:      %s/analysis.txt\n' "$dir"
   printf 'AI report:     %s/AI_REPORT.txt\n' "$dir"
+  printf 'JSON:          %s/result.json\n' "$dir"
   printf 'Raw logs:      %s/*.log\n' "$dir"
 }
 
 run_all(){
+  local mode="${1:-human}"
+  local quiet=0
+  [[ "$mode" == "machine" ]] && quiet=1
+
   local names=(
     "IP Region"
     "Censorcheck — проверка геоблока"
@@ -991,20 +1216,30 @@ run_all(){
     printf 'tester=remnanode-next-server-multitest\n'
   } >"$run_dir/meta.txt"
 
-  say 'Автоматический режим: все тесты идут подряд без подтверждений.'
-  printf '%sCtrl+C во время теста — пропустить только текущий и перейти дальше.%s\n' "$C_GRAY" "$C_RESET"
-  printf 'Отчёт: %s\n' "$run_dir"
+  if (( ! quiet )); then
+    say 'Автоматический режим: все тесты идут подряд без подтверждений.'
+    printf '%sCtrl+C во время теста — пропустить только текущий и перейти дальше.%s\n' "$C_GRAY" "$C_RESET"
+    printf 'Отчёт: %s\n' "$run_dir"
+  fi
 
   for ((i=0; i<total; i++)); do
     num=$((i+1))
     logfile="$(printf '%s/%02d-%s.log' "$run_dir" "$num" "${slugs[$i]}")"
-    echo
-    printf '%s============ [%s/%s] %s ============ %s\n'       "$C_CYAN" "$num" "$total" "${names[$i]}" "$C_RESET"
+    if (( ! quiet )); then
+      echo
+      printf '%s============ [%s/%s] %s ============ %s\n' \
+        "$C_CYAN" "$num" "$total" "${names[$i]}" "$C_RESET"
+    fi
 
     started="$(date +%s)"
     set +e
-    run_interruptible "$num" 2>&1 | tee "$logfile"
-    rc=${PIPESTATUS[0]}
+    if (( quiet )); then
+      run_interruptible "$num" >"$logfile" 2>&1
+      rc=$?
+    else
+      run_interruptible "$num" 2>&1 | tee "$logfile"
+      rc=${PIPESTATUS[0]}
+    fi
     set -e
     ended="$(date +%s)"
     duration=$((ended-started))
@@ -1021,7 +1256,9 @@ run_all(){
       *)
         status=FAIL
         failed=$((failed+1))
-        warn "Тест $num завершился с rc=$rc"
+        if (( ! quiet )); then
+          warn "Тест $num завершился с rc=$rc"
+        fi
         ;;
     esac
     printf '%s\t%s\t%s\t%s\t%s\n' "$num" "${names[$i]}" "$status" "$duration" "$rc" >>"$summary"
@@ -1029,9 +1266,16 @@ run_all(){
 
   printf '%s\n' "$run_dir" >"$REPORT_ROOT/latest.path"
   generate_report "$run_dir"
+  generate_json_report "$run_dir" "$mode" || return 1
+
+  if (( quiet )); then
+    cat "$run_dir/result.json"
+    return 0
+  fi
 
   echo
-  printf '%sИтог:%s PASS=%s FAIL=%s SKIP=%s TOTAL=%s\n'     "$C_GREEN" "$C_RESET" "$passed" "$failed" "$skipped" "$total"
+  printf '%sИтог:%s PASS=%s FAIL=%s SKIP=%s TOTAL=%s\n' \
+    "$C_GREEN" "$C_RESET" "$passed" "$failed" "$skipped" "$total"
   echo
   echo '==================== АНАЛИТИКА ПОСЛЕ ТЕСТОВ ===================='
   print_colored_analysis "$run_dir/analysis.txt"
@@ -1039,6 +1283,7 @@ run_all(){
   echo
   printf 'Analysis:  %s/analysis.txt\n' "$run_dir"
   printf 'AI report: %s/AI_REPORT.txt\n' "$run_dir"
+  printf 'JSON:      %s/result.json\n' "$run_dir"
   printf 'Повторно:  sudo remnanode-next multitest analyze\n'
   (( failed == 0 ))
 }
@@ -1085,6 +1330,7 @@ Usage:
   server-multitest.sh menu
   server-multitest.sh list
   server-multitest.sh all
+  server-multitest.sh machine
   server-multitest.sh analyze
   server-multitest.sh report
   server-multitest.sh 1..13
@@ -1097,6 +1343,11 @@ main(){
     -h|--help|help) usage ;;
     menu|'') need_root; menu ;;
     all|99) need_root; run_all ;;
+    machine)
+      need_root
+      REPORT_ROOT="${MULTITEST_MACHINE_REPORT_DIR:-/tmp/remnanode-next-multitest}" \
+        MULTITEST_NO_INSTALL=1 run_all machine
+      ;;
     analyze) need_root; show_latest_analysis ;;
     report) need_root; show_latest_report ;;
     1|2|3|4|5|6|7|8|9|10|11|12|13) need_root; run_interruptible "$1" ;;
