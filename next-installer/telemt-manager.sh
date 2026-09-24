@@ -313,9 +313,32 @@ EOF
 }
 
 status_all(){
+  local node_host panel_user panel_driver panel_db
+  node_host="$(hostname -f 2>/dev/null || hostname)"
+  panel_user="$(awk -F= '/^[[:space:]]*username[[:space:]]*=/{gsub(/[[:space:]"]/,"",$2); print $2; exit}' "$PANEL_ETC/config.toml" 2>/dev/null || true)"
+  panel_driver="$(awk -F= '/^[[:space:]]*driver[[:space:]]*=/{gsub(/[[:space:]"]/,"",$2); print $2; exit}' "$PANEL_ETC/config.toml" 2>/dev/null || true)"
+  panel_db="$(awk -F= '/^[[:space:]]*path[[:space:]]*=/{sub(/^[[:space:]]*/,"",$2); gsub(/"/,"",$2); print $2; exit}' "$PANEL_ETC/config.toml" 2>/dev/null || true)"
+  [ -n "$panel_user" ] || panel_user="$PANEL_USERNAME"
+  [ -n "$panel_driver" ] || panel_driver="sqlite"
+  [ -n "$panel_db" ] || panel_db="$PANEL_DATA/panel.db"
+
   echo "Telemt versions:"
   "$TELEMT_BIN" --version 2>/dev/null || true
   "$PANEL_BIN" --version 2>/dev/null || true
+  echo
+  echo "================ TELEMT PANEL ACCESS ================"
+  echo "Panel bind:      http://127.0.0.1:8080"
+  echo "SSH tunnel:      ssh -L 8080:127.0.0.1:8080 root@$node_host"
+  echo "Open locally:    http://127.0.0.1:8080"
+  echo "Username:        $panel_user"
+  echo "Password:        not stored in plaintext; only bcrypt hash is kept"
+  echo "Panel config:    $PANEL_ETC/config.toml"
+  echo "Panel data:      $PANEL_DATA"
+  echo "Panel DB:        $panel_driver — $panel_db"
+  echo "Telemt config:   $TELEMT_ETC/telemt.toml"
+  echo "Telemt API:      http://127.0.0.1:9091 (loopback only)"
+  echo "MTProto port:    TCP/$TELEMT_PORT"
+  echo "====================================================="
   echo
   ss -ltnp 2>/dev/null | grep -E "(:${TELEMT_PORT}|:8080|:9091)[[:space:]]" || true
   echo
