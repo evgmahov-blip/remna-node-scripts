@@ -25,6 +25,7 @@ must 'ensure_protection_port'
 must 'LEGACY_ADAPTER='
 must 'PANEL_PASSWORD=' 
 must 'config-set FILTER_PORTS'
+must 'ufw allow "$TELEMT_PORT/tcp"'
 must 'protection covers TCP/'
 must '80/443 are intentionally forbidden'
 
