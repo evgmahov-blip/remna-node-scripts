@@ -84,6 +84,7 @@ CLI: sudo remnanode-next
  [10] Safe clean текущей NEXT-ноды
  [11] Safe reinstall текущей NEXT-ноды
  [12] Существующая/legacy нода → очистка хвостов → NEXT V2
+ [16] Backup / Restore
 
  [0]  Выход
 ```
@@ -224,7 +225,7 @@ Final Mask: ПУСТО / DEFAULT
 sudo remnanode-next multitest
 sudo remnanode-next multitest all
 sudo remnanode-next multitest 1
-sudo remnanode-next multitest 12
+sudo remnanode-next multitest 13
 ```
 
 Тесты:
@@ -242,6 +243,7 @@ sudo remnanode-next multitest 12
 10  NextTrace Route/MTR — loss/jitter/ASN/geo
 11  NextTrace Path MTU — UDP PMTU
 12  NextTrace Globalping — внешние TCP/443 точки → эта нода
+13  Node Health — core / 443 / DNS / TLS / disk / memory / IPv4/IPv6
 99  все тесты автоматически
 ```
 
@@ -264,9 +266,9 @@ sudo remnanode-next multitest report
 
 `analyze` повторно строит и показывает анализ последнего прогона. `report` показывает каталог и пути к `analysis.txt`, `AI_REPORT.txt` и raw logs. В меню также есть пункт `98) Анализ последнего прогона`.
 
-После `multitest all` в терминале сразу выводится короткий блок **ИТОГ ПО НОДЕ**: FAIL, измеренная скорость, single/all-thread CPU, MTU, DNSBL blacklist, рабочий сетевой бюджет и ориентир по одновременно активным XHTTP-клиентам при 3 и 5 Mbit/s. PASS/нормальные показатели подсвечиваются зелёным, предупреждения/пропуски — жёлтым, FAIL/проблемы — красным, заголовки секций — голубым. Файлы `analysis.txt` и `AI_REPORT.txt` остаются без ANSI-кодов.
+После `multitest all` в терминале выводится короткая **операторская карточка**. Она разбита на `IP / REPUTATION`, `СЕТЬ`, `CPU`, `ДИСК`, `МАРШРУТЫ / MTU`, `DPI`, `GEO / MEDIA`, `TLS / RUNTIME` и даёт каждой секции понятный статус `ОТЛИЧНО / НОРМАЛЬНО / ВНИМАНИЕ / ПЛОХО`. Вверху выводится общий итог по худшему существенному сигналу. Для сети используются прозрачные пороги скорости, IP оценивается по consensus/risk/DNSBL, TLS/runtime — по critical/warnings, маршруты — по MTR/PMTU/Globalping. CPU и диск не получают выдуманный универсальный performance-score: рядом показываются фактические метрики и факт успешного прохождения теста. PASS/нормальные показатели подсвечиваются зелёным, предупреждения/пропуски — жёлтым, FAIL/проблемы — красным, заголовки секций — голубым. Файлы `analysis.txt` и `AI_REPORT.txt` остаются без ANSI-кодов.
 
-IPQuality запускается в JSON/privacy-режиме и выводит только полезные поля: ASN, регион, тип IP, risk, proxy flags, media и DNSBL — без рекламных sponsor-блоков. Подробные raw-логи и `AI_REPORT.txt` сохраняются отдельно.
+IPQuality запускается в JSON/privacy-режиме. В итог вытаскиваются ASN/организация, Geo и расхождения стран между базами, usage-консенсус, все доступные risk scores, количество сигналов proxy/VPN/Tor/abuser/robot/datacenter, media/AI, port 25 и DNSBL total/marked/blacklisted. Поверх этого строится операторский `IP VERDICT: CLEAN / REVIEW / BAD`; это диагностический ориентир, а не универсальный рейтинг IP. Подробные raw-логи и `AI_REPORT.txt` сохраняются отдельно.
 
 Tester не меняет firewall, sysctl, Docker или конфигурацию Remnawave. Он может доустановить только утилиту, необходимую выбранному тесту (`iperf3`, `sysbench`, `traceroute`, `jq` и т.п.).
 
@@ -401,6 +403,29 @@ sudo remnanode-next bbr3
 
 Источники:
 - BBR3: https://github.com/ivan-nginx/bbr3
+
+## Статус ноды и Backup / Restore
+
+`sudo remnanode-next status` теперь показывает единый health-экран: rw-core/container, Nginx, TCP/UDP 443, DNS, TLS expiry и SAN для домена ноды, диск/память/load, IPv6/default route, BBR/qdisc, последний backup, последний multitest и RKN status. В конце выводится `HEALTHY / REVIEW / ATTENTION`.
+
+Пункт **16** открывает безопасный Backup / Restore:
+
+```text
+1) создать backup
+2) показать backups
+3) проверить последний backup
+4) восстановить последний backup
+```
+
+Новые backups получают соседний SHA256-файл. Перед restore архив проверяется, разрешены только пути `opt/remnanode/...`; затем создаётся дополнительный backup текущего состояния, выполняется restore, поднимается compose и запускается health/status.
+
+Быстрые команды:
+
+```bash
+sudo remnanode-next backup
+sudo remnanode-next backups
+sudo remnanode-next restore
+```
 
 ## Два сценария очистки / переустановки
 

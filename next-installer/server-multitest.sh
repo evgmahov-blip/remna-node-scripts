@@ -49,6 +49,7 @@ NEXTTRACE_TOOL_DIR="/usr/local/libexec/remnanode-next-tools"
 NEXTTRACE_BIN=""
 
 REPORT_ROOT="${MULTITEST_REPORT_DIR:-/var/log/remnanode-next/multitest}"
+MULTITEST_LOCK_FILE="${MULTITEST_LOCK_FILE:-/run/lock/remnanode-next-multitest.lock}"
 
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
@@ -74,6 +75,22 @@ warn(){ printf '%s[WARN]%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 fail(){ printf '%s[ERROR]%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; return 1; }
 need_root(){ [[ ${EUID:-$(id -u)} -eq 0 ]] || { fail 'Запусти от root.'; exit 1; }; }
 pause(){ printf 'Enter — продолжить... '; read -r _ < "$TTY" || true; }
+
+acquire_multitest_lock(){
+  need_cmd flock util-linux || return 1
+  install -d -m 0755 "$(dirname "$MULTITEST_LOCK_FILE")"
+  exec 9>"$MULTITEST_LOCK_FILE"
+  if ! flock -n 9; then
+    warn "Мультитест уже запущен другим процессом. Дождись его завершения."
+    exec 9>&-
+    return 75
+  fi
+}
+
+release_multitest_lock(){
+  flock -u 9 2>/dev/null || true
+  exec 9>&- 2>/dev/null || true
+}
 
 git_blob_sha(){
   local file="$1" size
@@ -313,47 +330,198 @@ test_geo_unlock(){
 test_ipquality(){
   need_cmd curl curl ca-certificates
   need_cmd jq jq
+  need_cmd bc bc
+  need_cmd nc netcat-openbsd
+  need_cmd dig dnsutils
+  need_cmd ip iproute2
 
-  local script json rc=0
+  local script json err rc=0
   script="$(mktemp "/tmp/remna-ipquality.XXXXXX.sh")"
   json="$(mktemp "/tmp/remna-ipquality.XXXXXX.json")"
+  err="$(mktemp "/tmp/remna-ipquality.XXXXXX.err")"
 
   printf '%s================ IPQuality ================%s\n' "$C_CYAN" "$C_RESET"
   if ! download_external_script "IPQuality" "$IPQUALITY_URL" "$script" "$IPQUALITY_BLOB_SHA"; then
-    rm -f "$script" "$json"
+    rm -f "$script" "$json" "$err"
     return 1
   fi
 
   set +e
-  bash "$script" -l ru -y -p -j >"$json" 2>/dev/null
+  bash "$script" -l ru -y -p -j >"$json" 2>"$err"
   rc=$?
   set -e
 
   if ! jq -e . "$json" >/dev/null 2>&1; then
     fail "IPQuality не вернул валидный JSON (rc=$rc)."
-    rm -f "$script" "$json"
+    if [[ -s "$err" ]]; then
+      printf '%s--- IPQuality stderr --- %s\n' "$C_YELLOW" "$C_RESET"
+      sed -n '1,80p' "$err"
+    fi
+    if [[ -s "$json" ]]; then
+      printf '%s--- IPQuality stdout (первые строки) --- %s\n' "$C_YELLOW" "$C_RESET"
+      sed -n '1,40p' "$json"
+    fi
+    rm -f "$script" "$json" "$err"
     return 1
   fi
 
+  if (( rc != 0 )); then
+    warn "IPQuality вернул rc=$rc, но JSON валиден; используем полученные данные."
+  fi
+
   jq -r '
-    "ASN: " + (.Info.ASN // "?"),
-    "Region: " + (.Info.Region.Code // "?") + " " + (.Info.Region.Name // ""),
-    "Usage: " + ([.Type.Usage[]?] | unique | join(", ")),
-    "Risk: IP2Location=" + (.Score.IP2LOCATION // "?") +
-      " AbuseIPDB=" + (.Score.AbuseIPDB // "?") +
-      " Scamalytics=" + (.Score.SCAMALYTICS // "?"),
-    "Proxy flags: " + ([.Factor.Proxy | to_entries[] | select(.value == true) | .key] |
-      if length == 0 then "none" else join(",") end),
-    "Media: " + ([.Media | to_entries[] |
-      (.key + "=" + (.value.Status // "?") + "/" + (.value.Region // "-"))] | join(" ")),
-    "DNSBL: clean=" + ((.Mail.DNSBlacklist.Clean // "?")|tostring) +
+    def count_true(o): [o | to_entries[]? | select(.value == true)] | length;
+    def count_known(o): [o | to_entries[]? | select(.value == true or .value == false)] | length;
+    def values(o): [o | to_entries[]? | select(.value != null and .value != "null") | (.key + "=" + (.value|tostring))] | join(" ");
+    "ASN: " + (.Info.ASN // "?") + " / " + (.Info.Organization // "?"),
+    "Geo: " + (.Info.Region.Code // "?") + " " + (.Info.Region.Name // "") +
+      " / registered=" + (.Info.RegisteredRegion.Code // "?") + " / " + (.Info.Type // "?"),
+    "Geo consensus: " + values(.Factor.CountryCode),
+    "Usage consensus: " + values(.Type.Usage),
+    "Risk scores: " + values(.Score),
+    "Risk factors: proxy=" + ((count_true(.Factor.Proxy))|tostring) + "/" + ((count_known(.Factor.Proxy))|tostring) +
+      " vpn=" + ((count_true(.Factor.VPN))|tostring) + "/" + ((count_known(.Factor.VPN))|tostring) +
+      " tor=" + ((count_true(.Factor.Tor))|tostring) + "/" + ((count_known(.Factor.Tor))|tostring) +
+      " abuser=" + ((count_true(.Factor.Abuser))|tostring) + "/" + ((count_known(.Factor.Abuser))|tostring) +
+      " robot=" + ((count_true(.Factor.Robot))|tostring) + "/" + ((count_known(.Factor.Robot))|tostring) +
+      " datacenter=" + ((count_true(.Factor.Server))|tostring) + "/" + ((count_known(.Factor.Server))|tostring),
+    "Media: " + ([.Media | to_entries[] | (.key + "=" + (.value.Status // "?") + "/" + (.value.Region // "-"))] | join(" ")),
+    "Mail: port25=" + ((.Mail.Port25 // "?")|tostring),
+    "DNSBL: total=" + ((.Mail.DNSBlacklist.Total // "?")|tostring) +
+      " clean=" + ((.Mail.DNSBlacklist.Clean // "?")|tostring) +
       " marked=" + ((.Mail.DNSBlacklist.Marked // "?")|tostring) +
       " blacklisted=" + ((.Mail.DNSBlacklist.Blacklisted // "?")|tostring)
   ' "$json"
 
+  local blacklisted marked proxy_hits vpn_hits tor_hits abuser_hits geo_regions
+  blacklisted="$(jq -r '.Mail.DNSBlacklist.Blacklisted // -1' "$json")"
+  marked="$(jq -r '.Mail.DNSBlacklist.Marked // -1' "$json")"
+  proxy_hits="$(jq '[.Factor.Proxy | to_entries[]? | select(.value == true)] | length' "$json")"
+  vpn_hits="$(jq '[.Factor.VPN | to_entries[]? | select(.value == true)] | length' "$json")"
+  tor_hits="$(jq '[.Factor.Tor | to_entries[]? | select(.value == true)] | length' "$json")"
+  abuser_hits="$(jq '[.Factor.Abuser | to_entries[]? | select(.value == true)] | length' "$json")"
+  geo_regions="$(jq '[.Factor.CountryCode | to_entries[]? | select(.value != null and .value != "null") | .value] | unique | length' "$json")"
+
+  if [[ "$blacklisted" =~ ^[0-9]+$ ]] && (( blacklisted >= 3 )); then
+    echo "IP VERDICT: BAD — DNSBL blacklist=$blacklisted; адрес лучше не считать чистым для новой ноды."
+  elif (( abuser_hits >= 3 || tor_hits >= 2 || proxy_hits >= 4 )); then
+    echo 'IP VERDICT: BAD — несколько независимых risk-факторов считают адрес проблемным.'
+  elif { [[ "$blacklisted" =~ ^[0-9]+$ ]] && (( blacklisted > 0 )); } ||
+       { [[ "$marked" =~ ^[0-9]+$ ]] && (( marked >= 50 )); } ||
+       (( abuser_hits > 0 || tor_hits > 0 || proxy_hits >= 2 || vpn_hits >= 3 || geo_regions > 1 )); then
+    echo 'IP VERDICT: REVIEW — есть сигналы риска/расхождения; смотри Risk/Geo/DNSBL выше.'
+  else
+    echo 'IP VERDICT: CLEAN — критичных сигналов по доступным источникам не найдено.'
+  fi
+  printf 'IP evidence: proxy=%s vpn=%s tor=%s abuser=%s geo_regions=%s\n' "$proxy_hits" "$vpn_hits" "$tor_hits" "$abuser_hits" "$geo_regions"
+
   rm -f "$script" "$json"
   return 0
 }
+test_node_health(){
+  need_cmd curl curl ca-certificates
+  local app="/opt/remnanode" domain="" transport="" critical=0 warnings=0
+  local cert="" end="" days="" disk="" mem_avail="" load="" ip4="" ip6=""
+
+  domain="$(cat "$app/.node_domain" 2>/dev/null || true)"
+  transport="$(cat "$app/.transport" 2>/dev/null || true)"
+
+  echo '================ NODE HEALTH ================'
+  printf 'Host: %s\n' "$(hostname -f 2>/dev/null || hostname)"
+  printf 'Transport: %s\n' "$transport"
+
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -qx remnanode; then
+    echo 'Core container: OK'
+  else
+    echo 'Core container: FAIL'
+    critical=$((critical+1))
+  fi
+
+  if ss -lnt 2>/dev/null | grep -Eq '(:|\])443[[:space:]]'; then
+    echo 'TCP/443: LISTEN'
+  else
+    echo 'TCP/443: FAIL — listener отсутствует'
+    critical=$((critical+1))
+  fi
+
+  if [[ "$transport" == *hysteria* || "$transport" == "combined" ]]; then
+    if ss -lnu 2>/dev/null | grep -Eq '(:|\])443[[:space:]]'; then
+      echo 'UDP/443: LISTEN'
+    else
+      echo 'UDP/443: FAIL — Hysteria2 выбран, listener отсутствует'
+      critical=$((critical+1))
+    fi
+  else
+    echo 'UDP/443: N/A'
+  fi
+
+  if [[ -n "$domain" ]]; then
+    printf 'Domain: %s\n' "$domain"
+    if getent ahostsv4 "$domain" >/dev/null 2>&1; then
+      echo 'DNS A: OK'
+    else
+      echo 'DNS A: WARN — resolve failed'
+      warnings=$((warnings+1))
+    fi
+  else
+    echo 'Domain: WARN — not configured'
+    warnings=$((warnings+1))
+  fi
+
+  for cert in "$app/certs/fullchain.pem" "/etc/xray/certs/fullchain.pem"; do
+    [[ -s "$cert" ]] && break
+  done
+  if [[ -s "$cert" ]] && command -v openssl >/dev/null 2>&1; then
+    end="$(openssl x509 -in "$cert" -noout -enddate 2>/dev/null | cut -d= -f2- || true)"
+    if [[ -n "$end" ]]; then
+      days=$(( ($(date -d "$end" +%s 2>/dev/null || echo 0) - $(date +%s)) / 86400 ))
+      printf 'TLS expiry: %s (%s days)\n' "$end" "$days"
+      if (( days < 0 )); then
+        echo 'TLS: FAIL — expired'
+        critical=$((critical+1))
+      elif (( days < 14 )); then
+        echo 'TLS: WARN — less than 14 days'
+        warnings=$((warnings+1))
+      else
+        echo 'TLS: OK'
+      fi
+      if [[ -n "$domain" ]]; then
+        local san wildcard
+        san="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
+        wildcard="*.${domain#*.}"
+        if grep -Fq "DNS:$domain" <<<"$san" || { [[ "$domain" == *.* ]] && grep -Fq "DNS:$wildcard" <<<"$san"; }; then
+          echo 'TLS SAN: OK'
+        else
+          echo 'TLS SAN: WARN — node domain not covered'
+          warnings=$((warnings+1))
+        fi
+      fi
+    fi
+  else
+    echo 'TLS: WARN — local certificate file not found'
+    warnings=$((warnings+1))
+  fi
+
+  disk="$(df -P / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')"
+  mem_avail="$(awk '/MemAvailable:/{printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || true)"
+  load="$(awk '{print $1}' /proc/loadavg 2>/dev/null || true)"
+  printf 'Root disk used: %s%%\n' "$disk"
+  printf 'Mem available: %s MB\n' "$mem_avail"
+  printf 'Load1: %s\n' "$load"
+  if [[ "$disk" =~ ^[0-9]+$ ]] && (( disk >= 90 )); then
+    echo 'Disk: WARN — >=90% used'
+    warnings=$((warnings+1))
+  fi
+
+  ip4="$(curl -4fsSL --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || true)"
+  ip6="$(curl -6fsSL --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 10 https://api64.ipify.org 2>/dev/null || true)"
+  printf 'Public IPv4: %s\n' "$ip4"
+  printf 'Public IPv6: %s\n' "$ip6"
+
+  printf 'Health summary: critical=%s warnings=%s\n' "$critical" "$warnings"
+  (( critical == 0 ))
+}
+
 
 test_sysbench_cpu(){
   need_cmd sysbench sysbench
@@ -481,6 +649,7 @@ run_one(){
     10) test_nexttrace_mtr ;;
     11) test_nexttrace_mtu ;;
     12) test_nexttrace_globalping ;;
+    13) test_node_health ;;
     *) fail "Неизвестный тест: ${1:-пусто}"; return 2 ;;
   esac
 }
@@ -513,6 +682,7 @@ print_list(){
 10) NextTrace Route/MTR — loss/jitter/ASN/geo
 11) NextTrace Path MTU — UDP PMTU
 12) NextTrace Globalping — внешние TCP/443 точки → эта нода
+13) Node Health — core / 443 / DNS / TLS / disk / memory / IPv4/IPv6
 98) Анализ последнего прогона
 99) Мультитест: все тесты автоматически
 EOF
@@ -554,7 +724,13 @@ report_key_metrics(){
   if [[ -f "$dir/07-ipquality.log" ]]; then
     echo
     echo '[IP quality / unlock]'
-    grep -aE '^(ASN|Region|Usage|Risk|Proxy flags|Media|DNSBL):' "$dir/07-ipquality.log" | tail -20 || true
+    grep -aE '^(ASN|Geo|Geo consensus|Usage consensus|Risk scores|Risk factors|Media|Mail|DNSBL|IP VERDICT|IP evidence):' "$dir/07-ipquality.log" | tail -30 || true
+  fi
+
+  if [[ -f "$dir/13-node-health.log" ]]; then
+    echo
+    echo '[Node health]'
+    grep -aE '^(Core container|TCP/443|UDP/443|DNS A|TLS|Root disk|Mem available|Load1|Public IPv|Health summary):' "$dir/13-node-health.log" | tail -30 || true
   fi
 
   if [[ -f "$dir/08-sysbench-cpu.log" ]]; then
@@ -591,12 +767,44 @@ report_key_metrics(){
 print_node_scorecard(){
   local dir="$1"
   local summary
-  local speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" fail_count="" safe_mbps=""
-  local at3="" at5=""
+  local speed="" cpu_single="" cpu_all="" mtu="" blacklisted="" marked="" ip_verdict="" risk_factors="" geo="" health_summary=""
+  local fail_count="" safe_mbps="" at3="" at5="" disk_status="" cpu_status="" route_status="" dpi_status="" geoblock_status=""
+  local iperf_avg_down="" iperf_avg_up="" iperf_best_down="" iperf_best_up="" iperf_min_ping="" network_consensus=""
+  local network_status="" ip_status="" media_status="" health_status="" overall_status="ОТЛИЧНО"
+  local dpi_bad=0 dpi_ok=0 geoblock_bad=0 media_block=0 health_critical="" health_warnings=""
+  local t5="" t8="" t9="" t10="" t11="" t12="" t13=""
 
   summary="$dir/summary.tsv"
 
-  [[ -f "$dir/09-network-bench.log" ]] &&     speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
+  test_status(){
+    awk -F '\t' -v n="$1" 'NR>1 && $1==n{print $3; exit}' "$summary" 2>/dev/null || true
+  }
+
+  worse_overall(){
+    case "$1" in
+      "ПЛОХО") overall_status="ПЛОХО" ;;
+      "ВНИМАНИЕ") [[ "$overall_status" == "ПЛОХО" ]] || overall_status="ВНИМАНИЕ" ;;
+      "НОРМАЛЬНО") [[ "$overall_status" != "ОТЛИЧНО" ]] || overall_status="НОРМАЛЬНО" ;;
+    esac
+    return 0
+  }
+
+  [[ -f "$dir/09-network-bench.log" ]] &&
+    speed="$(awk '/Average:[[:space:]]+[0-9.]+ Mbit\/s/{print $2; exit}' "$dir/09-network-bench.log" 2>/dev/null || true)"
+
+  if [[ -f "$dir/04-iperf-ru.log" ]]; then
+    local iperf_mbps iperf_pings
+    iperf_mbps="$(grep -aE '^[A-Za-z].*[0-9.]+ Mbps[[:space:]]+[0-9.]+ Mbps[[:space:]]+[0-9]+ ms' "$dir/04-iperf-ru.log" |
+      grep -oE '[0-9.]+ Mbps' | awk '{print $1}' || true)"
+    if [[ -n "$iperf_mbps" ]]; then
+      iperf_avg_down="$(awk 'NR%2==1{s+=$1;n++} END{if(n) printf "%.1f",s/n}' <<<"$iperf_mbps")"
+      iperf_avg_up="$(awk 'NR%2==0{s+=$1;n++} END{if(n) printf "%.1f",s/n}' <<<"$iperf_mbps")"
+      iperf_best_down="$(awk 'NR%2==1 && $1>m{m=$1} END{if(m) printf "%.1f",m}' <<<"$iperf_mbps")"
+      iperf_best_up="$(awk 'NR%2==0 && $1>m{m=$1} END{if(m) printf "%.1f",m}' <<<"$iperf_mbps")"
+    fi
+    iperf_pings="$(grep -aE '^[A-Za-z].*[0-9]+ ms' "$dir/04-iperf-ru.log" | grep -oE '[0-9]+ ms' | awk '{print $1}' || true)"
+    [[ -n "$iperf_pings" ]] && iperf_min_ping="$(awk 'NR==1||$1<m{m=$1} END{if(NR) print m}' <<<"$iperf_pings")"
+  fi
 
   if [[ -f "$dir/08-sysbench-cpu.log" ]]; then
     cpu_single="$(awk '
@@ -610,39 +818,202 @@ print_node_scorecard(){
     ' "$dir/08-sysbench-cpu.log" 2>/dev/null || true)"
   fi
 
-  [[ -f "$dir/11-nexttrace-mtu.log" ]] &&     mtu="$(awk '/Path MTU:[[:space:]]*[0-9]+/{print $3; exit}' "$dir/11-nexttrace-mtu.log" 2>/dev/null || true)"
+  [[ -f "$dir/11-nexttrace-mtu.log" ]] &&
+    mtu="$(awk '/Path MTU:[[:space:]]*[0-9]+/{print $3; exit}' "$dir/11-nexttrace-mtu.log" 2>/dev/null || true)"
 
-  [[ -f "$dir/07-ipquality.log" ]] &&     blacklisted="$(sed -nE 's/^DNSBL:.*blacklisted=([0-9]+).*/\1/p' "$dir/07-ipquality.log" | head -1)"
+  if [[ -f "$dir/07-ipquality.log" ]]; then
+    blacklisted="$(sed -nE 's/^DNSBL:.*blacklisted=([0-9]+).*/\1/p' "$dir/07-ipquality.log" | head -1)"
+    marked="$(sed -nE 's/^DNSBL:.*marked=([0-9]+).*/\1/p' "$dir/07-ipquality.log" | head -1)"
+    ip_verdict="$(sed -n 's/^IP VERDICT: //p' "$dir/07-ipquality.log" | head -1)"
+    risk_factors="$(sed -n 's/^Risk factors: //p' "$dir/07-ipquality.log" | head -1)"
+    geo="$(sed -n 's/^Geo: //p' "$dir/07-ipquality.log" | head -1)"
+    media_block="$(grep -a '^Media:' "$dir/07-ipquality.log" 2>/dev/null | grep -oE '=(Block|No|Failed|Unavailable)(/[^ ]*)?' | wc -l | tr -d ' ' || true)"
+  fi
 
-  [[ -f "$summary" ]] &&     fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
+  if [[ -f "$dir/13-node-health.log" ]]; then
+    health_summary="$(sed -n 's/^Health summary: //p' "$dir/13-node-health.log" | head -1)"
+    health_critical="$(sed -nE 's/^Health summary: critical=([0-9]+).*/\1/p' "$dir/13-node-health.log" | head -1)"
+    health_warnings="$(sed -nE 's/^Health summary:.*warnings=([0-9]+).*/\1/p' "$dir/13-node-health.log" | head -1)"
+  fi
+
+  if [[ -f "$dir/03-censor-dpi.log" ]]; then
+    dpi_bad="$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$dir/03-censor-dpi.log" |
+      grep -Ec '(^|[[:space:]])(Blocked|Denied|Spoofed)([[:space:]]|$)' || true)"
+    dpi_ok="$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$dir/03-censor-dpi.log" |
+      grep -Ec '(^|[[:space:]])(Available|Clean)([[:space:]]|$)' || true)"
+  fi
+
+  if [[ -f "$dir/02-censor-geoblock.log" ]]; then
+    geoblock_bad="$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$dir/02-censor-geoblock.log" |
+      grep -Ec '(^|[[:space:]])(Blocked|Denied|Spoofed)([[:space:]]|$)' || true)"
+  fi
+
+  [[ -f "$summary" ]] &&
+    fail_count="$(awk -F '\t' 'NR>1 && $3=="FAIL"{n++} END{print n+0}' "$summary")"
+
+  t5="$(test_status 5)"
+  t8="$(test_status 8)"
+  t9="$(test_status 9)"
+  t10="$(test_status 10)"
+  t11="$(test_status 11)"
+  t12="$(test_status 12)"
+  t13="$(test_status 13)"
+
+  case "$ip_verdict" in
+    CLEAN*) ip_status="ОТЛИЧНО" ;;
+    REVIEW*) ip_status="ВНИМАНИЕ" ;;
+    BAD*) ip_status="ПЛОХО" ;;
+    *) ip_status="ВНИМАНИЕ" ;;
+  esac
+  worse_overall "$ip_status"
+
+  if [[ "$t9" == "FAIL" ]]; then
+    network_status="ПЛОХО"
+  elif [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    if awk -v s="$speed" 'BEGIN{exit !(s>=500)}'; then
+      network_status="ОТЛИЧНО"
+    elif awk -v s="$speed" 'BEGIN{exit !(s>=150)}'; then
+      network_status="НОРМАЛЬНО"
+    elif awk -v s="$speed" 'BEGIN{exit !(s>=50)}'; then
+      network_status="ВНИМАНИЕ"
+    else
+      network_status="ПЛОХО"
+    fi
+  else
+    network_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$network_status"
+
+  if [[ "$t8" == "FAIL" ]]; then
+    cpu_status="ПЛОХО"
+  elif [[ -n "$cpu_single" && -n "$cpu_all" ]]; then
+    cpu_status="НОРМАЛЬНО"
+  else
+    cpu_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$cpu_status"
+
+  if [[ "$t5" == "FAIL" ]]; then
+    disk_status="ПЛОХО"
+  elif [[ "$t5" == "PASS" ]]; then
+    disk_status="НОРМАЛЬНО"
+  else
+    disk_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$disk_status"
+
+  if [[ "$t10" == "PASS" && "$t11" == "PASS" && "$t12" == "PASS" ]]; then
+    if [[ "$mtu" == "1500" ]]; then
+      route_status="ОТЛИЧНО"
+    elif [[ "$mtu" =~ ^[0-9]+$ ]] && (( mtu >= 1400 )); then
+      route_status="НОРМАЛЬНО"
+    else
+      route_status="ВНИМАНИЕ"
+    fi
+  elif [[ "$t10" == "FAIL" && "$t12" == "FAIL" ]]; then
+    route_status="ПЛОХО"
+  else
+    route_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$route_status"
+
+  if [[ "$dpi_bad" =~ ^[0-9]+$ ]] && (( dpi_bad >= 3 )); then
+    dpi_status="ПЛОХО"
+  elif [[ "$dpi_bad" =~ ^[0-9]+$ ]] && (( dpi_bad > 0 )); then
+    dpi_status="ВНИМАНИЕ"
+  elif [[ "$dpi_ok" =~ ^[0-9]+$ ]] && (( dpi_ok > 0 )); then
+    dpi_status="ОТЛИЧНО"
+  else
+    dpi_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$dpi_status"
+
+  if [[ "$media_block" =~ ^[0-9]+$ ]] && (( media_block == 0 )) &&
+     [[ "$geoblock_bad" =~ ^[0-9]+$ ]] && (( geoblock_bad == 0 )); then
+    media_status="ОТЛИЧНО"
+  elif [[ "$media_block" =~ ^[0-9]+$ ]] && (( media_block >= 3 )); then
+    media_status="ПЛОХО"
+  else
+    media_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$media_status"
+
+  if [[ "$t13" == "FAIL" ]] || { [[ "$health_critical" =~ ^[0-9]+$ ]] && (( health_critical > 0 )); }; then
+    health_status="ПЛОХО"
+  elif [[ "$health_critical" == "0" && "$health_warnings" == "0" ]]; then
+    health_status="ОТЛИЧНО"
+  elif [[ "$health_critical" == "0" && "$health_warnings" =~ ^[0-9]+$ ]]; then
+    health_status="ВНИМАНИЕ"
+  else
+    health_status="ВНИМАНИЕ"
+  fi
+  worse_overall "$health_status"
 
   echo '======================================================================'
-  echo ' ИТОГ ПО НОДЕ'
+  echo ' ИТОГ ПО НОДЕ — ОПЕРАТОРСКАЯ ОЦЕНКА'
   echo '======================================================================'
-  printf 'FAIL:             %s\n' "${fail_count:-?}"
-  printf 'Сеть:             %s\n' "$([[ -n "$speed" ]] && printf '%s Mbit/s' "$speed" || printf 'нет данных')"
-  printf 'CPU single:       %s\n' "$([[ -n "$cpu_single" ]] && printf '%s events/s' "$cpu_single" || printf 'нет данных')"
-  printf 'CPU all-thread:   %s\n' "$([[ -n "$cpu_all" ]] && printf '%s events/s' "$cpu_all" || printf 'нет данных')"
-  printf 'MTU:              %s\n' "${mtu:-нет данных}"
-  printf 'DNSBL blacklist:  %s\n' "${blacklisted:-нет данных}"
+  printf ' ОБЩИЙ ИТОГ       [%s]\n' "$overall_status"
+  printf ' Тесты             FAIL=%s из 13\n' "${fail_count:-?}"
+  echo '----------------------------------------------------------------------'
+  printf ' IP / REPUTATION   [%-9s] %s\n' "$ip_status" "${ip_verdict:-нет verdict}"
+  printf '                    Geo: %s\n' "${geo:-нет данных}"
+  printf '                    DNSBL: blacklisted=%s marked=%s\n' "${blacklisted:-?}" "${marked:-?}"
+  printf '                    Risk: %s\n' "${risk_factors:-нет данных}"
+  echo '----------------------------------------------------------------------'
+  if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ && "$iperf_avg_down" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    local lo hi pct
+    if awk -v a="$speed" -v b="$iperf_avg_down" 'BEGIN{exit !(a<b)}'; then
+      lo="$speed"; hi="$iperf_avg_down"
+    else
+      lo="$iperf_avg_down"; hi="$speed"
+    fi
+    pct="$(awk -v a="$hi" -v b="$lo" 'BEGIN{if(a>0) printf "%.0f", ((a-b)/a)*100; else print 0}')"
+    if (( pct <= 15 )); then
+      network_consensus="результаты хорошо согласуются: download ~${lo}-${hi} Mbit/s"
+    elif (( pct <= 30 )); then
+      network_consensus="результаты в разумном диапазоне: download ~${lo}-${hi} Mbit/s"
+    else
+      network_consensus="заметный разброс между тестами: download ~${lo}-${hi} Mbit/s"
+    fi
+    if [[ "$iperf_avg_up" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+      network_consensus="${network_consensus}; upload avg ~${iperf_avg_up} Mbit/s"
+    fi
+  elif [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    network_consensus="есть только Cloudflare measurement: ~${speed} Mbit/s download"
+  elif [[ "$iperf_avg_down" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    network_consensus="есть только iPerf3 RU: avg download ~${iperf_avg_down} Mbit/s"
+  else
+    network_consensus="недостаточно данных для сетевого консенсуса"
+  fi
 
+  printf ' СЕТЬ              [%-9s] %s\n' "$network_status" "$network_consensus"
+  printf '                    Cloudflare HTTPS 100MB: %s\n' "$([[ -n "$speed" ]] && printf '%s Mbit/s download' "$speed" || printf 'нет данных')"
+  if [[ -n "$iperf_avg_down" || -n "$iperf_avg_up" ]]; then
+    printf '                    iPerf3 RU (5 точек): avg ↓%s / ↑%s Mbit/s; best ↓%s / ↑%s; min ping %sms\n' \
+      "${iperf_avg_down:-?}" "${iperf_avg_up:-?}" "${iperf_best_down:-?}" "${iperf_best_up:-?}" "${iperf_min_ping:-?}"
+  fi
   if [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     safe_mbps="$(awk -v s="$speed" 'BEGIN{printf "%.1f", s*0.70}')"
     at3="$(awk -v s="$safe_mbps" 'BEGIN{print int(s/3)}')"
     at5="$(awk -v s="$safe_mbps" 'BEGIN{print int(s/5)}')"
-    printf 'Рабочий бюджет:   %s Mbit/s (70%% измеренной скорости)\n' "$safe_mbps"
-    printf 'XHTTP ориентир:   ~%s активных @3 Mbit/s / ~%s @5 Mbit/s\n' "$at3" "$at5"
+    printf '                    расчётный бюджет по Cloudflare (70%%): ~%s Mbit/s\n' "$safe_mbps"
+    printf '                    ориентир XHTTP: ~%s активных @3 Mbit/s / ~%s @5 Mbit/s\n' "$at3" "$at5"
   fi
-
-  if [[ "$blacklisted" == "0" ]]; then
-    echo 'IP reputation:    без DNSBL blacklist по текущему тесту'
-  fi
-  if [[ "$mtu" == "1500" ]]; then
-    echo 'MTU:              нормальный для XHTTP/Hysteria2'
-  fi
+  echo '----------------------------------------------------------------------'
+  printf ' CPU               [%-9s] single=%s all=%s events/s\n' "$cpu_status" "${cpu_single:-?}" "${cpu_all:-?}"
+  printf ' ДИСК              [%-9s] fio test=%s\n' "$disk_status" "${t5:-нет данных}"
+  echo '----------------------------------------------------------------------'
+  printf ' МАРШРУТЫ / MTU    [%-9s] MTR=%s PMTU=%s Globalping=%s MTU=%s\n' "$route_status" "${t10:-?}" "${t11:-?}" "${t12:-?}" "${mtu:-?}"
+  printf ' DPI               [%-9s] bad-signals=%s clean-signals=%s\n' "$dpi_status" "$dpi_bad" "$dpi_ok"
+  printf ' GEO / MEDIA       [%-9s] geoblock-signals=%s media-blocks=%s\n' "$media_status" "$geoblock_bad" "$media_block"
+  echo '----------------------------------------------------------------------'
+  printf ' TLS / RUNTIME     [%-9s] %s\n' "$health_status" "${health_summary:-нет данных}"
+  echo '======================================================================'
+  echo ' ЛЕГЕНДА: ОТЛИЧНО = чисто/сильный результат; НОРМАЛЬНО = рабочий результат;'
+  echo '         ВНИМАНИЕ = есть отклонения или неполные данные; ПЛОХО = критичный сигнал.'
+  echo ' CPU/диск не получают искусственный рейтинг производительности: показываются фактические метрики.'
   echo '======================================================================'
 }
-
 generate_report(){
   local dir="$1"
   local summary analysis ai
@@ -708,7 +1079,7 @@ print_colored_analysis(){
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
-      " REMNANODE NEXT — MULTITEST ANALYSIS"|" ИТОГ ПО НОДЕ"|"=== TEST STATUS ==="|"=== ПРОБЛЕМЫ ===")
+      " REMNANODE NEXT — MULTITEST ANALYSIS"|" ИТОГ ПО НОДЕ — ОПЕРАТОРСКАЯ ОЦЕНКА"|"=== TEST STATUS ==="|"=== ПРОБЛЕМЫ ===")
         printf '%s%s%s\n' "$C_CYAN" "$line" "$C_RESET"
         ;;
       "======================================================================"|"================================================================="|"==================== АНАЛИТИКА ПОСЛЕ ТЕСТОВ ====================")
@@ -730,7 +1101,19 @@ print_colored_analysis(){
       *" SKIP "*|SKIP=*|*"SKIP="*)
         printf '%s%s%s\n' "$C_YELLOW" "$line" "$C_RESET"
         ;;
-      "Сеть:"*|"CPU single:"*|"CPU all-thread:"*|"MTU:"*|"DNSBL blacklist:"*|"Рабочий бюджет:"*|"XHTTP ориентир:"*|"IP reputation:"*)
+      *"[ОТЛИЧНО]"*)
+        printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
+        ;;
+      *"[НОРМАЛЬНО]"*)
+        printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
+        ;;
+      *"[ВНИМАНИЕ]"*)
+        printf '%s%s%s\n' "$C_YELLOW" "$line" "$C_RESET"
+        ;;
+      *"[ПЛОХО]"*)
+        printf '%s%s%s\n' "$C_RED" "$line" "$C_RESET"
+        ;;
+      "Сеть:"*|"CPU single:"*|"CPU all-thread:"*|"MTU:"*|"Geo/IP location:"*|"DNSBL:"*|"IP verdict:"*|"Risk factors:"*|"Node health:"*|"Рабочий бюджет:"*|"XHTTP ориентир:"*|"IP reputation:"*)
         printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET"
         ;;
       "  Нет.")
@@ -775,6 +1158,7 @@ show_latest_report(){
 }
 
 run_all(){
+  acquire_multitest_lock || return $?
   local names=(
     "IP Region"
     "Censorcheck — проверка геоблока"
@@ -788,6 +1172,7 @@ run_all(){
     "NextTrace Route/MTR"
     "NextTrace Path MTU"
     "NextTrace Globalping"
+    "Node Health"
   )
   local slugs=(
     "ip-region"
@@ -802,6 +1187,7 @@ run_all(){
     "nexttrace-mtr"
     "nexttrace-mtu"
     "nexttrace-globalping"
+    "node-health"
   )
   local total="${#names[@]}" i num rc status started ended duration
   local passed=0 failed=0 skipped=0
@@ -870,7 +1256,18 @@ run_all(){
   printf 'Analysis:  %s/analysis.txt\n' "$run_dir"
   printf 'AI report: %s/AI_REPORT.txt\n' "$run_dir"
   printf 'Повторно:  sudo remnanode-next multitest analyze\n'
-  (( failed == 0 ))
+  local final_rc=0
+  (( failed == 0 )) || final_rc=1
+  release_multitest_lock
+  return "$final_rc"
+}
+
+run_single_locked(){
+  local num="$1" rc=0
+  acquire_multitest_lock || return $?
+  run_interruptible "$num" || rc=$?
+  release_multitest_lock
+  return "$rc"
 }
 
 menu(){
@@ -886,9 +1283,9 @@ menu(){
     printf 'Выбор: '
     read -r choice < "$TTY" || choice=0
     case "$choice" in
-      1|2|3|4|5|6|7|8|9|10|11|12)
+      1|2|3|4|5|6|7|8|9|10|11|12|13)
         rc=0
-        run_interruptible "$choice" || rc=$?
+        run_single_locked "$choice" || rc=$?
         (( rc == 0 || rc == 130 )) || warn "Тест завершился с rc=$rc"
         pause
         ;;
@@ -917,7 +1314,7 @@ Usage:
   server-multitest.sh all
   server-multitest.sh analyze
   server-multitest.sh report
-  server-multitest.sh 1..12
+  server-multitest.sh 1..13
 EOF
 }
 
@@ -929,7 +1326,7 @@ main(){
     all|99) need_root; run_all ;;
     analyze) need_root; show_latest_analysis ;;
     report) need_root; show_latest_report ;;
-    1|2|3|4|5|6|7|8|9|10|11|12) need_root; run_interruptible "$1" ;;
+    1|2|3|4|5|6|7|8|9|10|11|12|13) need_root; run_single_locked "$1" ;;
     *) usage; exit 2 ;;
   esac
 }

@@ -16,9 +16,12 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"
 NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="3a2014701d1775ba07f30b469865fc993cd633d1"
-TESTER_BLOB_SHA="3d445a57ddadf923f03206f7848d37dc65f377ae"
+TESTER_REF="dc79e5b4495884d21615506ea94bc5e9e016c029"
+TESTER_BLOB_SHA="41993e50f9dc1b9a1126feb5743bbc265f4ffa86"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
+SELFSTEAL_OVERLAY_REF="3a558fb58448cc998f228ad8020a9fd229d49648"
+SELFSTEAL_OVERLAY_BLOB_SHA="39bd9b619936d8400407e4ec1fefacfe84b5c50d"
+SELFSTEAL_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${SELFSTEAL_OVERLAY_REF}/next-installer/selfsteal-site-manager.sh"
 
 APP_DIR="/opt/remnanode"
 NEXT_DIR="$APP_DIR/next-installer"
@@ -143,6 +146,20 @@ FILES
 
   verify_source_file "$tmp/next-installer/rkn-watcher-manager.sh" "$EXPECTED_RKN"
   verify_source_file "$tmp/next-installer/selfsteal-site-manager.sh" "$EXPECTED_SELFSTEAL"
+
+  local selfsteal_overlay
+  selfsteal_overlay="$tmp/selfsteal-site-manager.fixed.sh"
+  curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 3 \
+    "$SELFSTEAL_OVERLAY_URL" -o "$selfsteal_overlay" || die 'Не удалось скачать SelfSteal preferences overlay.'
+  [[ "$(git_blob_sha "$selfsteal_overlay")" == "$SELFSTEAL_OVERLAY_BLOB_SHA" ]] || die 'SelfSteal preferences overlay не прошёл Git blob SHA.'
+  bash -n "$selfsteal_overlay" || die 'SelfSteal preferences overlay не прошёл bash -n.'
+  grep -Fq 'PREFERRED_PERCENT=' "$selfsteal_overlay" || die 'SelfSteal overlay: favorite weight отсутствует.'
+  grep -Fq 'template:rybaliti-2.0' "$selfsteal_overlay" || die 'SelfSteal overlay: rybaliti favorite отсутствует.'
+  grep -Fq 'template:worldzoo-stream-template' "$selfsteal_overlay" || die 'SelfSteal overlay: worldzoo favorite отсутствует.'
+  grep -Fq 'deploy_random_preferred' "$selfsteal_overlay" || die 'SelfSteal overlay: weighted random отсутствует.'
+  install -m 0700 "$selfsteal_overlay" "$tmp/next-installer/selfsteal-site-manager.sh"
+  ok 'SelfSteal preferences overlay: 80% STREAM/rybaliti/worldzoo, 20% остальные.'
+
   verify_source_file "$tmp/next-installer/xhttp-signature-manager.sh" "$EXPECTED_SIGNATURE"
 
   local v2cleanup
@@ -201,7 +218,15 @@ FILES
   grep -Fq 'АНАЛИТИКА ПОСЛЕ ТЕСТОВ' "$tester" || die 'Server Multitest: automatic inline analysis отсутствует.'
   grep -Fq 'Рабочий бюджет:' "$tester" || die 'Server Multitest: XHTTP planning budget отсутствует.'
   grep -Fq 'XHTTP ориентир:' "$tester" || die 'Server Multitest: XHTTP planning estimate отсутствует.'
-  grep -Fq '"DNSBL: clean="' "$tester" || die 'Server Multitest: concise IPQuality output отсутствует.'
+  grep -Fq '"DNSBL: total="' "$tester" || die 'Server Multitest: DNSBL summary отсутствует.'
+  grep -Fq 'IP VERDICT:' "$tester" || die 'Server Multitest: IP reputation verdict отсутствует.'
+  grep -Fq 'Risk factors: proxy=' "$tester" || die 'Server Multitest: risk consensus отсутствует.'
+  grep -Fq '13) Node Health' "$tester" || die 'Server Multitest: Node Health отсутствует.'
+  grep -Fq 'ИТОГ ПО НОДЕ — ОПЕРАТОРСКАЯ ОЦЕНКА' "$tester" || die 'Server Multitest: operator scorecard отсутствует.'
+  grep -Fq 'ОБЩИЙ ИТОГ' "$tester" || die 'Server Multitest: overall operator verdict отсутствует.'
+  grep -Fq 'IP / REPUTATION' "$tester" || die 'Server Multitest: IP section отсутствует.'
+  grep -Fq 'TLS / RUNTIME' "$tester" || die 'Server Multitest: TLS/runtime section отсутствует.'
+  grep -Fq 'Health summary: critical=' "$tester" || die 'Server Multitest: Node Health summary отсутствует.'
   ! grep -Fq 'INTERPRETATION RULE' "$tester" || die 'Server Multitest: verbose interpretation footer вернулся.'
   ! sed -n '/run_all(){/,/^}/p' "$tester" | grep -Fq 'read -r action' || die 'Server Multitest: all mode снова требует Enter.'
   if grep -Eq '(^|[^[:alnum:]])http://' "$tester"; then
@@ -465,24 +490,119 @@ MENU
 
 show_status(){
   sync_next_sources
-  echo '================ REMNANODE NEXT STATUS ================'
-  printf 'Transport : %s\n' "$(cat "$APP_DIR/.transport" 2>/dev/null || echo 'не выбран')"
-  printf 'Domain    : %s\n' "$(cat "$APP_DIR/.node_domain" 2>/dev/null || echo 'не задан')"
-  printf 'Node      : '
-  if command -v docker >/dev/null 2>&1; then docker ps --filter name='^/remnanode$' --format '{{.Status}}' 2>/dev/null | head -1 || true; else echo 'docker отсутствует'; fi
-  printf 'Nginx     : '
-  if command -v docker >/dev/null 2>&1; then docker ps --filter name='^/remnawave-nginx$' --format '{{.Status}}' 2>/dev/null | head -1 || true; else echo 'docker отсутствует'; fi
-  echo 'Listeners :'
-  ss -lntup 2>/dev/null | grep -E '(:443|:2222)[[:space:]]' || true
-  printf 'Network   : %s / %s\n' "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)" "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo unknown)"
-  echo 'Profiles  :'
-  find "$APP_DIR/remnawave-profiles" -maxdepth 1 -type f -name '*.json' -printf '  %f\n' 2>/dev/null | sort || true
-  if [[ -x "$RKN" ]]; then
-    echo 'RKN       :'
-    "$RKN" status || true
-  fi
-}
+  local domain="" transport="" node_state="" nginx_state="" cert="" cert_end="" cert_days=""
+  local disk="" mem="" load="" ipv6_state="" backup="" backup_age="" mt_dir="" mt_result=""
+  local ok_count=0 warn_count=0 fail_count=0
 
+  domain="$(cat "$APP_DIR/.node_domain" 2>/dev/null || true)"
+  transport="$(cat "$APP_DIR/.transport" 2>/dev/null || true)"
+
+  echo '======================================================================'
+  echo ' REMNANODE NEXT — NODE HEALTH'
+  echo '======================================================================'
+  printf 'Transport : %s\n' "$transport"
+  printf 'Domain    : %s\n' "$domain"
+
+  if command -v docker >/dev/null 2>&1; then
+    node_state="$(docker ps --filter name='^/remnanode$' --format '{{.Status}}' 2>/dev/null | head -1)"
+    nginx_state="$(docker ps --filter name='^/remnawave-nginx$' --format '{{.Status}}' 2>/dev/null | head -1)"
+  fi
+  if [[ -n "$node_state" ]]; then echo "[OK]   rw-core/container: $node_state"; ok_count=$((ok_count+1)); else echo '[FAIL] rw-core/container: not running'; fail_count=$((fail_count+1)); fi
+  if [[ -n "$nginx_state" ]]; then echo "[OK]   nginx: $nginx_state"; ok_count=$((ok_count+1)); else echo '[WARN] nginx: not running/not used'; warn_count=$((warn_count+1)); fi
+
+  if ss -lnt 2>/dev/null | grep -Eq '(:|\])443[[:space:]]'; then echo '[OK]   TCP/443: LISTEN'; ok_count=$((ok_count+1)); else echo '[FAIL] TCP/443: no listener'; fail_count=$((fail_count+1)); fi
+  if [[ "$transport" == *hysteria* || "$transport" == "combined" ]]; then
+    if ss -lnu 2>/dev/null | grep -Eq '(:|\])443[[:space:]]'; then echo '[OK]   UDP/443: LISTEN'; ok_count=$((ok_count+1)); else echo '[FAIL] UDP/443: Hysteria2 selected, no listener'; fail_count=$((fail_count+1)); fi
+  else
+    echo '[INFO] UDP/443: not required by current transport'
+  fi
+
+  if [[ -n "$domain" ]] && getent ahostsv4 "$domain" >/dev/null 2>&1; then
+    echo '[OK]   DNS A: resolves'
+    ok_count=$((ok_count+1))
+  elif [[ -n "$domain" ]]; then
+    echo '[WARN] DNS A: resolve failed'
+    warn_count=$((warn_count+1))
+  fi
+
+  for cert in "$APP_DIR/certs/fullchain.pem" "/etc/xray/certs/fullchain.pem"; do
+    [[ -s "$cert" ]] && break
+  done
+  if [[ -s "$cert" ]] && command -v openssl >/dev/null 2>&1; then
+    cert_end="$(openssl x509 -in "$cert" -noout -enddate 2>/dev/null | cut -d= -f2- || true)"
+    if [[ -n "$cert_end" ]]; then
+      cert_days=$(( ($(date -d "$cert_end" +%s 2>/dev/null || echo 0) - $(date +%s)) / 86400 ))
+      printf 'TLS       : %s days, expires %s\n' "$cert_days" "$cert_end"
+      if (( cert_days < 0 )); then echo '[FAIL] TLS expired'; fail_count=$((fail_count+1))
+      elif (( cert_days < 14 )); then echo '[WARN] TLS expires soon'; warn_count=$((warn_count+1))
+      else echo '[OK]   TLS expiry'; ok_count=$((ok_count+1)); fi
+      if [[ -n "$domain" ]]; then
+        local san wildcard
+        san="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
+        wildcard="*.${domain#*.}"
+        if grep -Fq "DNS:$domain" <<<"$san" || { [[ "$domain" == *.* ]] && grep -Fq "DNS:$wildcard" <<<"$san"; }; then
+          echo '[OK]   TLS SAN covers node domain'
+          ok_count=$((ok_count+1))
+        else
+          echo '[WARN] TLS SAN does not cover node domain'
+          warn_count=$((warn_count+1))
+        fi
+      fi
+    fi
+  else
+    echo '[WARN] Local certificate file not found'
+    warn_count=$((warn_count+1))
+  fi
+
+  disk="$(df -P / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')"
+  mem="$(awk '/MemAvailable:/{printf "%.0f MB", $2/1024}' /proc/meminfo 2>/dev/null || true)"
+  load="$(awk '{print $1}' /proc/loadavg 2>/dev/null || true)"
+  printf 'Resources : disk=%s%% mem_available=%s load1=%s\n' "$disk" "$mem" "$load"
+  if [[ "$disk" =~ ^[0-9]+$ ]] && (( disk >= 90 )); then echo '[WARN] Root disk >=90% used'; warn_count=$((warn_count+1)); else ok_count=$((ok_count+1)); fi
+
+  if [[ "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo 1)" == "0" ]]; then
+    ipv6_state="$(ip -6 route show default 2>/dev/null | head -1)"
+    if [[ -n "$ipv6_state" ]]; then echo '[OK]   IPv6 enabled + default route'; ok_count=$((ok_count+1)); else echo '[WARN] IPv6 enabled but no default route'; warn_count=$((warn_count+1)); fi
+  else
+    echo '[INFO] IPv6 disabled'
+  fi
+  printf 'Network   : %s / %s\n' "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)" "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo unknown)"
+
+  backup="$(ls -1t /root/remnanode-next-backup-*.tar.gz 2>/dev/null | head -1 || true)"
+  if [[ -n "$backup" ]]; then
+    backup_age=$(( ($(date +%s) - $(stat -c %Y "$backup" 2>/dev/null || echo 0)) / 86400 ))
+    printf 'Backup    : %s (%s days ago)\n' "$backup" "$backup_age"
+    if (( backup_age <= 7 )); then ok_count=$((ok_count+1)); else warn_count=$((warn_count+1)); fi
+  else
+    echo '[WARN] Backup: none'
+    warn_count=$((warn_count+1))
+  fi
+
+  mt_dir="$(cat /var/log/remnanode-next/multitest/latest.path 2>/dev/null || true)"
+  if [[ -n "$mt_dir" && -f "$mt_dir/analysis.txt" ]]; then
+    mt_result="$(grep '^Result:' "$mt_dir/analysis.txt" | head -1 || true)"
+    printf 'Multitest : %s\n' "$mt_result"
+  else
+    echo 'Multitest : no saved run'
+  fi
+
+  if [[ -x "$RKN" ]]; then
+    echo
+    echo '--- SECURITY ---'
+    "$RKN" status || { echo '[WARN] RKN status failed'; warn_count=$((warn_count+1)); }
+  fi
+
+  echo
+  printf 'HEALTH SUMMARY: OK=%s WARN=%s FAIL=%s\n' "$ok_count" "$warn_count" "$fail_count"
+  if (( fail_count > 0 )); then
+    echo 'VERDICT: ATTENTION — есть критичные проблемы.'
+  elif (( warn_count > 0 )); then
+    echo 'VERDICT: REVIEW — нода работает, но есть предупреждения.'
+  else
+    echo 'VERDICT: HEALTHY'
+  fi
+  echo '======================================================================'
+}
 hysteria_diag(){
   local domain runtime_tmp="" runtime_ok=0 drift=0
   domain="$(cat "$APP_DIR/.node_domain" 2>/dev/null || true)"
@@ -632,7 +752,113 @@ backup_current(){
   ((${#paths[@]})) || return 0
   tar -C / -czf "$dst" "${paths[@]}"
   chmod 0600 "$dst"
+  sha256sum "$dst" >"$dst.sha256"
+  chmod 0600 "$dst.sha256"
   ok "Backup конфигурации → $dst"
+}
+
+list_backups(){
+  local found=0 file
+  echo '================ BACKUPS ================'
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    found=1
+    printf '%s  %s\n' "$(stat -c '%y' "$file" 2>/dev/null | cut -d. -f1)" "$file"
+  done < <(ls -1t /root/remnanode-next-backup-*.tar.gz 2>/dev/null || true)
+  (( found )) || echo 'Backup files not found.'
+}
+
+verify_backup(){
+  local file="$1" item bad=0 expected=""
+  [[ -f "$file" ]] || { warn "Backup не найден: $file"; return 1; }
+  case "$file" in
+    /root/remnanode-next-backup-*.tar.gz) ;;
+    *) warn 'Разрешены только backup-файлы /root/remnanode-next-backup-*.tar.gz'; return 1 ;;
+  esac
+
+  if [[ -f "$file.sha256" ]]; then
+    expected="$(awk '{print $1}' "$file.sha256" 2>/dev/null || true)"
+    [[ -n "$expected" && "$(sha256sum "$file" | awk '{print $1}')" == "$expected" ]] || {
+      warn 'SHA256 backup не совпадает.'
+      return 1
+    }
+  fi
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] || continue
+    case "$item" in
+      opt/remnanode/*|opt/remnanode) ;;
+      *) warn "Неожиданный путь в backup: $item"; bad=1 ;;
+    esac
+    [[ "$item" != *"../"* && "$item" != "../"* ]] || bad=1
+  done < <(tar -tzf "$file" 2>/dev/null) || return 1
+
+  (( bad == 0 )) || return 1
+  tar -tzf "$file" >/dev/null 2>&1 || return 1
+  ok "Backup verified: $file"
+}
+
+restore_backup(){
+  local file="$1"
+  verify_backup "$file" || return 1
+  warn 'Перед restore будет создан backup текущего состояния.'
+  backup_current || true
+
+  if [[ -f "$APP_DIR/docker-compose.yml" ]] && command -v docker >/dev/null 2>&1; then
+    (cd "$APP_DIR" && docker compose down) || true
+  fi
+
+  tar -C / -xzf "$file"
+  chmod 0700 "$APP_DIR" 2>/dev/null || true
+  [[ -f "$APP_DIR/.env" ]] && chmod 0600 "$APP_DIR/.env" || true
+
+  if [[ -f "$APP_DIR/docker-compose.yml" ]] && command -v docker >/dev/null 2>&1; then
+    (cd "$APP_DIR" && docker compose up -d) || {
+      warn 'docker compose up после restore завершился ошибкой.'
+      return 1
+    }
+  fi
+
+  sync_next_sources
+  "$GUARDS" restore-hysteria >/dev/null 2>&1 || true
+  "$GUARDS" sync-rkn-watch >/dev/null 2>&1 || true
+  ok "Restore complete: $file"
+  show_status
+}
+
+backup_menu(){
+  local c latest answer
+  while true; do
+    cat <<'MENU'
+
+BACKUP / RESTORE
+ [1] Создать backup сейчас
+ [2] Показать backups
+ [3] Проверить последний backup
+ [4] Восстановить последний backup
+ [0] Назад
+MENU
+    printf 'Выбор: '; read -r c < "$TTY" || true
+    case "$c" in
+      1) backup_current; pause ;;
+      2) list_backups; pause ;;
+      3)
+        latest="$(ls -1t /root/remnanode-next-backup-*.tar.gz 2>/dev/null | head -1 || true)"
+        [[ -n "$latest" ]] && verify_backup "$latest" || warn 'Backup не найден.'
+        pause
+        ;;
+      4)
+        latest="$(ls -1t /root/remnanode-next-backup-*.tar.gz 2>/dev/null | head -1 || true)"
+        [[ -n "$latest" ]] || { warn 'Backup не найден.'; pause; continue; }
+        printf 'Restore %s? Введи RESTORE: ' "$latest"
+        read -r answer < "$TTY" || true
+        [[ "$answer" == RESTORE ]] && restore_backup "$latest" || say 'Отменено.'
+        pause
+        ;;
+      0|'') return 0 ;;
+      *) warn 'Неверный пункт.' ;;
+    esac
+  done
 }
 
 safe_clean_impl(){
@@ -833,8 +1059,9 @@ ${C_BOLD}${C_YELLOW}ОБСЛУЖИВАНИЕ / ВОССТАНОВЛЕНИЕ${C_R
  [10] Safe clean текущей NEXT-ноды
  [11] Safe reinstall текущей NEXT-ноды
  [12] Существующая/legacy нода → очистка хвостов → NEXT V2
+ [16] Backup / Restore
 
-${C_DIM}Быстрые команды: multitest | status | network | hysteria-diag${C_RESET}
+${C_DIM}Быстрые команды: multitest | status | network | hysteria-diag | backup${C_RESET}
  [0]  Выход
 ────────────────────────────────────────────────────────────
 MENU
@@ -855,6 +1082,7 @@ MENU
       13) network_menu ;;
       14) hysteria_diag; pause ;;
       15) "$TESTER" menu ;;
+      16) backup_menu ;;
       0|'') return 0 ;;
       *) warn 'Неверный пункт.' ;;
     esac
@@ -886,8 +1114,16 @@ main(){
     bbr3) sync_next_sources; "$NETWORK" bbr3 ;;
     hysteria-diag|hy2-diag) hysteria_diag ;;
     multitest|server-test|tests) sync_next_sources; shift; "$TESTER" "${1:-menu}" ;;
+    backup) backup_current ;;
+    backups) list_backups ;;
+    restore)
+      local latest
+      latest="$(ls -1t /root/remnanode-next-backup-*.tar.gz 2>/dev/null | head -1 || true)"
+      [[ -n "$latest" ]] || die 'Backup не найден.'
+      restore_backup "$latest"
+      ;;
     sync-source) sync_next_sources ;;
-    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|sync-source]' ;;
+    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|backup|backups|restore|sync-source]' ;;
   esac
 }
 
