@@ -209,7 +209,8 @@ FILES
   overlay_root="$tmp/current-overlay"
   mkdir -p "$overlay_root/security" "$overlay_root/next-installer"
   fetch_pinned_overlay(){
-    local rel="$1" expected="$2" out="$overlay_root/$rel"
+    local rel="$1" expected="$2" out
+    out="$overlay_root/$rel"
     mkdir -p "$(dirname "$out")"
     curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 3 \
       "https://raw.githubusercontent.com/${REPO}/${MGMT_OVERLAY_REF}/$rel" -o "$out" || die "Не удалось скачать current overlay: $rel"
