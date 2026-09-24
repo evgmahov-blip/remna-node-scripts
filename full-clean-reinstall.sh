@@ -19,8 +19,8 @@ V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next
 NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"
 NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
 NETWORK_URL="https://raw.githubusercontent.com/${REPO}/${NETWORK_REF}/next-installer/network-tuning-manager.sh"
-TESTER_REF="68dfdd2fc69cf5d2d0e97b4613b1f375a36e0a73"
-TESTER_BLOB_SHA="47e1e8e8ec1498d84d6e2f2627facbea9711bae5"
+TESTER_REF="bc240a3187c5c33cf5c56d2659059bc782e67f9e"
+TESTER_BLOB_SHA="2e4f39cb660cc4ca3da6280a90c8fc518498dbed"
 TESTER_URL="https://raw.githubusercontent.com/${REPO}/${TESTER_REF}/next-installer/server-multitest.sh"
 
 MGMT_OVERLAY_REF="f7c609b0fa929cecc4a74db5bafe90b0a4d782be"
@@ -49,6 +49,11 @@ SECURITY_DIR="$APP_DIR/security"
 TELEMT="$NEXT_DIR/telemt-manager.sh"
 TELEMT_LEGACY="$NEXT_DIR/telemt-legacy-rkn-adapter.sh"
 REBUILD="$NEXT_DIR/legacy-rebuild-manager.sh"
+RELEASE_MARKER="$APP_DIR/.ainoc-release.json"
+MANAGED_UPDATE_BACKUP_ROOT="${MANAGED_UPDATE_BACKUP_ROOT:-/root/remnanode-managed-updates}"
+MANAGED_UPDATE_RUNTIME_DIR="${MANAGED_UPDATE_RUNTIME_DIR:-/run}"
+TELEMT_CONFIG_FILE="${TELEMT_CONFIG_FILE:-/etc/telemt/telemt.toml}"
+TELEMT_PANEL_CONFIG_FILE="${TELEMT_PANEL_CONFIG_FILE:-/etc/telemt-panel/config.toml}"
 TTY=/dev/tty
 [[ -r "$TTY" ]] || TTY=/dev/stdin
 
@@ -95,6 +100,9 @@ ensure_bootstrap_deps(){
   local missing=0
   for c in curl tar sha256sum sed awk diff python3; do command -v "$c" >/dev/null 2>&1 || missing=1; done
   if (( missing )); then
+    if [[ "${AINOC_INPLACE_UPDATE:-0}" == "1" ]]; then
+      die 'Safe in-place update: не хватает bootstrap-зависимостей; автоматическая установка пакетов запрещена.'
+    fi
     command -v apt-get >/dev/null 2>&1 || die 'Не хватает bootstrap-зависимостей и apt-get недоступен.'
     apt_get update -y
     apt_get install -y curl ca-certificates tar gzip coreutils diffutils python3
@@ -231,6 +239,9 @@ FILES
   grep -Fq 'Рабочий бюджет:' "$tester" || die 'Server Multitest: XHTTP planning budget отсутствует.'
   grep -Fq 'XHTTP ориентир:' "$tester" || die 'Server Multitest: XHTTP planning estimate отсутствует.'
   grep -Fq '"DNSBL: clean="' "$tester" || die 'Server Multitest: concise IPQuality output отсутствует.'
+  grep -Fq 'server-multitest.sh machine' "$tester" || die 'Server Multitest: machine mode отсутствует.'
+  grep -Fq 'remnanode.multitest.v1' "$tester" || die 'Server Multitest: machine JSON contract отсутствует.'
+  grep -Fq 'MULTITEST_NO_INSTALL' "$tester" || die 'Server Multitest: no-install machine guard отсутствует.'
   ! grep -Fq 'INTERPRETATION RULE' "$tester" || die 'Server Multitest: verbose interpretation footer вернулся.'
   ! sed -n '/run_all(){/,/^}/p' "$tester" | grep -Fq 'read -r action' || die 'Server Multitest: all mode снова требует Enter.'
   if grep -Eq '(^|[^[:alnum:]])http://' "$tester"; then
@@ -280,6 +291,450 @@ FILES
   fi
   ok "NEXT source синхронизирован → $NEXT_DIR"
   rm -rf "$tmp"
+}
+
+release_status(){
+  if [[ ! -s "$RELEASE_MARKER" ]]; then
+    printf '{"schema":"remnanode.release.v1","installed":false,"release_sha":null,"identity_ok":false,"image_ok":false}\n'
+    return 0
+  fi
+  local current_identity current_image
+  current_identity="$(managed_identity_digest 2>/dev/null | sed -n '1p' || true)"
+  current_image="$(managed_running_image_digest 2>/dev/null | sed -n '1p' || true)"
+  python3 - "$RELEASE_MARKER" "$current_identity" "$current_image" <<'PY'
+import json, re, sys
+from pathlib import Path
+p=Path(sys.argv[1])
+current_identity=sys.argv[2]
+current_image=sys.argv[3]
+try:
+    d=json.loads(p.read_text(encoding="utf-8"))
+except Exception:
+    print('{"schema":"remnanode.release.v1","installed":false,"release_sha":null,"identity_ok":false,"image_ok":false,"error":"invalid_marker"}')
+    raise SystemExit(0)
+sha=str(d.get("release_sha") or "")
+identity=str(d.get("identity_digest") or "")
+image=str(d.get("node_image_digest") or "")
+if not re.fullmatch(r"[0-9a-f]{40}", sha):
+    print('{"schema":"remnanode.release.v1","installed":false,"release_sha":null,"identity_ok":false,"image_ok":false,"error":"invalid_sha"}')
+    raise SystemExit(0)
+identity_valid=bool(re.fullmatch(r"[0-9a-f]{64}", identity))
+image_valid=bool(re.fullmatch(r"sha256:[0-9a-f]{64}", image))
+current_identity_valid=bool(re.fullmatch(r"[0-9a-f]{64}", current_identity))
+current_image_valid=bool(re.fullmatch(r"sha256:[0-9a-f]{64}", current_image))
+print(json.dumps({
+    "schema":"remnanode.release.v1",
+    "installed":True,
+    "release_sha":sha,
+    "installed_at":d.get("installed_at"),
+    "method":d.get("method"),
+    "identity_digest":identity if identity_valid else None,
+    "identity_ok":bool(identity_valid and current_identity_valid and identity == current_identity),
+    "node_image_digest":image if image_valid else None,
+    "image_ok":bool(image_valid and current_image_valid and image == current_image),
+    "marker_integrity_ok":bool(identity_valid and image_valid),
+}, ensure_ascii=False, separators=(",",":")))
+PY
+}
+
+write_release_marker(){
+  local sha="$1" identity_digest="$2" method="${3:-in-place}"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die 'AINOC release SHA invalid.'
+  [[ "$identity_digest" =~ ^[0-9a-f]{64}$ ]] || die 'AINOC identity digest invalid.'
+  [[ "$NODE_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'AINOC node image digest invalid.'
+  python3 - "$RELEASE_MARKER" "$sha" "$identity_digest" "$NODE_IMAGE_DIGEST" "$method" <<'PY'
+import json, os, sys, tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+target=Path(sys.argv[1])
+payload={
+    "schema":"remnanode.release.v1",
+    "release_sha":sys.argv[2],
+    "identity_digest":sys.argv[3],
+    "node_image_digest":sys.argv[4],
+    "installed_at":datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "method":sys.argv[5],
+}
+target.parent.mkdir(parents=True, exist_ok=True)
+fd,tmp=tempfile.mkstemp(prefix=".ainoc-release.",dir=str(target.parent))
+try:
+    os.fchmod(fd,0o600)
+    with os.fdopen(fd,"w",encoding="utf-8") as fh:
+        fh.write(json.dumps(payload,ensure_ascii=False,separators=(",",":"))+"\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp,target)
+    dfd=os.open(str(target.parent),os.O_RDONLY | getattr(os,"O_DIRECTORY",0))
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
+except Exception:
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    raise
+PY
+}
+
+managed_identity_manifest(){
+  local out="$1"
+  python3 - "$out" "$APP_DIR" "$TELEMT_CONFIG_FILE" "$TELEMT_PANEL_CONFIG_FILE" <<'PY'
+import hashlib, json, sys
+from pathlib import Path
+out=Path(sys.argv[1])
+app=Path(sys.argv[2])
+telemt=Path(sys.argv[3])
+telemt_panel=Path(sys.argv[4])
+fixed=[
+    app/".env", app/".node_domain", app/".panel_ip", app/".transport",
+    app/".camouflage_mode", app/"reality.env", app/".reality_sni",
+    app/".reality_target", app/".xhttp_path", app/"nginx.conf",
+    app/"xhttp-signature.json", telemt, telemt_panel,
+]
+paths=list(fixed)
+profiles=app/"remnawave-profiles"
+if profiles.is_dir():
+    paths.extend(sorted(
+        p for p in profiles.iterdir()
+        if p.is_file() and (
+            p.suffix == ".json"
+            or (p.name.startswith("host-") and p.suffix == ".txt")
+        )
+    ))
+items=[]
+for path in paths:
+    if path.is_file():
+        data=path.read_bytes()
+        items.append({"path":str(path),"state":"file","sha256":hashlib.sha256(data).hexdigest()})
+    else:
+        items.append({"path":str(path),"state":"missing","sha256":None})
+raw=json.dumps({"schema":"remnanode.identity.v1","files":items},ensure_ascii=False,sort_keys=True,separators=(",",":"))
+out.write_text(raw+"\n",encoding="utf-8")
+PY
+  chmod 0600 "$out"
+}
+
+managed_identity_digest(){
+  local tmp digest
+  install -d -m 0700 "$MANAGED_UPDATE_RUNTIME_DIR"
+  tmp="$(mktemp "$MANAGED_UPDATE_RUNTIME_DIR/remnanode-identity.XXXXXX")"
+  managed_identity_manifest "$tmp"
+  digest="$(sha256sum "$tmp" | awk '{print $1}')"
+  rm -f "$tmp"
+  printf '%s\n' "$digest"
+}
+
+managed_running_image_digest(){
+  command -v docker >/dev/null 2>&1 || return 1
+  [[ "$NODE_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  local cid image_id image_ref digests expected
+  cid="$(cd "$APP_DIR" && docker compose ps -q remnanode 2>/dev/null || true)"
+  [[ -n "$cid" ]] || return 1
+  image_id="$(docker inspect "$cid" --format '{{.Image}}' 2>/dev/null || true)"
+  image_ref="$(docker inspect "$cid" --format '{{.Config.Image}}' 2>/dev/null || true)"
+  [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  if [[ "$image_ref" == "$NODE_IMAGE" ]]; then
+    printf '%s\n' "$NODE_IMAGE_DIGEST"
+    return 0
+  fi
+  expected="ghcr.io/remnawave/node@$NODE_IMAGE_DIGEST"
+  digests="$(docker image inspect "$image_id" --format '{{range .RepoDigests}}{{println .}}{{end}}' 2>/dev/null || true)"
+  if grep -Fqx "$expected" <<<"$digests"; then
+    printf '%s\n' "$NODE_IMAGE_DIGEST"
+  else
+    printf '%s\n' "$image_id"
+  fi
+}
+
+managed_update_backup(){
+  local stamp dir rootfs src
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  install -d -m 0700 "$MANAGED_UPDATE_BACKUP_ROOT"
+  dir="$(mktemp -d "$MANAGED_UPDATE_BACKUP_ROOT/$stamp.XXXXXX")"
+  chmod 0700 "$dir"
+  rootfs="$dir/rootfs"
+  install -d -m 0700 "$rootfs"
+  local dst
+  for src in "$SELF" "$NEXT_DIR" "$PROTECTION" "$SECURITY_DIR" "$APP_DIR/docker-compose.yml" "$RELEASE_MARKER"; do
+    [[ -e "$src" || -L "$src" ]] || continue
+    dst="$rootfs/${src#/}"
+    mkdir -p "$(dirname "$dst")"
+    cp -a "$src" "$dst" || die "managed-update backup failed: $src"
+  done
+  managed_identity_manifest "$dir/identity.before.json"
+  python3 - "$dir/identity.before.json" "$rootfs" <<'PY'
+import json, shutil, sys
+from pathlib import Path
+manifest=Path(sys.argv[1])
+rootfs=Path(sys.argv[2])
+data=json.loads(manifest.read_text(encoding="utf-8"))
+for item in data.get("files", []):
+    if item.get("state") != "file":
+        continue
+    src=Path(str(item["path"]))
+    dst=rootfs / str(src).lstrip("/")
+    expected=str(item.get("sha256") or "")
+    if not src.is_file():
+        raise SystemExit(f"identity source disappeared during backup: {src}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    actual=__import__("hashlib").sha256(dst.read_bytes()).hexdigest()
+    if actual != expected:
+        raise SystemExit(f"identity changed during backup: {src}")
+PY
+  chmod -R go-rwx "$dir"
+  printf '%s\n' "$dir"
+}
+
+managed_update_restore_identity(){
+  local dir="$1" rootfs="$1/rootfs" manifest="$1/identity.before.json"
+  [[ -s "$manifest" ]] || { warn 'Managed update rollback: identity manifest missing.'; return 1; }
+  python3 - "$manifest" "$rootfs" "$APP_DIR" <<'PY'
+import json, shutil, sys
+from pathlib import Path
+manifest=Path(sys.argv[1])
+rootfs=Path(sys.argv[2])
+app=Path(sys.argv[3])
+data=json.loads(manifest.read_text(encoding="utf-8"))
+items=data.get("files", [])
+profiles=app/"remnawave-profiles"
+if profiles.is_dir():
+    for p in profiles.iterdir():
+        if p.is_file() and (p.suffix == ".json" or (p.name.startswith("host-") and p.suffix == ".txt")):
+            p.unlink()
+for item in items:
+    dst=Path(str(item["path"]))
+    state=item.get("state")
+    if state == "missing":
+        try:
+            dst.unlink()
+        except FileNotFoundError:
+            pass
+        continue
+    if state != "file":
+        raise SystemExit(f"unsupported identity state for {dst}: {state}")
+    src=rootfs / str(dst).lstrip("/")
+    if not src.is_file():
+        raise SystemExit(f"identity backup missing: {src}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+PY
+}
+
+managed_update_restore_code(){
+  local dir="$1" rootfs="$1/rootfs"
+  warn "Managed update rollback: восстанавливаю launcher/scripts/compose из $dir"
+  if [[ -d "$rootfs/opt/remnanode/next-installer" ]]; then
+    rm -rf "$NEXT_DIR"
+    mkdir -p "$(dirname "$NEXT_DIR")"
+    cp -a "$rootfs/opt/remnanode/next-installer" "$NEXT_DIR"
+  fi
+  if [[ -e "$rootfs/usr/local/libexec/remnanode-next.sh" ]]; then
+    install -m 0700 "$rootfs/usr/local/libexec/remnanode-next.sh" "$SELF"
+    ln -sfn "$SELF" "$CLI"
+  fi
+  if [[ -e "$rootfs/opt/remnanode/protection-manager.sh" ]]; then
+    install -m 0700 "$rootfs/opt/remnanode/protection-manager.sh" "$PROTECTION"
+  fi
+  if [[ -d "$rootfs/opt/remnanode/security" ]]; then
+    rm -rf "$SECURITY_DIR"
+    cp -a "$rootfs/opt/remnanode/security" "$SECURITY_DIR"
+  fi
+  if [[ -e "$rootfs/opt/remnanode/docker-compose.yml" ]]; then
+    cp -a "$rootfs/opt/remnanode/docker-compose.yml" "$APP_DIR/docker-compose.yml"
+  fi
+  if [[ -e "$rootfs/opt/remnanode/.ainoc-release.json" ]]; then
+    cp -a "$rootfs/opt/remnanode/.ainoc-release.json" "$RELEASE_MARKER"
+  else
+    rm -f "$RELEASE_MARKER"
+  fi
+}
+
+managed_update_rollback(){
+  local dir="$1" expected_image="$2" current expected_identity restored_identity i
+  managed_update_restore_code "$dir"
+  managed_update_restore_identity "$dir" || return 1
+  expected_identity="$(sha256sum "$dir/identity.before.json" | awk '{print $1}')"
+  restored_identity="$(managed_identity_digest 2>/dev/null || true)"
+  if [[ "$restored_identity" != "$expected_identity" ]]; then
+    warn "Managed update rollback identity mismatch: expected=$expected_identity got=$restored_identity"
+    return 1
+  fi
+
+  current="$(managed_running_image_digest 2>/dev/null || true)"
+  if [[ "$current" == "$expected_image" ]]; then
+    ok "Managed update rollback identity + image verified."
+    return 0
+  fi
+
+  ( cd "$APP_DIR" && docker compose up -d --no-deps remnanode >/dev/null 2>&1 ) || {
+    warn 'Managed update rollback: docker compose up failed.'
+    return 1
+  }
+  for i in $(seq 1 30); do
+    current="$(managed_running_image_digest 2>/dev/null || true)"
+    if [[ "$current" == "$expected_image" ]]; then
+      ok "Managed update rollback identity + image verified."
+      return 0
+    fi
+    sleep 2
+  done
+  warn "Managed update rollback image mismatch: expected=${expected_image:0:19}… got=${current:0:19}…"
+  return 1
+}
+
+managed_patch_node_image(){
+  local compose="$APP_DIR/docker-compose.yml" tmp current after i
+  [[ -s "$compose" ]] || die 'managed-update: docker-compose.yml missing.'
+  tmp="$(mktemp "$APP_DIR/.docker-compose.XXXXXX")"
+  python3 - "$compose" "$tmp" "$NODE_IMAGE" <<'PY'
+import re, sys
+from pathlib import Path
+src=Path(sys.argv[1]); dst=Path(sys.argv[2]); image=sys.argv[3]
+text=src.read_text(encoding="utf-8")
+pat=re.compile(r'(?m)^(\s*image:\s*)ghcr\.io/remnawave/node:[^\s#]+\s*$')
+new,n=pat.subn(lambda m:m.group(1)+image,text,count=1)
+if n != 1:
+    raise SystemExit("expected exactly one remnanode image line")
+dst.write_text(new,encoding="utf-8")
+PY
+  chmod --reference="$compose" "$tmp" 2>/dev/null || chmod 0600 "$tmp"
+  mv -f "$tmp" "$compose"
+  ( cd "$APP_DIR" && docker compose config -q ) || return 1
+
+  current="$(managed_running_image_digest)"
+  if [[ "$current" == "$NODE_IMAGE_DIGEST" ]]; then
+    ok "Remnanode image уже соответствует release digest: ${NODE_IMAGE_DIGEST:0:19}…"
+    return 0
+  fi
+  docker pull "$NODE_IMAGE" >/dev/null || return 1
+  ( cd "$APP_DIR" && docker compose up -d --no-deps remnanode ) || return 1
+  for i in $(seq 1 30); do
+    after="$(managed_running_image_digest 2>/dev/null || true)"
+    [[ "$after" == "$NODE_IMAGE_DIGEST" ]] && return 0
+    sleep 2
+  done
+  return 1
+}
+
+managed_update_postcheck(){
+  local before_telemt="$1" before_panel="$2" node_port
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode || return 1
+  node_port="$(awk -F= '$1=="NODE_PORT"{print $2; exit}' "$APP_DIR/.env" 2>/dev/null | tr -d '[:space:]')"
+  [[ "$node_port" =~ ^[0-9]+$ ]] || node_port=2222
+  ss -lntup 2>/dev/null | grep -q ":${node_port}[[:space:]]" || return 1
+  if [[ "$before_telemt" == active ]]; then systemctl is-active --quiet telemt.service || return 1; fi
+  if [[ "$before_panel" == active ]]; then systemctl is-active --quiet telemt-panel.service || return 1; fi
+  [[ "$(managed_running_image_digest)" == "$NODE_IMAGE_DIGEST" ]] || return 1
+}
+
+managed_update_is_current(){
+  local release_sha="$1" status
+  status="$(release_status 2>/dev/null || true)"
+  python3 - "$release_sha" "$status" <<'PY'
+import json, sys
+target=sys.argv[1]
+try:
+    d=json.loads(sys.argv[2])
+except Exception:
+    raise SystemExit(1)
+ok=(
+    d.get("schema") == "remnanode.release.v1"
+    and d.get("installed") is True
+    and d.get("release_sha") == target
+    and d.get("identity_ok") is True
+    and d.get("image_ok") is True
+    and d.get("marker_integrity_ok") is True
+)
+raise SystemExit(0 if ok else 1)
+PY
+}
+
+managed_update_prune_backups(){
+  local keep="${MANAGED_UPDATE_KEEP_BACKUPS:-5}"
+  [[ "$keep" =~ ^[0-9]+$ ]] || keep=5
+  (( keep >= 1 )) || keep=5
+  python3 - "$MANAGED_UPDATE_BACKUP_ROOT" "$keep" <<'PY'
+import re, shutil, sys
+from pathlib import Path
+root=Path(sys.argv[1])
+keep=int(sys.argv[2])
+if not root.is_dir():
+    raise SystemExit(0)
+pat=re.compile(r"^\d{8}-\d{6}\.[A-Za-z0-9]+$")
+dirs=[p for p in root.iterdir() if p.is_dir() and pat.fullmatch(p.name)]
+dirs.sort(key=lambda p:p.stat().st_mtime, reverse=True)
+for p in dirs[keep:]:
+    shutil.rmtree(p)
+PY
+}
+
+run_managed_update(){
+  local release_sha backup before_identity backup_identity after_identity before_telemt before_panel before_image lock_fd
+  release_sha="${AINOC_RELEASE_SHA:-}"
+  [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || die 'managed-update требует trusted AINOC_RELEASE_SHA (40 hex).'
+
+  command -v flock >/dev/null 2>&1 || die 'managed-update: flock отсутствует.'
+  install -d -m 0700 "$MANAGED_UPDATE_RUNTIME_DIR"
+  exec {lock_fd}>"$MANAGED_UPDATE_RUNTIME_DIR/remnanode-managed-update.lock"
+  flock -n "$lock_fd" || die 'managed-update: другая операция обновления уже выполняется.'
+
+  if managed_update_is_current "$release_sha"; then
+    ok "AINOC release уже установлен и identity/image verified: ${release_sha:0:12}"
+    flock -u "$lock_fd" || true
+    eval "exec ${lock_fd}>&-"
+    return 0
+  fi
+
+  [[ -s "$APP_DIR/.env" ]] || die 'managed-update: RemnaNode .env отсутствует.'
+  [[ -s "$APP_DIR/.node_domain" ]] || die 'managed-update: node domain marker отсутствует.'
+  [[ -s "$APP_DIR/.transport" ]] || die 'managed-update: transport marker отсутствует.'
+
+  before_identity="$(managed_identity_digest)"
+  before_image="$(managed_running_image_digest)" || die 'managed-update: current Remnanode image cannot be identified safely.'
+  before_telemt="$(systemctl is-active telemt.service 2>/dev/null || true)"
+  before_panel="$(systemctl is-active telemt-panel.service 2>/dev/null || true)"
+  backup="$(managed_update_backup)"
+  backup_identity="$(sha256sum "$backup/identity.before.json" | awk '{print $1}')"
+  [[ "$backup_identity" == "$before_identity" ]] || die 'managed-update: identity changed during preflight/backup; update refused before mutation.'
+  ok "managed-update backup verified: $backup"
+
+  if ! AINOC_INPLACE_UPDATE=1 sync_next_sources; then
+    if ! managed_update_rollback "$backup" "$before_image"; then
+      die 'managed-update: source sync failed AND verified rollback failed.'
+    fi
+    die 'managed-update: source sync failed; verified identity+image rollback applied.'
+  fi
+  if ! managed_patch_node_image; then
+    if ! managed_update_rollback "$backup" "$before_image"; then
+      die 'managed-update: image update failed AND identity+image rollback verification failed.'
+    fi
+    die 'managed-update: image update failed; verified identity+image rollback applied.'
+  fi
+
+  after_identity="$(managed_identity_digest)"
+  if [[ "$after_identity" != "$before_identity" ]]; then
+    if ! managed_update_rollback "$backup" "$before_image"; then
+      die 'managed-update: CONNECTION IDENTITY DRIFT detected; identity+image rollback verification failed.'
+    fi
+    die 'managed-update: CONNECTION IDENTITY DRIFT detected; verified identity+image rollback applied, release marker NOT written.'
+  fi
+  if ! managed_update_postcheck "$before_telemt" "$before_panel"; then
+    if ! managed_update_rollback "$backup" "$before_image"; then
+      die 'managed-update: postcheck failed AND identity+image rollback verification failed.'
+    fi
+    die 'managed-update: postcheck failed; verified identity+image rollback applied.'
+  fi
+
+  write_release_marker "$release_sha" "$after_identity" in-place
+  ok "AINOC in-place release установлен без изменения connection identity: ${release_sha:0:12}"
+  ok "Rollback point: $backup"
+  managed_update_prune_backups || warn 'managed-update: не удалось удалить старые recovery backups.'
+  flock -u "$lock_fd" || true
+  eval "exec ${lock_fd}>&-"
 }
 
 legacy_call(){
@@ -1029,6 +1484,8 @@ main(){
     rkn|protection|security) sync_next_sources; shift; "$PROTECTION" "${1:-menu}" ;;
     telemt|mtproto) sync_next_sources; shift; "$TELEMT" "${1:-status}" ;;
     rebuild-manager|legacy-rebuild) sync_next_sources; shift; "$REBUILD" "${1:-discover}" ;;
+    managed-update) run_managed_update ;;
+    release-status) release_status ;;
     signature) sync_next_sources; shift; "$SIGNATURE" "${1:-apply}" ;;
     runtime) sync_next_sources; shift; "$GUARDS" "$@" ;;
     status) show_status ;;
@@ -1040,7 +1497,7 @@ main(){
     hysteria-diag|hy2-diag) hysteria_diag ;;
     multitest|server-test|tests) sync_next_sources; shift; "$TESTER" "${1:-menu}" ;;
     sync-source) sync_next_sources ;;
-    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|protection|security|telemt|mtproto|rebuild-manager|legacy-rebuild|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|sync-source]' ;;
+    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|protection|security|telemt|mtproto|rebuild-manager|legacy-rebuild|managed-update|release-status|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|sync-source]' ;;
   esac
 }
 
