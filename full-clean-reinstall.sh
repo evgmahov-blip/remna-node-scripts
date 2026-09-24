@@ -7,6 +7,9 @@ REPO="evgmahov-blip/remna-node-scripts"
 SOURCE_REF="721269e2c48e31b7cac86e04bc14c46b33e31e72"
 SOURCE_BLOB_SHA="51a91d5745d0bea9b03eefeeaac52677fcf56b60"
 SOURCE_URL="https://raw.githubusercontent.com/${REPO}/${SOURCE_REF}/vendor/remna-next-source.tar.gz"
+NODE_IMAGE_VERSION="3.4.1"
+NODE_IMAGE_DIGEST="sha256:0cdf386dd49f360fc885bb34bde21132e478e40f0deac62d616086ec0fa9257e"
+NODE_IMAGE="ghcr.io/remnawave/node:${NODE_IMAGE_VERSION}@${NODE_IMAGE_DIGEST}"
 HYSTERIA_OVERLAY_REF="6f02c87c10d1d47fb4abcb234755823d1a1067bf"
 HYSTERIA_OVERLAY_BLOB_SHA="62ff1364c26d88f357968422d5591b3d2b8d9e78"
 HYSTERIA_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${HYSTERIA_OVERLAY_REF}/next-installer/remnawave-transport-manager.sh"
@@ -134,6 +137,17 @@ FILES
 
   tar -xzf "$bundle" -C "$tmp"
   verify_source_file "$tmp/next-installer/setup_node-legacy.sh" "$EXPECTED_SETUP"
+
+  # Keep the immutable source bundle, but replace its mutable Remnawave image tag
+  # only after the original bundle and setup script have passed integrity checks.
+  sed -i "s#ghcr.io/remnawave/node:latest#${NODE_IMAGE}#g" \
+    "$tmp/docker-compose.yml" "$tmp/next-installer/setup_node-legacy.sh"
+  grep -Fq "$NODE_IMAGE" "$tmp/docker-compose.yml" || die 'Pinned Remnawave image missing from docker-compose.yml.'
+  grep -Fq "$NODE_IMAGE" "$tmp/next-installer/setup_node-legacy.sh" || die 'Pinned Remnawave image missing from setup_node-legacy.sh.'
+  ! grep -R -Fq 'ghcr.io/remnawave/node:latest' "$tmp/docker-compose.yml" "$tmp/next-installer/setup_node-legacy.sh" \
+    || die 'Mutable Remnawave node:latest reference remains after pin overlay.'
+  bash -n "$tmp/next-installer/setup_node-legacy.sh" || die 'Pinned setup_node-legacy.sh failed bash -n.'
+
   verify_source_file "$tmp/next-installer/next-runtime-guards.sh" "$EXPECTED_GUARDS"
   verify_source_file "$tmp/next-installer/remnawave-transport-manager.sh" "$EXPECTED_TRANSPORT"
 
