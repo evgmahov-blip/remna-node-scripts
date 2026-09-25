@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "remnanode-next.mutation-envelope.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "manager_name",
+    "transaction_id",
+    "operation_id",
+    "owned_objects",
+    "expected_current",
+    "proposed_next",
+    "fencing_token",
+    "mutation_gate",
+    "security_v2_lock_order",
+    "pure"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "remnanode-next.mutation-envelope.v1"
+    },
+    "fencing_token": {
+      "type": "string",
+      "minLength": 1
+    },
+    "security_v2_lock_order": {
+      "const": [
+        "transaction",
+        "inbound",
+        "transport",
+        "egress"
+      ]
+    },
+    "pure": {
+      "const": true
+    }
+  },
+  "additionalProperties": true
+}
