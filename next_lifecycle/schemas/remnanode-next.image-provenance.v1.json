@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "remnanode-next.image-provenance.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "registry",
+    "repository",
+    "platform",
+    "manifest_digest",
+    "platform_digest",
+    "running_image_id",
+    "running_repo_digest",
+    "trust_policy_version",
+    "trust_policy_hash",
+    "trust_basis",
+    "lkg"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "remnanode-next.image-provenance.v1"
+    },
+    "registry": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "platform": {
+      "type": "object",
+      "required": [
+        "os",
+        "architecture"
+      ]
+    },
+    "lkg": {
+      "type": "object",
+      "required": [
+        "image_id",
+        "platform_digest",
+        "retention_protected"
+      ]
+    }
+  },
+  "additionalProperties": true
+}
