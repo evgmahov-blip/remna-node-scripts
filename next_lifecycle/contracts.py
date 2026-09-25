@@ -235,6 +235,8 @@ def validate_journal(document: Any) -> list[str]:
             expected_sequence += 1
         if record.get("transaction_id") != document.get("transaction_id"):
             errors.append("transaction_id mismatch")
+        if record.get("provenance") != document.get("provenance"):
+            errors.append("provenance mismatch")
         for field in ("operation_id", "step"):
             if not _is_nonempty_string(record.get(field)):
                 errors.append(field)
@@ -327,6 +329,20 @@ def validate_mutation_envelope(envelope: Any) -> list[str]:
     objects = envelope.get("owned_objects")
     if not isinstance(objects, list) or not objects:
         errors.append("owned_objects")
+    else:
+        for owned in objects:
+            if not isinstance(owned, dict):
+                errors.append("owned_objects")
+                continue
+            for field in ("owner", "layer", "object_id"):
+                if not _is_nonempty_string(owned.get(field)):
+                    errors.append(f"owned_objects.{field}")
+            if owned.get("owner") == "security-v2" and owned.get("layer") not in {
+                "inbound",
+                "transport",
+                "egress",
+            }:
+                errors.append("owned_objects.layer")
     gate = envelope.get("mutation_gate")
     if not isinstance(gate, dict):
         errors.append("mutation_gate")
@@ -420,6 +436,8 @@ def aggregate_verify(result: Any, policy: Any) -> dict[str, Any]:
     expected_hash = policy.get("policy_hash")
     if not _is_sha256(expected_hash) or result.get("policy_hash") != expected_hash:
         errors.append("fail-closed: verify_policy_hash_mismatch")
+    if policy.get("policy_version") != result.get("policy_version"):
+        errors.append("fail-closed: verify_policy_version_mismatch")
     required_ids = policy.get("required_check_ids")
     if not isinstance(required_ids, list) or not all(_is_nonempty_string(x) for x in required_ids):
         errors.append("fail-closed: invalid required_check_ids")
@@ -509,6 +527,8 @@ def validate_image_provenance(
             errors.append(f"missing {field}")
     if image.get("trust_basis") in (None, "", "mutable_tag"):
         errors.append("mutable-tag-only trust")
+    if _is_digest(image.get("platform_digest")) and image.get("running_repo_digest") != image.get("platform_digest"):
+        errors.append("running_repo_digest does not match approved platform_digest")
     if not _is_sha256(image.get("trust_policy_hash")):
         errors.append("trust_policy_hash")
     if expected_trust_policy_hash is not None and image.get(
