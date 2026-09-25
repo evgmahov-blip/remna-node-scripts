@@ -45,6 +45,10 @@ jobs:
         shell: bash
         run: bash tests/telemt/run.sh
 
+      - name: CheburNET adoption Phase 1 contract tests
+        shell: bash
+        run: bash tests/cheburnet_adoption/run.sh
+
       - name: Verify recovered NEXT source
         shell: bash
         run: |
