@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "remnanode-next.release-binding.v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "reviewed_candidate_commit",
+    "source_blob_hashes",
+    "artifact_hashes",
+    "runtime_image_platform_digest",
+    "verify_policy_hash",
+    "trust_policy_hash",
+    "review_evidence_ids",
+    "release_approval_id",
+    "activation_authorized"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "remnanode-next.release-binding.v1"
+    },
+    "activation_authorized": {
+      "const": false
+    }
+  },
+  "additionalProperties": true
+}
