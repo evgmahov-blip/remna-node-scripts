@@ -301,6 +301,9 @@ class Phase1Contracts(unittest.TestCase):
     def test_invalid_idempotence_class_rejected(self):
         record = _record(idempotence_class="RETRY")
         self.assertIn("invalid idempotence_class", validate_journal(_journal([record])))
+        journal = _journal()
+        journal["provenance"] = {"candidate_commit": "34" * 20, "release_id": None}
+        self.assertIn("provenance mismatch", validate_journal(journal))
 
     def test_missing_fencing_token_and_wrong_lock_order_rejected(self):
         envelope = _envelope()
@@ -312,6 +315,9 @@ class Phase1Contracts(unittest.TestCase):
         envelope = _envelope()
         envelope["mutation_gate"]["execution"] = "apply"
         self.assertIn("mutation_gate.execution", validate_mutation_envelope(envelope))
+        envelope = _envelope()
+        envelope["owned_objects"][0]["layer"] = "firewall-shadow"
+        self.assertIn("owned_objects.layer", validate_mutation_envelope(envelope))
 
     def test_required_unknown_is_non_success(self):
         result = aggregate_verify(
@@ -402,6 +408,19 @@ class Phase1Contracts(unittest.TestCase):
             _image(), expected_trust_policy_hash=FP2
         )
         self.assertIn("fail-closed: trust_policy_hash_mismatch", image_errors)
+        wrong_runtime = _image()
+        wrong_runtime["running_repo_digest"] = DIGEST
+        self.assertIn(
+            "running_repo_digest does not match approved platform_digest",
+            validate_image_provenance(wrong_runtime),
+        )
+        wrong_version_policy = _policy()
+        wrong_version_policy["policy_version"] = "verify-policy.v2"
+        version_result = aggregate_verify(_verify(), wrong_version_policy)
+        self.assertEqual(version_result["status"], "UNKNOWN")
+        self.assertIn(
+            "fail-closed: verify_policy_version_mismatch", version_result["errors"]
+        )
         binding = policy_binding_result(
             _release(),
             observed_verify_policy_hash="ff" * 32,
