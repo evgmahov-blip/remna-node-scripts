@@ -28,6 +28,10 @@ TELEMT_BLOB_SHA="81dcf46d8cff45a681c0808c2ed309053e6edec6"
 TELEMT_LEGACY_BLOB_SHA="4d75a0ce34ff615fb7006a4e89a2cb619850c9ab"
 REBUILD_BLOB_SHA="f82d074be9cc0b578c7fc12e451ff9e7ec7b650e"
 
+HEALTH_REF="d96fc50a09aa8835e550cef7aff92d77ff92173a"
+HEALTH_BLOB_SHA="5f37f1e1021658851e6f026ddca55b55dbd95c6c"
+HEALTH_URL="https://raw.githubusercontent.com/${REPO}/${HEALTH_REF}/next-installer/node-health.py"
+
 APP_DIR="/opt/remnanode"
 NEXT_DIR="$APP_DIR/next-installer"
 CLI="/usr/local/bin/remnanode-next"
@@ -41,6 +45,7 @@ SIGNATURE="$NEXT_DIR/xhttp-signature-manager.sh"
 V2_CLEANER="$NEXT_DIR/existing-node-v2-cleanup.sh"
 NETWORK="$NEXT_DIR/network-tuning-manager.sh"
 TESTER="$NEXT_DIR/server-multitest.sh"
+HEALTH="$NEXT_DIR/node-health.py"
 PROTECTION="$APP_DIR/protection-manager.sh"
 SECURITY_DIR="$APP_DIR/security"
 TELEMT="$NEXT_DIR/telemt-manager.sh"
@@ -205,6 +210,17 @@ FILES
     die 'Server Multitest содержит небезопасный HTTP URL.'
   fi
 
+  local health
+  health="$tmp/node-health.py"
+  curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 3 \
+    "$HEALTH_URL" -o "$health" || die 'Не удалось скачать node health checker.'
+  [[ "$(git_blob_sha "$health")" == "$HEALTH_BLOB_SHA" ]] || die 'Health checker Git blob SHA mismatch.'
+  python3 - "$health" <<'HEALTH_SYNTAX'
+import ast, sys
+from pathlib import Path
+ast.parse(Path(sys.argv[1]).read_text())
+HEALTH_SYNTAX
+
   local overlay_root
   overlay_root="$tmp/current-overlay"
   mkdir -p "$overlay_root/security" "$overlay_root/next-installer"
@@ -231,6 +247,7 @@ FILES
 
   install -d -m 0700 "$NEXT_DIR" "$SECURITY_DIR" /usr/local/libexec
   install -m 0700 "$tmp/next-installer/"*.sh "$NEXT_DIR/"
+  install -m 0600 "$health" "$HEALTH"
   install -m 0700 "$overlay_root/protection-manager.sh" "$PROTECTION"
   install -m 0700 "$overlay_root/security/remna-security.sh" "$SECURITY_DIR/remna-security.sh"
   install -m 0600 "$overlay_root/security/remna_sec.py" "$SECURITY_DIR/remna_sec.py"
@@ -490,6 +507,59 @@ MENU
   done
 }
 
+health_check(){
+  if (( $# > 1 )) || [[ $# -eq 1 && "$1" != --json ]]; then
+    warn 'Проверка без изменений принимает только --json.'
+    return 1
+  fi
+  [[ -r "$HEALTH" ]] || { warn 'Health checker ещё не установлен: sudo remnanode-next sync-source'; return 1; }
+  python3 "$HEALTH" "$@"
+}
+
+health_boot_enable(){
+  [[ -r "$HEALTH" ]] || { warn 'Health checker отсутствует.'; return 1; }
+  install -d -m 0700 /var/lib/remnanode-next/health || return 1
+  cat > /etc/systemd/system/remnanode-next-health.service <<'UNIT' || return 1
+[Unit]
+Description=Remnanode NEXT local post-reboot health report (no repairs)
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/remnanode/docker-compose.yml
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/remnanode/next-installer/node-health.py --record
+SuccessExitStatus=2 3
+TimeoutStartSec=240
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/remnanode-next/health
+UNIT
+  cat > /etc/systemd/system/remnanode-next-health.timer <<'UNIT' || return 1
+[Unit]
+Description=Check Remnanode NEXT once after boot
+
+[Timer]
+OnBootSec=120s
+Unit=remnanode-next-health.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+  systemctl daemon-reload || return 1
+  systemctl enable --now remnanode-next-health.timer || return 1
+  ok 'Проверка после boot включена: отчёт без автоматического исправления.'
+}
+
+health_boot_disable(){
+  systemctl disable --now remnanode-next-health.timer >/dev/null 2>&1 || true
+  systemctl stop remnanode-next-health.service >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/remnanode-next-health.timer /etc/systemd/system/remnanode-next-health.service
+  systemctl daemon-reload
+}
+
 show_status(){
   sync_next_sources
   echo '================ REMNANODE NEXT STATUS ================'
@@ -665,6 +735,7 @@ backup_current(){
 safe_clean_impl(){
   sync_next_sources
   backup_current
+  health_boot_disable
   "$GUARDS" remove-rkn-watch >/dev/null 2>&1 || true
   "$RKN" uninstall >/dev/null 2>&1 || true
 
@@ -802,6 +873,8 @@ run_install(){
   ensure_default_network || warn 'BBR TUNE не применён автоматически. Проверить: sudo remnanode-next network-status'
   echo '==============================================================='
 
+  health_boot_enable || warn 'Проверка после boot не включена.'
+  health_check || warn 'Проверка готовности требует внимания — см. итог выше.'
   show_status
   offer_current_profile
 }
@@ -932,6 +1005,9 @@ CLI:  sudo remnanode-next
       TEST:   sudo remnanode-next multitest 1..12
  [16] TELEMT / MTProto + Panel (8443 / loopback admin)
  [17] Managed legacy-node rebuild
+ [18] Проверка готовности ноды (без изменений)
+      RUN:    sudo remnanode-next check
+      BOOT:   sudo remnanode-next health-boot-report
 
  [0]  Выход
 ────────────────────────────────────────────────────────────
@@ -955,6 +1031,7 @@ MENU
       15) "$TESTER" menu ;;
       16) telemt_menu ;;
       17) rebuild_menu ;;
+      18) health_check || true; pause ;;
       0|'') return 0 ;;
       *) warn 'Неверный пункт.' ;;
     esac
@@ -981,6 +1058,10 @@ main(){
     signature) sync_next_sources; shift; "$SIGNATURE" "${1:-apply}" ;;
     runtime) sync_next_sources; shift; "$GUARDS" "$@" ;;
     status) show_status ;;
+    check|health) shift; health_check "$@" ;;
+    health-boot-enable) sync_next_sources; health_boot_enable ;;
+    health-boot-disable) health_boot_disable ;;
+    health-boot-report) cat /var/lib/remnanode-next/health/post-reboot.json ;;
     current-profile|copy-profile-now) show_current_copy_profile ;;
     network) sync_next_sources; "$NETWORK" menu ;;
     network-status) sync_next_sources; "$NETWORK" status ;;
@@ -989,7 +1070,7 @@ main(){
     hysteria-diag|hy2-diag) hysteria_diag ;;
     multitest|server-test|tests) sync_next_sources; shift; "$TESTER" "${1:-menu}" ;;
     sync-source) sync_next_sources ;;
-    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|protection|security|telemt|mtproto|rebuild-manager|legacy-rebuild|signature|runtime|status|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|sync-source]' ;;
+    *) die 'Использование: full-clean-reinstall.sh [menu|install|reinstall|migrate-existing|install-v2|legacy-to-next|clean|transport|profiles|hosts|host-xhttp|host-hysteria2|host-raw|current-profile|selfsteal|rkn|protection|security|telemt|mtproto|rebuild-manager|legacy-rebuild|signature|runtime|status|check|health|health-boot-enable|health-boot-disable|health-boot-report|network|network-status|bbr-tune|bbr3|hysteria-diag|multitest|sync-source]' ;;
   esac
 }
 
