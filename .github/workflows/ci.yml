@@ -41,6 +41,16 @@ jobs:
         shell: bash
         run: bash tests/security/run.sh
 
+      - name: Node health offline tests
+        run: python3 -m unittest discover -s tests/health -v
+
+      - name: Health immutable source pin
+        run: |
+          ref=$(sed -n 's/^HEALTH_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)
+          expected=$(sed -n 's/^HEALTH_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)
+          test "$(git rev-parse "$ref:next-installer/node-health.py")" = "$expected"
+          test "$(git rev-parse HEAD:next-installer/node-health.py)" = "$expected"
+
       - name: Telemt integration security tests
         shell: bash
         run: bash tests/telemt/run.sh

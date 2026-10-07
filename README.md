@@ -27,7 +27,7 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/b3779b0bcf9e50d6423478cb29fbc8f57f1c4d2f/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/484e96362f1dba5f34ab555e86475fcfabf5ad16/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -37,7 +37,7 @@ sudo bash /tmp/remna-install.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/93c28cc0489c03beb9c32ea0573bca774be7c652/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/484e96362f1dba5f34ab555e86475fcfabf5ad16/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
@@ -487,3 +487,28 @@ protection-manager.sh
 Последний корректный main до архитектурной ошибки: `cf8c8f5910b1bbd56364b99a457f2b999c743119`.
 
 В `42d7d662c1f11b4705c8bfba3c74839ce98d669a` launcher был ошибочно переключён с NEXT на legacy Caddy-manager. Текущая ветка восстанавливает исходную роль NEXT, но хранит recovered source внутри этого репозитория, чтобы больше не зависеть от исчезнувшего внешнего `setup-remna-node`.
+
+## Проверка готовности и проверка после reboot
+
+```bash
+sudo remnanode-next check
+sudo remnanode-next check --json
+sudo remnanode-next health-boot-report
+```
+
+`check` не скачивает скрипты, не устанавливает пакеты, не меняет настройки и не запускает repair. Проверяет контейнеры, nginx/Unix-сокет, совпадение публичных inbounds активного runtime с выбранным локальным профилем, listener транспорта и API, срок/имя сертификата Hysteria, права env/profile, фактический NOFILE, BBR/qdisc и наличие RKN SAFE правил. Значения ключей и UUID не выводятся, ошибки команд скрыты.
+
+Сравнение inbounds исключает только динамические `clients`, `tag` и `metadataOnly=false`. Добавление/изменение публичных inbounds в панели будет показано как расхождение. API listener не подтверждает mTLS или whitelist панели; наличие socket не подтверждает ответ сайта. Внешний доступ и настоящую VPN-сессию проверяйте отдельно.
+
+Результаты: `PASS` / код 0 — локальные проверки пройдены; `FAIL` / 1 — ошибка; `WAIT` / 2 — ожидается профиль панели; `WARN` / 3 — основные проверки пройдены, есть предупреждения. NOFILE ниже 65536 даёт предупреждение, а не автоматически меняет лимиты. RKN SAFE проверяется по известной цепочке; другой protection backend проверяйте через его собственный status.
+
+Новая установка NEXT автоматически включает собственный systemd timer: один прогон спустя 120 секунд после boot (при включении позже этого срока — сразу). Проверка ничего не исправляет; сохраняет root-only JSON в `/var/lib/remnanode-next/health/post-reboot.json` и вывод в journal. При медленном старте контейнеров отчёт может содержать ошибку — повторите `check` после их запуска. Это разовый отчёт после boot, а не постоянный мониторинг.
+
+Для существующей ноды после обновления менеджера:
+
+```bash
+sudo remnanode-next sync-source
+sudo remnanode-next health-boot-enable
+```
+
+Отключить: `sudo remnanode-next health-boot-disable`. Safe clean отключает и удаляет только эти две systemd units; последний отчёт сохраняется. Обновление GitHub само по себе работающие серверы не меняет.
