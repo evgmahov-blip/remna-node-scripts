@@ -28,3 +28,19 @@ assert all(t['status'] in ('PASS','FAIL','SKIP') for t in p['tests'])
 assert isinstance(p['metrics'],dict)
 print('machine read-only JSON contract OK')
 PY
+
+# Missing mandatory Docker / TCP probes must not return a green PASS.
+for name in docker ss; do
+  cat > "$tmp/$name" <<'EOF'
+#!/usr/bin/env bash
+exit 127
+EOF
+  chmod 700 "$tmp/$name"
+done
+PATH="$tmp:$PATH" bash "$script" machine > "$tmp/unknown.json"
+python3 - "$tmp/unknown.json" <<'PYUNKNOWN'
+import json,sys
+p=json.load(open(sys.argv[1]))
+assert p['overall_status']=='UNKNOWN',p
+print('unknown-on-missing-critical-probes OK')
+PYUNKNOWN
