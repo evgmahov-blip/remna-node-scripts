@@ -914,6 +914,7 @@ usage(){
 Usage:
   server-multitest.sh menu
   server-multitest.sh list
+  server-multitest.sh machine   # bounded read-only JSON, no package installation
   server-multitest.sh all
   server-multitest.sh analyze
   server-multitest.sh report
@@ -921,8 +922,56 @@ Usage:
 EOF
 }
 
+# AINOC machine contract: no writes, package installation or external downloads.
+machine_readonly(){
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' '{"schema":"remnanode.multitest.v1","overall_status":"UNKNOWN","counts":{"pass":0,"fail":0,"skip":1,"total":1},"tests":[{"test":1,"name":"python3 runtime","status":"SKIP","rc":127,"duration_sec":0}],"metrics":{},"issues":[],"conclusions":["Python3 unavailable; no packages installed"],"duration_sec":0}'
+    return 0
+  fi
+  python3 - <<'PYMACHINE'
+import json,os,socket,subprocess,time
+start=time.monotonic(); tests=[]; metrics={}; issues=[]
+def add(name,status,detail='',rc=0):
+ row={'test':len(tests)+1,'name':name,'status':status,'duration_sec':0,'rc':rc}
+ tests.append(row)
+ if status=='FAIL': issues.append({'test':row['test'],'name':name,'status':status,'rc':rc,'reason':detail[:140]})
+def call(argv):
+ try:
+  p=subprocess.run(argv,capture_output=True,text=True,timeout=4,check=False)
+  return (p.returncode,p.stdout.strip(),p.stderr.strip())
+ except (OSError,subprocess.TimeoutExpired):return (127,'','not available')
+rc,out,err=call(['docker','inspect','-f','{{.State.Running}}','remnanode'])
+if rc==0:add('Remnanode container','PASS' if out=='true' else 'FAIL','container not running',int(out!='true'))
+else:add('Remnanode container','SKIP','docker inspect unavailable',rc)
+rc,out,err=call(['ss','-H','-lnt'])
+if rc==0:
+ found=any(line.split() and any(part.endswith(':443') for part in line.split()) for line in out.splitlines())
+ add('TCP 443 listener','PASS' if found else 'FAIL','no TCP/443 listener',int(not found))
+else:add('TCP 443 listener','SKIP','ss unavailable',rc)
+rc,out,err=call(['ss','-H','-lnu'])
+if rc==0:
+ found=any(line.split() and any(part.endswith(':443') for part in line.split()) for line in out.splitlines())
+ add('UDP 443 listener','PASS' if found else 'SKIP','Hysteria2 is optional')
+else:add('UDP 443 listener','SKIP','ss unavailable',rc)
+try:
+ disk=os.statvfs('/')
+ metrics['root_disk_free_gb']=round(disk.f_bavail*disk.f_frsize/1e9,2)
+ add('Root filesystem','PASS' if metrics['root_disk_free_gb']>=1 else 'FAIL','less than 1 GB available',int(metrics['root_disk_free_gb']<1))
+except OSError:add('Root filesystem','SKIP')
+try:metrics['load_1min']=round(os.getloadavg()[0],2)
+except OSError:pass
+metrics['cpu_count']=os.cpu_count()
+counts={key:sum(t['status']==key.upper() for t in tests) for key in ('pass','fail','skip')}
+counts['total']=len(tests)
+critical_ok=(tests[0]['status']=='PASS' and tests[1]['status']=='PASS')
+overall='FAIL' if counts['fail'] else ('PASS' if critical_ok else 'UNKNOWN')
+print(json.dumps({'schema':'remnanode.multitest.v1','host':socket.gethostname(),'overall_status':overall,'counts':counts,'metrics':metrics,'tests':tests,'issues':issues,'conclusions':['Read-only diagnostic only; no throughput or VPN client performance measured'],'duration_sec':round(time.monotonic()-start,2)},ensure_ascii=False,separators=(',',':')))
+PYMACHINE
+}
+
 main(){
   case "${1:-menu}" in
+    machine) machine_readonly ;;
     list) print_list ;;
     -h|--help|help) usage ;;
     menu|'') need_root; menu ;;
