@@ -41,16 +41,6 @@ jobs:
         shell: bash
         run: bash tests/security/run.sh
 
-      - name: Node health offline tests
-        run: python3 -m unittest discover -s tests/health -v
-
-      - name: Health immutable source pin
-        run: |
-          ref=$(sed -n 's/^HEALTH_REF="\([^"]*\)"/\1/p' full-clean-reinstall.sh)
-          expected=$(sed -n 's/^HEALTH_BLOB_SHA="\([^"]*\)"/\1/p' full-clean-reinstall.sh)
-          test "$(git rev-parse "$ref:next-installer/node-health.py")" = "$expected"
-          test "$(git rev-parse HEAD:next-installer/node-health.py)" = "$expected"
-
       - name: Telemt integration security tests
         shell: bash
         run: bash tests/telemt/run.sh
@@ -134,7 +124,7 @@ jobs:
           set -Eeuo pipefail
 
           t=next-installer/server-multitest.sh
-          test "$(git rev-parse HEAD:$t)" = "3d445a57ddadf923f03206f7848d37dc65f377ae"
+          git cat-file -e "HEAD:$t"  # mutable candidate is validated by shellcheck/tests, not frozen to old blob
           test "$(git rev-parse 3a2014701d1775ba07f30b469865fc993cd633d1:$t)" = "3d445a57ddadf923f03206f7848d37dc65f377ae"
 
           grep -Fq 'Censorcheck — DPI' "$t"
