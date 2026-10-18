@@ -963,7 +963,9 @@ except OSError:pass
 metrics['cpu_count']=os.cpu_count()
 counts={key:sum(t['status']==key.upper() for t in tests) for key in ('pass','fail','skip')}
 counts['total']=len(tests)
-print(json.dumps({'schema':'remnanode.multitest.v1','host':socket.gethostname(),'overall_status':'FAIL' if counts['fail'] else ('PASS' if counts['pass'] else 'UNKNOWN'),'counts':counts,'metrics':metrics,'tests':tests,'issues':issues,'conclusions':['Read-only diagnostic only; no throughput or VPN client performance measured'],'duration_sec':round(time.monotonic()-start,2)},ensure_ascii=False,separators=(',',':')))
+critical_ok=(tests[0]['status']=='PASS' and tests[1]['status']=='PASS')
+overall='FAIL' if counts['fail'] else ('PASS' if critical_ok else 'UNKNOWN')
+print(json.dumps({'schema':'remnanode.multitest.v1','host':socket.gethostname(),'overall_status':overall,'counts':counts,'metrics':metrics,'tests':tests,'issues':issues,'conclusions':['Read-only diagnostic only; no throughput or VPN client performance measured'],'duration_sec':round(time.monotonic()-start,2)},ensure_ascii=False,separators=(',',':')))
 PYMACHINE
 }
 
