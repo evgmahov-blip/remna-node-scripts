@@ -41,6 +41,8 @@ SOURCE_META = {
     "tspu": {"class": "pinned", "mode": "plain", "family": "ipv4", "min_absolute": 1, "set": SET_TSPU, "maxelem": 2000000},
     "gov": {"class": "pinned", "mode": "gov", "family": "ipv4", "min_absolute": 1, "set": SET_GOV, "maxelem": 2000000},
     "scanners": {"class": "fast", "mode": "plain", "family": "ipv4", "min_absolute": 1, "set": SET_SCANNERS, "maxelem": 2000000},
+    "antiscanner": {"class": "fast", "mode": "plain", "family": "ipv4", "min_absolute": 1, "set": SET_SCANNERS, "maxelem": 2000000},
+    "skipa": {"class": "fast", "mode": "plain", "family": "ipv4", "min_absolute": 1, "set": SET_SCANNERS, "maxelem": 2000000},
     "geoip": {"class": "pinned", "mode": "plain", "family": "ipv4", "min_absolute": 10, "set": SET_COUNTRY, "maxelem": 3000000},
 }
 
@@ -53,6 +55,7 @@ DEFAULTS = {
     "FILTER_PORTS": "443",
     "GEO_COUNTRIES": "",
     "SCANNER_URL": "https://lists.blocklist.de/lists/all.txt",
+    "ENABLE_EXTRA_SCANNER_FEEDS": "0",
     "BACKEND": "iptables",
     "LOG_DROPS": "0",
 }
@@ -399,9 +402,16 @@ def build_plan(base: Path) -> dict:
     collisions = deny_removed
     for key, (enabled, set_name) in mapping.items():
         entries = read_lines(data_file(base, key if key != "geoip" else "countries"))
+        if key == "scanners" and cfg.get("ENABLE_EXTRA_SCANNER_FEEDS", "0") == "1":
+            # Merge independently validated, last-known-good feeds into the existing
+            # owned scanner set. No additional firewall chain or backend.
+            for source in ("antiscanner", "skipa"):
+                entries.extend(read_lines(data_file(base, source)))
         if key == "geoip":
             entries = read_lines(data_file(base, "countries"))
         v4, _v6 = split_families(entries)
+        if key == "scanners":
+            v4 = sorted(set(v4))
         if key != "geoip":
             v4, removed = subtract(v4, protected)
             collisions += removed
@@ -865,6 +875,8 @@ def source_status(base: Path, cfg: dict) -> dict:
         "gov": one("gov", cfg.get("ENABLE_GOV") == "1", "gov.txt", "pinned"),
         "geoip": one("geoip", cfg.get("ENABLE_GEOIP") == "1", "countries.txt", "pinned"),
         "scanners": one("scanners", cfg.get("ENABLE_SCANNERS") == "1", "scanners.txt", "fast"),
+        "antiscanner": one("antiscanner", cfg.get("ENABLE_SCANNERS") == "1" and cfg.get("ENABLE_EXTRA_SCANNER_FEEDS") == "1", "antiscanner.txt", "fast"),
+        "skipa": one("skipa", cfg.get("ENABLE_SCANNERS") == "1" and cfg.get("ENABLE_EXTRA_SCANNER_FEEDS") == "1", "skipa.txt", "fast"),
     }
 
 
