@@ -9,7 +9,7 @@ PASS=0
 
 export REMNA_SECURITY_SIM=1
 export REMNA_SECURITY_FORBID_LIVE=1
-unset REMNA_SECURITY_SOURCE_TSPU REMNA_SECURITY_SOURCE_GOV REMNA_SECURITY_SOURCE_SCANNERS REMNA_SECURITY_SOURCE_GEO REMNA_SECURITY_CURL_BIN REMNA_SIM_FAIL_SWAP || true
+unset REMNA_SECURITY_SOURCE_TSPU REMNA_SECURITY_SOURCE_GOV REMNA_SECURITY_SOURCE_SCANNERS REMNA_SECURITY_SOURCE_ANTISCANNER REMNA_SECURITY_SOURCE_SKIPA REMNA_SECURITY_SOURCE_GEO REMNA_SECURITY_CURL_BIN REMNA_SIM_FAIL_SWAP || true
 
 fail() { printf 'FAIL %s\n' "$*" >&2; exit 1; }
 ok() { PASS=$((PASS + 1)); printf 'ok %s\n' "$*"; }
@@ -26,6 +26,7 @@ ENABLE_TSPU=1
 ENABLE_GOV=1
 ENABLE_GEOIP=0
 ENABLE_SCANNERS=0
+ENABLE_EXTRA_SCANNER_FEEDS=0
 FILTER_PORTS=443
 GEO_COUNTRIES=
 SCANNER_URL=
@@ -33,7 +34,7 @@ BACKEND=iptables
 LOG_DROPS=0
 EOF
   chmod 0600 "$REMNA_SECURITY_BASE/settings.conf"
-  unset REMNA_SECURITY_SOURCE_TSPU REMNA_SECURITY_SOURCE_GOV REMNA_SECURITY_SOURCE_SCANNERS REMNA_SECURITY_SOURCE_GEO REMNA_SECURITY_CURL_BIN REMNA_SIM_FAIL_SWAP || true
+  unset REMNA_SECURITY_SOURCE_TSPU REMNA_SECURITY_SOURCE_GOV REMNA_SECURITY_SOURCE_SCANNERS REMNA_SECURITY_SOURCE_ANTISCANNER REMNA_SECURITY_SOURCE_SKIPA REMNA_SECURITY_SOURCE_GEO REMNA_SECURITY_CURL_BIN REMNA_SIM_FAIL_SWAP || true
 }
 
 nets() {
@@ -195,6 +196,58 @@ python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["node_api_2222"
 human=$(bash "$CLI" status)
 printf '%s\n' "$human" | grep -q 'TCP/2222' || fail human-status
 ok good-update
+
+echo "optional scanner sources: one set, per-feed LKG, fail-closed"
+begin docker
+SRC=$WORK/src
+write_pair "$SRC" 12
+printf '198.51.100.0/25\n' > "$SRC/scanners.txt"
+printf '192.0.2.0/24\n' > "$SRC/antiscanner.txt"
+printf '198.51.100.128/25\n192.0.2.0/24\n' > "$SRC/skipa.txt"
+sed -i 's/^ENABLE_SCANNERS=0$/ENABLE_SCANNERS=1/' "$REMNA_SECURITY_BASE/settings.conf"
+sed -i 's/^ENABLE_EXTRA_SCANNER_FEEDS=0$/ENABLE_EXTRA_SCANNER_FEEDS=1/' "$REMNA_SECURITY_BASE/settings.conf"
+export REMNA_SECURITY_SOURCE_SCANNERS=file://$SRC/scanners.txt
+export REMNA_SECURITY_SOURCE_ANTISCANNER=file://$SRC/antiscanner.txt
+export REMNA_SECURITY_SOURCE_SKIPA=file://$SRC/skipa.txt
+doc=$(bash "$CLI" update --json)
+DOC=$doc python3 - <<'PY'
+import json, os
+d=json.loads(os.environ["DOC"])
+assert d["ok"], d
+assert {x["id"] for x in d["sources"]} >= {"tspu", "gov", "scanners", "antiscanner", "skipa"}
+PY
+python3 - <<PY
+import json
+base="$REMNA_SECURITY_BASE"
+state=json.load(open(base+"/sim/state.json"))
+sets=state["sets"]
+assert "REMNA_SCANNERS" in sets, sets.keys()
+actual=json.dumps(sets["REMNA_SCANNERS"])
+for subnet in ("198.51.100.0/25", "198.51.100.128/25", "192.0.2.0/24"):
+    assert subnet in actual, (subnet, actual)
+rules="\\n".join(state["chains"]["REMNA_GUARD"])
+assert "REMNA_SCANNERS" in rules
+assert "-p udp" not in rules
+assert "REMNA_RKN_SCANNERS" not in rules
+PY
+cp "$REMNA_SECURITY_BASE/data/antiscanner.txt" "$WORK/antiscanner.good"
+printf '0.0.0.0/0\n' > "$SRC/antiscanner.txt"
+set +e
+bash "$CLI" update --json > "$WORK/extra-failure.json"
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "invalid optional feed should fail"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert any(x["id"]=="antiscanner" and x["error"]=="broad" and x["kept_lkg"] for x in d["sources"]),d' "$WORK/extra-failure.json"
+cmp -s "$WORK/antiscanner.good" "$REMNA_SECURITY_BASE/data/antiscanner.txt" || fail "extra feed LKG replaced"
+bash "$CLI" config-set ENABLE_EXTRA_SCANNER_FEEDS 0 >/dev/null
+status=$(bash "$CLI" status --json)
+STATUS=$status python3 - <<'PY'
+import json, os
+d=json.loads(os.environ["STATUS"])
+assert not d["sources"]["antiscanner"]["enabled"]
+assert not d["sources"]["skipa"]["enabled"]
+PY
+ok optional-scanners
 
 echo "download, html, empty, integrity keep lkg"
 begin docker
