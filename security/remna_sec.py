@@ -1153,10 +1153,10 @@ LogRateLimitIntervalSec=30s
 LogRateLimitBurst=20
 """
     timer = """[Unit]
-Description=Weekly RemnaNode Security pinned-feed check
+Description=Daily RemnaNode Security validated-feed refresh
 
 [Timer]
-OnCalendar=Sun *-*-* 03:00:00
+OnCalendar=*-*-* 03:00:00
 Persistent=true
 RandomizedDelaySec=15m
 Unit=remna-protection-update.service
