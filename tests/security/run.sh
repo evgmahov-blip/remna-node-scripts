@@ -449,7 +449,7 @@ assert "-F INPUT" not in text
 assert "nft flush ruleset" not in text
 PY
 grep -q 'LogRateLimitIntervalSec=30s' "$REMNA_SECURITY_BASE/sim/units/remna-protection.service"
-grep -q 'OnCalendar=Sun' "$REMNA_SECURITY_BASE/sim/units/remna-protection-update.timer"
+grep -Fq 'OnCalendar=*-*-* 03:00:00' "$REMNA_SECURITY_BASE/sim/units/remna-protection-update.timer"
 grep -q 'copytruncate' "$REMNA_SECURITY_BASE/sim/logrotate.conf"
 grep -q 'protection-manager.sh' "$REMNA_SECURITY_BASE/sim/units/remna-protection.service"
 ok lifecycle
