@@ -77,10 +77,10 @@ remna-protection-update.service
 remna-protection-update.timer
 ```
 
-Timer повторно проверяет и загружает **закреплённые** snapshots раз в неделю:
+Timer ежедневно проверяет и загружает **закреплённые** snapshots, а также включённые fast-feed источники:
 
 ```text
-OnCalendar=Sun *-*-* 03:00:00
+OnCalendar=*-*-* 03:00:00
 Persistent=true
 RandomizedDelaySec=15m
 ```
