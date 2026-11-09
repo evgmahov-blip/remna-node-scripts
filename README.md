@@ -27,7 +27,7 @@ NEXT восстановлен из source snapshot реально работаю
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/484e96362f1dba5f34ab555e86475fcfabf5ad16/install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/7cd40779d9a1ca994eafd6b8cff450a3be34b975/install.sh \
   -o /tmp/remna-install.sh
 
 sudo bash /tmp/remna-install.sh
@@ -37,7 +37,7 @@ sudo bash /tmp/remna-install.sh
 
 ```bash
 curl -fsSL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/484e96362f1dba5f34ab555e86475fcfabf5ad16/clean-install.sh \
+  https://raw.githubusercontent.com/evgmahov-blip/remna-node-scripts/7cd40779d9a1ca994eafd6b8cff450a3be34b975/clean-install.sh \
   -o /tmp/remna-clean-install.sh
 
 sudo bash /tmp/remna-clean-install.sh
