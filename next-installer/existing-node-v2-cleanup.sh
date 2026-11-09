@@ -184,15 +184,19 @@ remove_legacy_firewall(){
   ok 'Remna/RKN firewall chains/ipsets удалены адресно; global UFW reset НЕ выполнялся.'
 }
 
-remove_node_runtime(){
+stop_node_runtime(){
   if command -v docker >/dev/null 2>&1; then
     if [[ -f "$APP_DIR/docker-compose.yml" ]]; then
       ( cd "$APP_DIR" && docker compose down --remove-orphans ) >/dev/null 2>&1 || true
     fi
     docker rm -f remnanode remnawave-nginx >/dev/null 2>&1 || true
   fi
+  ok 'Старый Remnanode runtime остановлен до снятия защиты TCP/2222.'
+}
+
+remove_node_runtime_files(){
   rm -rf "$APP_DIR"
-  ok 'Старый Remnanode/NEXT runtime удалён; Docker как пакет и чужие контейнеры не тронуты.'
+  ok 'Старые Remnanode/NEXT файлы удалены; Docker как пакет и чужие контейнеры не тронуты.'
 }
 
 remove_legacy_front(){
@@ -292,8 +296,9 @@ main(){
   confirm_cleanup
   make_backup
   remove_legacy_units
+  stop_node_runtime
   remove_legacy_firewall
-  remove_node_runtime
+  remove_node_runtime_files
   remove_legacy_hysteria
   remove_legacy_front
   remove_stale_files

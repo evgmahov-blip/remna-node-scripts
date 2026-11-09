@@ -10,8 +10,8 @@ SOURCE_URL="https://raw.githubusercontent.com/${REPO}/${SOURCE_REF}/vendor/remna
 HYSTERIA_OVERLAY_REF="6f02c87c10d1d47fb4abcb234755823d1a1067bf"
 HYSTERIA_OVERLAY_BLOB_SHA="62ff1364c26d88f357968422d5591b3d2b8d9e78"
 HYSTERIA_OVERLAY_URL="https://raw.githubusercontent.com/${REPO}/${HYSTERIA_OVERLAY_REF}/next-installer/remnawave-transport-manager.sh"
-V2_CLEANUP_REF="551a80ca1802d3087c53edf12652f104cd1c721d"
-V2_CLEANUP_BLOB_SHA="755e94a26fa7cc835e65ce415c9d87f07a7fa86e"
+V2_CLEANUP_REF="cc375ea8182c76929d9fc1046217ee769a5152d9"
+V2_CLEANUP_BLOB_SHA="e4aa53eb348d907b72e6e847a384fabea3399cfb"
 V2_CLEANUP_URL="https://raw.githubusercontent.com/${REPO}/${V2_CLEANUP_REF}/next-installer/existing-node-v2-cleanup.sh"
 NETWORK_REF="8378a6b4340fc0b11b3f66246caaa39d3ee360b9"
 NETWORK_BLOB_SHA="a5157e7c48f3e2a1c4df4676ecd4a51511d15949"
@@ -868,8 +868,14 @@ run_install(){
 
   echo
   echo '================ DEFAULT PROTECTION / NETWORK ================='
-  ensure_default_rkn || warn 'RKN SAFE scanner guard не удалось установить автоматически. Доступно вручную: sudo remnanode-next rkn'
-  "$GUARDS" sync-rkn-watch >/dev/null 2>&1 || warn 'RKN self-heal watcher требует внимания.'
+  local panel_ip=""
+  [[ -r "$APP_DIR/.panel_ip" ]] && panel_ip="$(tr -d '[:space:]' < "$APP_DIR/.panel_ip")"
+  if [[ -n "$panel_ip" ]]; then
+    PANEL_IP_ENV="$panel_ip" "$PROTECTION" install || die 'Current semi-paranoid protection install failed.'
+  else
+    die 'PANEL_IP missing after base install; refusing to leave TCP/2222 without current protection.'
+  fi
+  "$GUARDS" sync-rkn-watch >/dev/null 2>&1 || warn 'Legacy RKN self-heal watcher требует внимания.'
   ensure_default_network || warn 'BBR TUNE не применён автоматически. Проверить: sudo remnanode-next network-status'
   echo '==============================================================='
 
