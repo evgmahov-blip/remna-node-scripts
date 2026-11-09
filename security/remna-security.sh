@@ -29,6 +29,10 @@ GOV_BLOB_SHA=2b179cc00d7e805e1c49e975e18229ec811c82af
 GOV_URL="https://raw.githubusercontent.com/C24Be/AS_Network_List/${GOV_COMMIT}/blacklists_iptables/blacklist-v4.ipset"
 GEOIP_COMMIT=6e3f7978b0391935e306060b11beba774fc7f624
 GEOIP_BASE="https://raw.githubusercontent.com/ipverse/country-ip-blocks/${GEOIP_COMMIT}/country"
+# Optional mutable feeds, intentionally disabled on existing and new nodes.
+# Each feed gets independent validation, LKG storage and error reporting.
+ANTISCANNER_URL="https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/antiscanner.list"
+SKIPA_URL="https://raw.githubusercontent.com/shadow-netlab/traffic-guard-lists/refs/heads/main/public/skipa.list"
 
 say() { printf '%s\n' "$*"; }
 ok() { printf '✓ %s\n' "$*"; }
@@ -74,6 +78,7 @@ ENABLE_SCANNERS=1
 FILTER_PORTS=443
 GEO_COUNTRIES=
 SCANNER_URL=https://lists.blocklist.de/lists/all.txt
+ENABLE_EXTRA_SCANNER_FEEDS=0
 BACKEND=iptables
 LOG_DROPS=0
 EOF
@@ -87,12 +92,13 @@ EOF
     ensure_key FILTER_PORTS 443
     ensure_key GEO_COUNTRIES ""
     ensure_key SCANNER_URL "https://lists.blocklist.de/lists/all.txt"
+    ensure_key ENABLE_EXTRA_SCANNER_FEEDS 0
     ensure_key BACKEND iptables
     ensure_key LOG_DROPS 0
     chmod 0600 "$CONF" || true
   fi
   local f
-  for f in allow.txt deny.txt countries.txt tspu.txt gov.txt scanners.txt; do
+  for f in allow.txt deny.txt countries.txt tspu.txt gov.txt scanners.txt antiscanner.txt skipa.txt; do
     touch "$DATA/$f"
     chmod 0600 "$DATA/$f" || true
   done
@@ -108,13 +114,14 @@ load_conf() {
   FILTER_PORTS=443
   GEO_COUNTRIES=""
   SCANNER_URL=""
+  ENABLE_EXTRA_SCANNER_FEEDS=0
   BACKEND=iptables
   LOG_DROPS=0
   local line key
   while IFS= read -r line || [ -n "$line" ]; do
     key=${line%%=*}
     case "$key" in
-      PANEL_IP|ENABLE_TSPU|ENABLE_GOV|ENABLE_GEOIP|ENABLE_SCANNERS|FILTER_PORTS|GEO_COUNTRIES|SCANNER_URL|BACKEND|LOG_DROPS)
+      PANEL_IP|ENABLE_TSPU|ENABLE_GOV|ENABLE_GEOIP|ENABLE_SCANNERS|FILTER_PORTS|GEO_COUNTRIES|SCANNER_URL|ENABLE_EXTRA_SCANNER_FEEDS|BACKEND|LOG_DROPS)
         printf -v "$key" '%s' "${line#*=}"
         ;;
     esac
@@ -134,7 +141,7 @@ set_conf() {
   local key=$1 value=$2 tmp
   case "$key" in
     PANEL_IP) [ -z "$value" ] || valid_ip "$value" || die "Некорректный PANEL_IP" ;;
-    ENABLE_TSPU|ENABLE_GOV|ENABLE_GEOIP|ENABLE_SCANNERS|LOG_DROPS) [[ "$value" =~ ^[01]$ ]] || die "Для $key допустимы только 0 или 1" ;;
+    ENABLE_TSPU|ENABLE_GOV|ENABLE_GEOIP|ENABLE_SCANNERS|ENABLE_EXTRA_SCANNER_FEEDS|LOG_DROPS) [[ "$value" =~ ^[01]$ ]] || die "Для $key допустимы только 0 или 1" ;;
     FILTER_PORTS) valid_ports "$value" || die "Некорректный список портов" ;;
     GEO_COUNTRIES) [[ "$value" =~ ^([A-Za-z]{2})(,[A-Za-z]{2})*$|^$ ]] || die "GEO_COUNTRIES: ожидается список ISO-кодов" ;;
     BACKEND) [[ "$value" =~ ^(iptables|nftables)$ ]] || die "BACKEND: iptables или nftables" ;;
@@ -225,7 +232,7 @@ fetch_url() {
       if [ -n "${REMNA_SECURITY_CURL_BIN:-}" ]; then
         "$REMNA_SECURITY_CURL_BIN" "$url" "$dst"
       else
-        command curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 2 "$url" -o "$dst"
+        command curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --retry 2 --max-filesize 16777216 "$url" -o "$dst"
       fi
       ;;
     *)
@@ -267,7 +274,13 @@ update_source() {
     rm -f "$raw"
     return 1
   fi
-  if python3 -c 'import pathlib,sys; data=pathlib.Path(sys.argv[1]).read_bytes()[:1024].lower(); sys.exit(0 if any(m in data for m in (b"<!doctype", b"<html", b"<head", b"<body")) else 1)' "$raw"; then
+  if [ "$(stat -c %s "$raw")" -gt 16777216 ]; then
+    fail_result "$id" oversized
+    rm -f "$raw"
+    return 1
+  fi
+  # Share the core marker list, including <title, before integrity reporting.
+  if python3 -c 'import pathlib,runpy,sys; core=runpy.run_path(sys.argv[1]); data=pathlib.Path(sys.argv[2]).open("rb").read(1024); sys.exit(0 if core["looks_html"](data) else 1)' "$PY" "$raw"; then
     fail_result "$id" html
     rm -f "$raw"
     return 1
@@ -318,6 +331,9 @@ update_geo() {
 update_blocklists() {
   load_conf
   valid_ip "$PANEL_IP" || die "PANEL_IP не задан/некорректен. Сначала: panel-set <IP>."
+  valid_ports "$FILTER_PORTS" || die "Некорректный FILTER_PORTS"
+  # A killed updater must never leave a candidate for a later failed download.
+  py discard-staging --base "$BASE"
   snapshot_before
   RESULTS=$(mktemp)
   printf '[]' > "$RESULTS"
@@ -333,6 +349,10 @@ update_blocklists() {
       fail_result scanners empty
       failed=1
     fi
+  fi
+  if [ "$ENABLE_SCANNERS" = 1 ] && [ "$ENABLE_EXTRA_SCANNER_FEEDS" = 1 ]; then
+    update_source antiscanner "${REMNA_SECURITY_SOURCE_ANTISCANNER:-$ANTISCANNER_URL}" "" || failed=1
+    update_source skipa "${REMNA_SECURITY_SOURCE_SKIPA:-$SKIPA_URL}" "" || failed=1
   fi
   if [ "$ENABLE_GEOIP" = 1 ]; then
     local geo out rc=0
@@ -476,6 +496,8 @@ print("Ports        : %s" % ports)
 print("TSPU         : %s (%s entries, pinned, ipv4)" % (src["tspu"]["enabled"], src["tspu"]["entries"]))
 print("GOV          : %s (%s entries, pinned, ipv4)" % (src["gov"]["enabled"], src["gov"]["entries"]))
 print("Scanners     : %s (%s entries, fast, ipv4)" % (src["scanners"]["enabled"], src["scanners"]["entries"]))
+print("Antiscanner  : %s (%s entries, fast, ipv4)" % (src["antiscanner"]["enabled"], src["antiscanner"]["entries"]))
+print("Skipa        : %s (%s entries, fast, ipv4)" % (src["skipa"]["enabled"], src["skipa"]["entries"]))
 print("GeoIP        : %s (%s entries)" % (src["geoip"]["enabled"], src["geoip"]["entries"]))
 print("IPv6 lists   : dynamic=false")
 print("Ruleset      : %s" % d["ruleset_health"])
@@ -589,7 +611,7 @@ migrate_inplace() {
   write_defaults
   mkdir -p "$DATA/lkg"
   local f
-  for f in allow.txt deny.txt countries.txt tspu.txt gov.txt scanners.txt; do
+  for f in allow.txt deny.txt countries.txt tspu.txt gov.txt scanners.txt antiscanner.txt skipa.txt; do
     if [ -s "$DATA/$f" ] && [ ! -s "$DATA/lkg/$f" ]; then
       cp "$DATA/$f" "$DATA/lkg/$f"
       chmod 0600 "$DATA/lkg/$f"

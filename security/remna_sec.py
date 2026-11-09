@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -41,6 +42,8 @@ SOURCE_META = {
     "tspu": {"class": "pinned", "mode": "plain", "family": "ipv4", "min_absolute": 1, "set": SET_TSPU, "maxelem": 2000000},
     "gov": {"class": "pinned", "mode": "gov", "family": "ipv4", "min_absolute": 1, "set": SET_GOV, "maxelem": 2000000},
     "scanners": {"class": "fast", "mode": "plain", "family": "ipv4", "min_absolute": 1, "set": SET_SCANNERS, "maxelem": 2000000},
+    "antiscanner": {"class": "fast", "mode": "plain", "family": "ipv4", "min_absolute": 1, "set": SET_SCANNERS, "maxelem": 2000000},
+    "skipa": {"class": "fast", "mode": "plain", "family": "ipv4", "min_absolute": 1, "set": SET_SCANNERS, "maxelem": 2000000},
     "geoip": {"class": "pinned", "mode": "plain", "family": "ipv4", "min_absolute": 10, "set": SET_COUNTRY, "maxelem": 3000000},
 }
 
@@ -53,6 +56,7 @@ DEFAULTS = {
     "FILTER_PORTS": "443",
     "GEO_COUNTRIES": "",
     "SCANNER_URL": "https://lists.blocklist.de/lists/all.txt",
+    "ENABLE_EXTRA_SCANNER_FEEDS": "0",
     "BACKEND": "iptables",
     "LOG_DROPS": "0",
 }
@@ -127,10 +131,17 @@ def validate_feed(raw: bytes, mode: str, family: str, previous: list[str], panel
         "ignored_family": 0,
         "entries": [],
     }
+    if len(raw) > 16777216:
+        report["reason"] = "oversized"
+        return report
     if looks_html(raw):
         report["reason"] = "html"
         return report
-    text = raw.decode("utf-8", errors="replace")
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        report["reason"] = "malformed"
+        return report
     parsed = []
     malformed = 0
     for raw_line in text.splitlines():
@@ -257,10 +268,37 @@ def load_state(base: Path) -> dict:
     return state
 
 
+def atomic_write_text(path: Path, text: str) -> None:
+    """Publish a complete private file, preserving the old file until replace.
+
+    The temporary file lives on the destination filesystem. Sync both its
+    contents and the rename so a crash cannot expose a partially written file.
+    An error after replace may leave the complete new file already visible.
+    """
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                         dir=path.parent, prefix=f".{path.name}.",
+                                         delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def save_state(base: Path, state: dict) -> None:
     path = state_path(base)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(state, indent=2, sort_keys=True) + "\n")
 
 
 def seed_state(base: Path, profile: str) -> None:
@@ -399,9 +437,16 @@ def build_plan(base: Path) -> dict:
     collisions = deny_removed
     for key, (enabled, set_name) in mapping.items():
         entries = read_lines(data_file(base, key if key != "geoip" else "countries"))
+        if key == "scanners" and cfg.get("ENABLE_EXTRA_SCANNER_FEEDS", "0") == "1":
+            # Merge independently validated, last-known-good feeds into the existing
+            # owned scanner set. No additional firewall chain or backend.
+            for source in ("antiscanner", "skipa"):
+                entries.extend(read_lines(data_file(base, source)))
         if key == "geoip":
             entries = read_lines(data_file(base, "countries"))
         v4, _v6 = split_families(entries)
+        if key == "scanners":
+            v4 = sorted(set(v4))
         if key != "geoip":
             v4, removed = subtract(v4, protected)
             collisions += removed
@@ -411,7 +456,9 @@ def build_plan(base: Path) -> dict:
     deny_v4, deny_v6 = split_families(deny)
     sets[SET_ALLOW] = {"entries": allow_v4, "maxelem": 65536, "enabled": True, "entries_effective": allow_v4}
     sets[SET_DENY] = {"entries": deny_v4, "maxelem": 65536, "enabled": True, "entries_effective": deny_v4}
-    ports = ports_of(cfg) if valid_ports(cfg) else []
+    if not valid_ports(cfg):
+        raise ValueError("FILTER_PORTS must contain 1..15 valid TCP ports")
+    ports = ports_of(cfg)
     port_csv = ",".join(str(p) for p in ports)
     panel = cfg.get("PANEL_IP", "")
     pver = panel_version(cfg)
@@ -659,38 +706,60 @@ def execute_live(plan: dict, state_hint: dict) -> None:
         reason = nft_activation_block(state_hint, False)
         if reason:
             raise RuntimeError(reason)
-    cmds = build_commands(plan, retire_nft=True, retire_iptables=plan["backend"] == "nftables")
-    restore = plan.get("ipset_restore", "")
-    for cmd in cmds:
-        if cmd[:2] == ["ipset", "restore"]:
-            subprocess.run(cmd, input=restore.encode(), check=True)
-            continue
-        if cmd[:2] == ["nft", "-f"]:
-            subprocess.run(cmd, input=plan.get("nft_payload", "").encode(), check=True)
-            continue
-        if cmd[:3] == ["iptables", "-N", CHAIN] or cmd[:3] == ["ip6tables", "-N", CHAIN6]:
-            subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            continue
-        if cmd[:3] in (["iptables", "-D", "INPUT"], ["ip6tables", "-D", "INPUT"]) or cmd[:2] == ["ipset", "destroy"] or cmd[:3] == ["nft", "delete", "table"]:
-            subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            continue
-        subprocess.run(cmd, check=True)
-    if plan["backend"] == "iptables":
-        while subprocess.run(["iptables", "-C", "INPUT", "-j", CHAIN], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-            subprocess.run(["iptables", "-D", "INPUT", "-j", CHAIN], check=True)
-        subprocess.run(["iptables", "-I", "INPUT", "1", "-j", CHAIN], check=True)
-        while subprocess.run(["ip6tables", "-C", "INPUT", "-j", CHAIN6], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-            subprocess.run(["ip6tables", "-D", "INPUT", "-j", CHAIN6], check=False)
-        subprocess.run(["ip6tables", "-I", "INPUT", "1", "-j", CHAIN6], check=True)
-        if ufw_active_live() and plan["panel_version"] == 4 and plan["panel_ip"]:
-            status = subprocess.run(["ufw", "status"], text=True, capture_output=True)
-            for line in (status.stdout or "").splitlines():
-                if line.startswith("2222/tcp") and "Anywhere" in line:
-                    subprocess.run(["ufw", "--force", "delete", "allow", "2222/tcp"], check=False)
-            subprocess.run(
-                ["ufw", "allow", "from", plan["panel_ip"], "to", "any", "port", "2222", "proto", "tcp", "comment", "Remnawave panel only"],
-                check=False,
-            )
+        cmds = build_commands(plan, retire_nft=True, retire_iptables=True)
+        for cmd in cmds:
+            if cmd[:2] == ["nft", "-f"]:
+                subprocess.run(cmd, input=plan.get("nft_payload", "").encode(), check=True)
+            elif cmd[:3] in (["iptables", "-D", "INPUT"], ["ip6tables", "-D", "INPUT"]) or cmd[:2] == ["ipset", "destroy"]:
+                subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.run(cmd, check=True)
+        return
+
+    # ipset updates are already atomic via TMP -> swap.
+    build_commands(plan, retire_nft=False, retire_iptables=False)
+    subprocess.run(["ipset", "restore"], input=plan.get("ipset_restore", "").encode(), check=True)
+
+    def stage_chain(binary: str, chain: str, rules: list[str]) -> None:
+        # Build a complete new chain before touching the currently active one.
+        # If rebuilding the canonical chain later fails, the staging hook remains
+        # active and keeps the node protected instead of exposing TCP/2222.
+        stage = f"{chain}_STG_{os.getpid()}"
+        subprocess.run([binary, "-N", stage], check=True)
+        try:
+            for rule in rules:
+                parts = rule.split()
+                if len(parts) >= 2 and parts[0] == "-A" and parts[1] == chain:
+                    parts[1] = stage
+                subprocess.run([binary, *parts], check=True)
+
+            subprocess.run([binary, "-I", "INPUT", "1", "-j", stage], check=True)
+
+            # The fully populated staging chain now protects traffic. Only now
+            # replace the canonical chain.
+            while subprocess.run([binary, "-C", "INPUT", "-j", chain], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                subprocess.run([binary, "-D", "INPUT", "-j", chain], check=True)
+            subprocess.run([binary, "-N", chain], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run([binary, "-F", chain], check=True)
+            for rule in rules:
+                subprocess.run([binary, *rule.split()], check=True)
+            subprocess.run([binary, "-I", "INPUT", "1", "-j", chain], check=True)
+
+            # Canonical chain is active; retire this staging generation.
+            while subprocess.run([binary, "-C", "INPUT", "-j", stage], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                subprocess.run([binary, "-D", "INPUT", "-j", stage], check=True)
+            subprocess.run([binary, "-F", stage], check=True)
+            subprocess.run([binary, "-X", stage], check=True)
+        except Exception:
+            # Never flush/delete a staging chain that may already be hooked; it
+            # is the fail-closed protection if canonical reconstruction failed.
+            raise
+
+    stage_chain("iptables", CHAIN, plan["ipv4_rules"])
+    stage_chain("ip6tables", CHAIN6, plan["ipv6_rules"])
+
+    # Retire old nft owned table only after iptables protection is live.
+    subprocess.run(["nft", "delete", "table", NFT_FAMILY, NFT_TABLE], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def promote_staging(base: Path) -> None:
@@ -703,10 +772,10 @@ def promote_staging(base: Path) -> None:
     lkg.mkdir(parents=True, exist_ok=True)
     for path in staging.glob("*.txt"):
         target = data / path.name
-        target.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-        os.chmod(target, 0o600)
-        (lkg / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-        os.chmod(lkg / path.name, 0o600)
+        contents = path.read_text(encoding="utf-8")
+        atomic_write_text(target, contents)
+        # Keep the previous LKG until publishing the live file has succeeded.
+        atomic_write_text(lkg / path.name, contents)
     for path in list(staging.glob("*")):
         path.unlink()
 
@@ -740,7 +809,7 @@ def write_stats(base: Path, plan: dict, collisions: int) -> None:
         "ipv6_dynamic_lists": False,
         "last_apply_unix": int(time.time()),
     }
-    path.write_text(json.dumps(stats, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(stats, indent=2, sort_keys=True) + "\n")
 
 
 def ruleset_health(base: Path, plan: dict | None = None) -> str:
@@ -865,6 +934,8 @@ def source_status(base: Path, cfg: dict) -> dict:
         "gov": one("gov", cfg.get("ENABLE_GOV") == "1", "gov.txt", "pinned"),
         "geoip": one("geoip", cfg.get("ENABLE_GEOIP") == "1", "countries.txt", "pinned"),
         "scanners": one("scanners", cfg.get("ENABLE_SCANNERS") == "1", "scanners.txt", "fast"),
+        "antiscanner": one("antiscanner", cfg.get("ENABLE_SCANNERS") == "1" and cfg.get("ENABLE_EXTRA_SCANNER_FEEDS") == "1", "antiscanner.txt", "fast"),
+        "skipa": one("skipa", cfg.get("ENABLE_SCANNERS") == "1" and cfg.get("ENABLE_EXTRA_SCANNER_FEEDS") == "1", "skipa.txt", "fast"),
     }
 
 
@@ -1020,7 +1091,7 @@ def add_event(base: Path, kind: str, message: str) -> None:
         if last.get("kind") == kind and last.get("message") == message and now - int(last.get("unix", 0)) < 60:
             return
     events.append({"unix": now, "kind": kind, "message": message})
-    path.write_text(json.dumps(events[-20:], indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(events[-20:], indent=2) + "\n")
 
 
 def accept_source(base: Path, source_id: str, raw_path: Path) -> dict:
@@ -1030,7 +1101,12 @@ def accept_source(base: Path, source_id: str, raw_path: Path) -> dict:
     previous = read_lines(base / "data" / previous_name)
     lkg = read_lines(base / "data" / "lkg" / previous_name)
     baseline = lkg or previous
-    raw = raw_path.read_bytes()
+    # A rejected candidate must not reuse a previous staging file, including
+    # when this function is called independently of the shell updater.
+    candidate_name = "countries.txt" if source_id == "geoip" else f"{source_id}.txt"
+    (base / "staging" / candidate_name).unlink(missing_ok=True)
+    with raw_path.open("rb") as stream:
+        raw = stream.read(16777217)
     report = validate_feed(
         raw,
         meta["mode"],
@@ -1044,11 +1120,11 @@ def accept_source(base: Path, source_id: str, raw_path: Path) -> dict:
     report["kept_lkg"] = not report["ok"]
     staging = base / "staging"
     staging.mkdir(parents=True, exist_ok=True)
-    (staging / f"{source_id}.report.json").write_text(json.dumps({k: v for k, v in report.items() if k != "entries"}, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(staging / f"{source_id}.report.json", json.dumps({k: v for k, v in report.items() if k != "entries"}, indent=2) + "\n")
     if report["ok"]:
         name = "countries.txt" if source_id == "geoip" else f"{source_id}.txt"
         target = staging / name
-        target.write_text("".join(f"{e}\n" for e in report["entries"]), encoding="utf-8")
+        atomic_write_text(target, "".join(f"{e}\n" for e in report["entries"]))
         os.chmod(target, 0o600)
     else:
         add_event(base, "source_error", f"{source_id}:{report['reason']}")
@@ -1078,7 +1154,7 @@ def finalize_update(base: Path, results: list[dict]) -> dict:
     }
     path = base / "data" / "last-update.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(doc, indent=2) + "\n")
     return doc
 
 
@@ -1109,8 +1185,7 @@ def update_list_file(base: Path, filename: str, value: str, remove: bool) -> Non
     else:
         if canon not in current:
             current.append(canon)
-    path.write_text("".join(f"{item}\n" for item in sorted(current)) + ("" if current else ""), encoding="utf-8")
-    os.chmod(path, 0o600)
+    atomic_write_text(path, "".join(f"{item}\n" for item in sorted(current)))
 
 
 def unit_texts(entrypoint: str) -> dict[str, str]:
@@ -1141,10 +1216,10 @@ LogRateLimitIntervalSec=30s
 LogRateLimitBurst=20
 """
     timer = """[Unit]
-Description=Weekly RemnaNode Security pinned-feed check
+Description=Daily RemnaNode Security validated-feed refresh
 
 [Timer]
-OnCalendar=Sun *-*-* 03:00:00
+OnCalendar=*-*-* 03:00:00
 Persistent=true
 RandomizedDelaySec=15m
 Unit=remna-protection-update.service
@@ -1357,6 +1432,9 @@ def main(argv: list[str]) -> int:
     p.add_argument("--id", required=True, choices=sorted(SOURCE_META))
     p.add_argument("--raw", required=True)
 
+    p = sub.add_parser("discard-staging")
+    p.add_argument("--base", required=True)
+
     p = sub.add_parser("finalize-update")
     p.add_argument("--base", required=True)
     p.add_argument("--results", required=True)
@@ -1420,6 +1498,9 @@ def main(argv: list[str]) -> int:
         else:
             steps = json.loads(Path(args.steps).read_text(encoding="utf-8")) if args.steps else []
             dump_json(selftest_doc(base, steps))
+        return 0
+    if args.cmd == "discard-staging":
+        discard_staging(Path(args.base))
         return 0
     if args.cmd == "accept-source":
         report = accept_source(Path(args.base), args.id, Path(args.raw))
