@@ -15,7 +15,8 @@ sha256sum -c remna-next-preflight.sh.sha256
 
 The generator emits a mode-0700 executable shell file, its byte SHA256 sidecar,
 and a canonical JSON manifest sidecar. Builds are byte-identical regardless of
-output filename, checkout directory, time or umask. Python 3 and a POSIX shell
+output filename, checkout directory, time or umask. Python 3 at
+`/usr/bin/python3` and a POSIX shell
 are preinstalled prerequisites; the artifact never installs them. The manifest
 locks original launcher/manager/NEXT script and vendor bytes with SHA256.
 The vendor archive is embedded unchanged; every regular member is verified in
@@ -41,12 +42,19 @@ Do not put the credential in the command, shell history or an environment
 assignment. Stdin must be a pipe supplied by the trusted root caller, or a
 root-owned regular file with no group/other permission bits. The artifact
 cannot authenticate a pipe's writer; the staging caller owns that boundary.
-An inherited `SECRET_KEY` is rejected; the PR968 env bridge is unnecessary here.
+Stage3.8 must invoke this artifact with stdin directly, without applying the
+PR968 env bridge. An inherited `SECRET_KEY` is rejected with
+`SECRET_ENV_FORBIDDEN` (exit 2); an env-bridge-only invocation is incompatible.
 No secret is persisted, printed, passed in argv, or sent to a child installer.
 The input is one nonempty, whitespace-free byte string (max 4096 bytes), with
 an optional trailing newline, followed by EOF. Domain is a dotted DNS name;
 email uses a bounded ASCII mailbox syntax. Values are validated but not echoed.
 No credential validity against a panel is claimed.
+
+The launcher uses the absolute system Python path and isolated mode (`-I`),
+excluding the working directory, user site packages and `PYTHON*` environment
+overrides from Python import resolution. The system interpreter and its standard
+library must be trusted host prerequisites.
 
 For offline smoke testing use `--dry-run` with synthetic stdin. This mode can
 run without root; normal invocation requires root. Both modes always refuse

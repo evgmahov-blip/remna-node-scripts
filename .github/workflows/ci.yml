@@ -45,6 +45,9 @@ jobs:
         # New safety tests exercise rejected candidates without a live firewall.
         run: python3 -m unittest discover -s tests/health -v
 
+      - name: NEXT immutable artifact offline tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -I -B tests/immutable-artifact/test_artifact.py
+
       - name: Feed safety regression tests
         run: python3 -m unittest discover -s tests/security -p 'test_*.py' -v
 

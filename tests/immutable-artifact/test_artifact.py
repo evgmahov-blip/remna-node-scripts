@@ -20,11 +20,11 @@ class ArtifactTests(unittest.TestCase):
     def build(self, output, script=None):
         return subprocess.run(['python3', str(script or ROOT / 'scripts/build-next-artifact.py'), str(output)], capture_output=True, check=True)
 
-    def run_artifact(self, secret=b'synthetic-secret-ONLY\n', args=('--dry-run',), extra=None):
+    def run_artifact(self, secret=b'synthetic-secret-ONLY\n', args=('--dry-run',), extra=None, cwd=None):
         env = dict(os.environ, DOMAIN='node.example.com', EMAIL='ops@example.com')
         env.pop('SECRET_KEY', None)
         env.update(extra or {})
-        result = subprocess.run([str(self.artifact), *args], input=secret, env=env, capture_output=True)
+        result = subprocess.run([str(self.artifact), *args], input=secret, env=env, capture_output=True, cwd=cwd)
         self.assertNotIn(b'synthetic-secret-ONLY', result.stdout + result.stderr)
         self.assertEqual(result.stderr, b'')
         rows = [json.loads(line) for line in result.stdout.splitlines()]
@@ -47,13 +47,28 @@ class ArtifactTests(unittest.TestCase):
         self.assertIn('DOCKER_IMAGES', {d['id'] for d in rows[-1]['dependencies']})
         self.assertEqual([r['event'] for r in rows], ['started', 'sources_verified', 'inputs_validated', 'completed'])
 
+    def test_launcher_ignores_import_and_path_hijacks(self):
+        hostile = self.root / 'hostile'
+        hostile.mkdir()
+        for name in ('json.py', 'hashlib.py', 'sitecustomize.py'):
+            (hostile / name).write_text("raise RuntimeError('IMPORT_HIJACK')\n")
+        fake_python = hostile / 'python3'
+        fake_python.write_text('#!/bin/sh\necho PATH_HIJACK >&2\nexit 99\n')
+        fake_python.chmod(0o700)
+        code, rows = self.run_artifact(cwd=hostile, extra={
+            'PYTHONPATH': str(hostile), 'PYTHONHOME': str(hostile),
+            'PYTHONUSERBASE': str(hostile), 'PATH': str(hostile),
+        })
+        self.assertEqual(code, 3)
+        self.assertEqual(rows[-1]['status'], 'BLOCKED_NOT_AVAILABLE')
+
     def test_missing_secret(self):
         code, rows = self.run_artifact(b'')
         self.assertEqual(code, 2)
         self.assertEqual(rows[-1]['reasons'], ['MISSING_SECRET'])
 
     def test_invalid_inputs_and_env_secret(self):
-        for extra in ({'DOMAIN': 'bad;command'}, {'EMAIL': 'bad\nmail'}, {'SECRET_KEY': 'synthetic-secret-ONLY'}):
+        for extra in ({'DOMAIN': 'bad;command'}, {'DOMAIN': '1.2.3.4'}, {'DOMAIN': 'node.123'}, {'EMAIL': 'bad\nmail'}, {'SECRET_KEY': 'synthetic-secret-ONLY'}):
             self.assertEqual(self.run_artifact(extra=extra)[0], 2)
         self.assertEqual(self.run_artifact(args=('--install',))[0], 2)
 

@@ -39,7 +39,7 @@ def build(output):
         VENDOR_MANIFEST=vendor, BLOCKERS=lock['blockers'],
         PAYLOAD=base64.b64encode(canonical(files).encode()).decode()).items()) + '\n' + runtime
     # Read embedded code through fd 3 to avoid argv size limits; fd 0 is secret input.
-    artifact = ("#!/bin/sh\nset +x\nexec python3 -B -c "
+    artifact = ("#!/bin/sh\nset +x\nexec /usr/bin/python3 -I -B -c "
                 "\"import os; exec(compile(os.fdopen(3).read(), '<next-preflight>', 'exec'))\" "
                 "\"$@\" 3<<'REMNA_EMBEDDED_PYTHON'\n" + code +
                 "\nREMNA_EMBEDDED_PYTHON\n")

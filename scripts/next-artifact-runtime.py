@@ -49,7 +49,7 @@ except (ValueError, KeyError, OSError, tarfile.TarError):
 emit('sources_verified', 'VERIFIED', manifest_sha256=MANIFEST_SHA256, writes=False)
 domain = os.environ.get('DOMAIN', '')
 email = os.environ.get('EMAIL', '')
-if len(domain) > 253 or '.' not in domain or not all(re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?', p) for p in domain.split('.')):
+if len(domain) > 253 or '.' not in domain or domain.rsplit('.', 1)[-1].isdigit() or not all(re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?', p) for p in domain.split('.')):
     stop('INVALID_DOMAIN')
 if len(email) > 254 or not re.fullmatch(r'[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}', email):
     stop('INVALID_EMAIL')
