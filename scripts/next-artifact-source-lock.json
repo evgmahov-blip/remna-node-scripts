@@ -1,0 +1,48 @@
+{
+  "blockers": [
+    {
+      "id": "APT_CLOSURE",
+      "reason": "No authenticated snapshot, exact package versions, architecture-specific deb hashes or transitive closure for bootstrap/base, Docker, certbot and protection dependencies."
+    },
+    {
+      "id": "DOCKER_IMAGES",
+      "reason": "setup_node-legacy.sh uses ghcr.io/remnawave/node:latest and nginx:1.28; no platform-specific immutable digests or verified offline layers."
+    },
+    {
+      "id": "DOCKER_REPOSITORY_KEY",
+      "reason": "Docker Ubuntu signing key is downloaded without a pinned content hash; repository metadata is mutable."
+    },
+    {
+      "id": "XRAY_BINARY",
+      "reason": "Xray version selected through releases API; downloaded architecture ZIP lacks a pinned SHA256."
+    },
+    {
+      "id": "REMOTE_CONTENT",
+      "reason": "Template ZIP, selfsteal pages/media and optional script downloads lack a complete embedded SHA256-verified dependency closure; immutable URL refs alone are insufficient."
+    },
+    {
+      "id": "CADDY_PATH",
+      "reason": "No trusted Caddy signing-key/package closure supplied. Legacy Caddy path is excluded and never invoked by this artifact."
+    },
+    {
+      "id": "NONINTERACTIVE_INSTALL",
+      "reason": "Existing installer remains interactive and can persist credentials or change firewall/network state. No reviewed non-destructive machine install adapter is available; embedded scripts are provenance only."
+    }
+  ],
+  "sha256": {
+    "NEXT_SOURCE_MANIFEST.md": "974a9060cb6dd2dffa798e14c0ef89d1cac921f11e524dd78dd82acd0e607203",
+    "clean-install.sh": "839580b5d5903d2195249cf25887265d9116f9cca00f4ccd80a9f5badc2a6141",
+    "full-clean-reinstall.sh": "58ed468b0d74d5767744e5c023005f103d03f1c6fea32b491ffe8e6cd7633c84",
+    "install.sh": "75f096750b90bee7f3f566afc435ea590474b4d0d28e8885c9b49759382d84d9",
+    "next-installer/existing-node-v2-cleanup.sh": "0e75987676e9afc84379863a802130dd72c52ae32873b44c925932282505866c",
+    "next-installer/legacy-rebuild-manager.sh": "aa0a76f7fad923ea004253b575c5869c9641c39bfa221357c521add960a164dd",
+    "next-installer/network-tuning-manager.sh": "0264d9abc1586da3fe6f6bfb022f3bc552232ac329b98d1bac68dcd614191b53",
+    "next-installer/node-health.py": "b55496c058e2a133f6affd80a5bebb646f761c56c2ffeb60320c1aaf0a34eb18",
+    "next-installer/remnawave-transport-manager.sh": "d8b4008e84abedce64de8f367d55940c61aadce5c53f7abac6bd81fe318787c3",
+    "next-installer/server-multitest.sh": "fcf08fda520c900f5c517c63fd36f18295bfa67ab190a52c6d3e392a3b33d215",
+    "next-installer/telemt-legacy-rkn-adapter.sh": "a0612f3a9360bf0d32ef4debc26fd5db2a370de0e8cacdd16a7b2f48cfe89983",
+    "next-installer/telemt-manager.sh": "c53baaf8afdf76a6f1692fe2ce4c6b271a42010989e39f2a0e055e04bfd22f6d",
+    "vendor/remna-next-source.tar.gz": "a2928eb300adb43b2f99b8a05c805bb9c901845acaa8c6204b838baf510500e5"
+  },
+  "source_commit": "ee240a73db2481eb3d08d8806866a14d08a10ad6"
+}
