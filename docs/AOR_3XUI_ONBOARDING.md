@@ -13,10 +13,12 @@ AOR dispatches and supervises this operation using its existing task/effect stor
 Bind every record to task_id, operation_id and exact release commit. Evidence uses
 schema `remna.aor-evidence.v1`, with `stages` keyed by the ordered STAGES constants.
 Each stage contains aor_attestation_ref, effect_id, observed_at, artifact_sha256 and
-boolean checks. Keep raw evidence root-only, outside ordinary logs. Run:
+boolean checks. artifact_sha256 must be 64 lowercase hex characters; observed_at
+must be an ISO timestamp with timezone; effect_id must be unique across stages.
+Keep raw evidence root-only, outside ordinary logs. Run:
 
 ```sh
-python3 next-installer/aor_onboarding.py /private/evidence.json \
+python3 next-installer/aor_onboarding.py continuation /private/evidence.json \
   --task TASK --operation OPERATION --release EXACT_COMMIT
 ```
 
@@ -40,6 +42,8 @@ from that snapshot, refuses live writable sources, checks SQLite integrity and
 reads the archive back. A WAL-bearing DB is rejected: obtain a provider-approved
 consolidated snapshot/SQLite online-backup copy without stopping live 3x-ui.
 This helper does not acquire snapshots or prove application consistency.
+It rejects both WAL and rollback-journal sidecars, including databases nested
+inside archived directory members. Connections are explicitly closed.
 
 Required root-only bundle inventory: SQLite DB, inbound/client metadata,
 /etc/x-ui or Docker bind mounts/named volumes and compose/environment files,
@@ -90,6 +94,12 @@ Fetch ALL pages of GET /internal-squads immediately before reconciliation.
 Host ALLOW_ONLY UUIDs exactly equal to the full squad set. Use panel's existing
 API adapter to apply patches with concurrency protection. Refetch and run
 `verify_squads`; membership races require fresh reconciliation, never deletion.
+Input is the unwrapped complete squad list. Inbounds may be API objects with
+`uuid`/`tag`/`profileUuid`; additive PATCH values are inbound UUIDs, not tags.
+`info.membersCount` is mandatory and compared before/after; missing counts fail
+closed. Equal counts do not prove identical member identities. Native AOR must
+serialize the operation and compare a complete private paginated member snapshot
+if identity-preservation proof is required; this helper makes no such claim.
 
 Require two host-network containers, nginx unix socket SelfSteal, xHTTP signature,
 correct active/local profile, REMNA_GUARD ipset feeds (TSPU/GOV/scanners), panel-only
@@ -117,3 +127,101 @@ make the production gate decision only after review, CI and rollback proof.
 
 Statuses: code candidate; independent review pending; CI remote pending; release,
 installation and runtime verification pending. Do not report rollout complete.
+
+## Executable target-local operations
+
+These commands are callable by the sanctioned native AOR remote executor; do not
+run them via a substitute SSH transport. No command grants production approval.
+Use an existing root-owned directory with mode 0700. CLI failures emit a fixed
+error, not paths, SQL values, container environment or personal information.
+
+```sh
+python3 next-installer/aor_onboarding.py preflight \
+  --database /etc/x-ui/x-ui.db --output /private/preflight.json
+python3 next-installer/aor_onboarding.py recovery \
+  --snapshot /mnt/provider-consistent-readonly --inventory /private/inventory.json \
+  --output /private/recovery.tar.gz
+python3 next-installer/aor_onboarding.py restore-test \
+  --bundle /private/recovery.tar.gz --sha256 BUNDLE_SHA256
+python3 next-installer/aor_onboarding.py verify-squads \
+  --before /private/squads-before.json --after /private/squads-after.json \
+  --host /private/host-policy.json --inbound-uuid PANEL_INBOUND_UUID
+```
+
+Preflight collects IPv4/IPv6 listeners and established connections, systemd units
+and x-ui dependencies/config, Docker containers/inspect, routes/rules and firewall
+backends into one private exclusively-created 0600 artifact. It counts inbounds,
+clients and enabled clients from a single read-only SQLite transaction. It does
+not copy client records into that artifact. Docker inspect can contain secrets;
+the artifact must remain root-only. Missing tools are recorded, not interpreted
+as absence. Docker detection uses container names/images; renamed deployments
+require Inventory corroboration. Both detected types require resolving ambiguity.
+Enabled clients and socket counts are NOT active-user identity proof. App-specific
+runtime activity, actual port owners, custom dependencies, management/recovery
+access, authorized credential source and origin agreement remain native PRECHECK
+requirements. This command always returns pending (exit 3), never auto-passes it.
+
+Recovery inventory JSON has `members` (relative snapshot files/directories),
+`databases` (relative SQLite files), and `coverage`. Each coverage key in
+`RECOVERY_CATEGORIES` must have `{"paths":["relative/path"]}` referring to
+archived data. Only optional TLS/ACME and reverse-proxy categories can instead
+have `{"absent_reason":"verified reason"}`. Mandatory categories cannot be
+marked absent. Native AOR must review coverage semantics and full dependency
+closure; path presence does not establish completeness or snapshot consistency.
+An example *shape*, not a valid complete inventory:
+
+```json
+{"members":["etc/x-ui"],"databases":["etc/x-ui/x-ui.db"],
+ "coverage":{"database":{"paths":["etc/x-ui/x-ui.db"]}}}
+```
+
+The bundle embeds `REMNA-RECOVERY.json` containing file SHA256s, original
+ownership/modes, explicit category coverage and an ordered restore plan. Nested
+symlinks, special files, unsafe paths, invalid DBs and existing output files are
+rejected. Recovery automatically rehearses file extraction in a temporary private
+directory, checks every file digest and runs SQLite integrity checks, then removes
+the rehearsal directory. `restore-test` repeats this against the recorded archive
+checksum. It restores bytes for verification, not original permissions/ownership,
+service processes or networking. Output explicitly says
+`runtime_restore_verified=false`; BACKUP_RESTORE_PROOF still requires the isolated
+old-service runtime test, original ownership/mode restoration and recovery-access
+attestation by native AOR. No production extraction command is provided.
+
+Host-policy JSON is `{"mode":"ALLOW_ONLY","internalSquads":["squad-uuid"]}`,
+normalized by the existing panel adapter. verify-squads validates this set against
+the complete fresh after-list as well as checking before/after squad sets,
+additive inbounds and unchanged member counts. It prints only counts/booleans.
+
+The immutable launcher pin chain currently requires the main installer blob to
+match both launcher source refs. This revision keeps that blob and all pins
+unchanged. Integrating a production cutover/setup command requires an exact
+reviewed release and orchestrator-owned publication/repinning; invoking the clean
+installer against live 3x-ui is not a supported shortcut.
+
+Local validation: onboarding fixtures include successful archive/isolated file
+restore, nested DBs, WAL/journal rejection, invalid SQLite, symlink/traversal,
+private permissions, checksums, API-shaped squads, CLI redaction and evidence
+formats. Fixture tests mock only root ownership/identity and read-only filesystem
+flags so they also execute on non-root CI. They do not attest provider snapshots,
+real target access, application consistency or runtime recovery.
+
+### Exact native continuation for this pilot
+
+Continue task `remnanode-next-swe-3xui-aor-onboarding-20261117`, revision 1;
+do not restore CAN or create a replacement operation. First unfinished stage:
+PRECHECK. Classification: EXECUTOR (no sanctioned executor exposed to this
+editor), IDENTITY/DNS (origin unproved), ACCESS/PROVIDER (credentials, provider
+and recovery channel unproved). The public DNS/SSH observations are historical
+observations, not validated access or origin evidence.
+
+Native dispatcher must attach its sanctioned executor and existing approved
+Inventory/Cloudflare integrations, bind an operation ID and the eventual exact
+reviewed release, then execute the preflight command on the verified target.
+Collect entitlement references privately and resolve every missing collector,
+active-user observation and dependency before creating the consistent snapshot.
+Next: recovery + isolated runtime restore proof -> stage exact NEXT release ->
+independent review/required CI -> separate explicit owner production decision.
+No such approval is present in this handoff. Cutover/setup integration and
+publication remain pending; file-rehearsal success must not advance OWNER_GATE.
+After approval use only scoped native effects, then require every VERIFY check,
+including isConnected, real external traffic and complete fresh squads/Host sets.
