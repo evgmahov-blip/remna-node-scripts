@@ -1,0 +1,13 @@
+{
+  "schema": "remnanode.onboarding.v1",
+  "task_id": "remnanode-next-canada-onboarding-20261117",
+  "node": {"name": "CAN-NEXT", "address": "31.59.156.28", "domain": "can.remna.2rdp.ru"},
+  "dns": {"type": "A", "name": "can.remna.2rdp.ru", "content": "31.59.156.28", "proxied": false, "ttl": 300},
+  "transport": {"protocol": "vless", "network": "xhttp", "security": "reality", "port": 443},
+  "api": {"port": 2222, "allowed_source": "panel-only", "panel_ip": null},
+  "host": {"address": "can.remna.2rdp.ru", "port": 443, "security_layer": "DEFAULT", "mapper": null, "xray_json_template": null},
+  "internal_squads": ["Svistunov", "All"],
+  "protected_nodes": ["PL", "GER5"],
+  "execution": {"dns_integration": "AINOC Cloudflare", "panel_integration": "AINOC RemnaWave", "production_route": "trusted AOR activation", "commit_owner": "orchestrator"},
+  "required_evidence": ["backup", "rollback", "dns_control_plane", "dns_authoritative", "dns_public", "tcp_443_external", "tls", "reality_client", "api_panel_allowed", "api_external_denied_ipv4", "api_external_denied_ipv6", "profile_host_binding", "squads", "subscription_svistunov", "subscription_all", "protected_nodes_unchanged", "required_ci_passed", "independent_review_approved", "exact_git_release", "trusted_activation_used", "materialized_production_tree_verified"]
+}
