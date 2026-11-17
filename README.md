@@ -1,5 +1,9 @@
 # Remna Node Scripts
 
+Миграция действующего **3x-ui** требует отдельного [AOR safety contract](docs/AOR_3XUI_ONBOARDING.md).
+Текущий V2-cleaner не обеспечивает этот контракт. Новый offline adapter — кандидат;
+он не подключён к remote executor и не означает готовность production rollout.
+
 Главный installer этого репозитория — **REMNANODE NEXT**.
 
 NEXT восстановлен из source snapshot реально работающей ноды и снова является основной цепочкой установки. Старый Caddy-based manager оставлен только для обслуживания legacy-нод и **не вызывается** из `install.sh`, `clean-install.sh` или `full-clean-reinstall.sh`.
