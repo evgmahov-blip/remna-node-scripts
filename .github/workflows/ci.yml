@@ -48,6 +48,9 @@ jobs:
       - name: Feed safety regression tests
         run: python3 -m unittest discover -s tests/security -p 'test_*.py' -v
 
+      - name: Native AOR onboarding safety contracts
+        run: python3 -B -m unittest discover -s tests/onboarding -v
+
       - name: Mistral blocker regression tests
         run: bash tests/mistral-blockers/run.sh
 
